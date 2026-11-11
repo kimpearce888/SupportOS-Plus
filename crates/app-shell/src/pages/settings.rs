@@ -54,6 +54,12 @@ pub(crate) struct GeneralSettings {
     pub reply_status_after: String,
     pub log_level: String,
     pub agent_language: String,
+    /// AUD-P2-3-3 (D8): the retention horizon in days. 0 (the default)
+    /// keeps everything; above 0 the maintenance sweep permanently
+    /// deletes audit-log entries and other operational records older
+    /// than the horizon — a compliance-relevant trade-off the UI must
+    /// state at the point of change, not only in the manual.
+    pub retention_days: i64,
 }
 
 impl Default for GeneralSettings {
@@ -72,6 +78,7 @@ impl Default for GeneralSettings {
             reply_status_after: "pending".into(),
             log_level: "info".into(),
             agent_language: "en".into(),
+            retention_days: 0,
         }
     }
 }
@@ -155,6 +162,11 @@ impl GeneralSettings {
                 .ok()
                 .flatten()
                 .unwrap_or(defaults.agent_language),
+            // AUD-P2-3-3 (D8): surface the retention horizon where it is
+            // actually changed — default 0 keeps everything.
+            retention_days: spp_core::settings::get_i64(conn, "retention_days", 0)
+                .unwrap_or(0)
+                .clamp(0, 3650),
         }
     }
 
@@ -192,6 +204,9 @@ impl GeneralSettings {
         spp_core::settings::set_string(conn, "reply_status_after", &self.reply_status_after)?;
         spp_core::settings::set_string(conn, "log_level", &self.log_level)?;
         spp_core::settings::set_string(conn, "agent_language", &self.agent_language)?;
+        // AUD-P2-3-3 (D8): clamp defensively — a negative or absurd value
+        // must never silently arm an aggressive deletion horizon.
+        spp_core::settings::set_i64(conn, "retention_days", self.retention_days.clamp(0, 3650))?;
         Ok(())
     }
 }
@@ -1233,6 +1248,65 @@ impl SettingsPage {
             });
         });
         ui.add_space(10.0);
+        // AUD-P2-3-3 (D8): the retention horizon finally has a Settings
+        // surface — the audit found the sweep deletes audit-log entries
+        // when enabled, yet the only disclosure was a manual table row;
+        // the UI that changes the value must state what it deletes and
+        // the compliance trade-off at the point of change.
+        design::card_titled_wide(
+            ui,
+            "Data retention",
+            Some(
+                "0 keeps everything (the default) — above 0 the maintenance \
+                 sweep permanently deletes older operational records",
+            ),
+            |ui| {
+                design::form_grid(ui, "settings-retention", |ui| {
+                    let retention_label =
+                        design::field_label(ui, "Retention horizon (days, 0 = keep everything)");
+                    ui.add_sized(
+                        [110.0, 26.0],
+                        egui::DragValue::new(&mut general.retention_days).range(0..=3650),
+                    )
+                    .labelled_by(retention_label.id)
+                    .on_hover_text(
+                        "The sweep runs on the ~6-hour maintenance cadence and \
+                         deletes rows older than this many days.",
+                    );
+                    ui.end_row();
+                });
+                design::hint_text(
+                    ui,
+                    "what gets deleted: webhook events, error reports, AUDIT-LOG \
+                     entries, AI run records, the translation cache and \
+                     notifications (for read notifications the clock runs from \
+                     when they were read). Conversations, customers and their \
+                     threads are never pruned by this setting.",
+                );
+                design::hint_text(
+                    ui,
+                    "compliance trade-off: audit-log entries are the \
+                     accountability record — who changed what, when. If you \
+                     operate under a retention obligation (SOC 2 evidence, \
+                     disputes, internal policy) that requires keeping audit \
+                     history, leave this at 0; only raise it when the \
+                     obligation itself demands a shorter horizon.",
+                );
+                if general.retention_days > 0 {
+                    design::callout(
+                        ui,
+                        design::CalloutRole::Warn,
+                        &format!(
+                            "audit history older than {} day{} will be \
+                             permanently deleted — irreversible",
+                            general.retention_days,
+                            if general.retention_days == 1 { "" } else { "s" }
+                        ),
+                    );
+                }
+            },
+        );
+        ui.add_space(10.0);
         design::card_titled_wide(
             ui,
             "AI behaviour",
@@ -1627,6 +1701,16 @@ impl SettingsPage {
                     "relay options: cloudflared tunnel --url http://127.0.0.1:PORT · \
                      ngrok http 127.0.0.1:PORT · ssh -N -R 80:127.0.0.1:PORT serveo.net \
                      — the registered URL must forward to the loopback listener",
+                );
+                // AUD-P2-3-2 (D7): the card must state what no relay MEANS,
+                // not only how to build one — polling-only sync, and chats/
+                // ratings with no data path at all.
+                design::hint_text(
+                    ui,
+                    "without a relay the app is polling-only: conversations and \
+                     customers still arrive on the polling cadence, but beacon live \
+                     chats and satisfaction ratings cannot arrive at all — Help Scout \
+                     has no list endpoint for them, the webhook is the only data path",
                 );
                 design::hint_text(
                     ui,

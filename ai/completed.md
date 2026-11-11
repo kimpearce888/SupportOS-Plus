@@ -9628,3 +9628,102 @@ features built to 80–90% and then left without their last mile… the
 read path is excellent, the write/edit/manage path repeatedly
 dead-ends." Zero TODO/FIXME/unimplemented markers in the codebase —
 every gap is structural, not annotated.
+
+## Batch AUD-P2-3 — the final three findings: B6 provider_available, D7 webhook reality, D8 retention disclosure (2026-11-10)
+
+**Owner directive:** "continue" — the Rule 8 authorization after the
+AUD-P2-2 STOP (the standing fix-everything directive of
+`docs/audit/repo-audit-v1.9.6.md` covers the whole backlog). Constraint
+carried over from AUD-P0/AUD-P1/AUD-P2-1/AUD-P2-2 honored: fix the
+existing implementation inside the existing stack — no new frameworks,
+no new dependencies.
+
+**Items AUD-P2-3-1..3 (the audit program's final batch — 44/44):**
+
+- **AUD-P2-3-1 (B6)** — the vestigial `AiStatus.provider_available`
+  column resolved honestly: REMOVED, not fake-populated. The field was
+  an always-`None` dead marker with zero consumers (the audit's
+  verdict); the honest source for availability is the AI hub's live
+  `probe_endpoint` lane (the AI Center polls it and renders "reachable
+  — N models · X ms" / "offline — …"), and a stored boolean would be
+  stale the moment it landed. The struct now carries a doc-comment
+  stating exactly this contract (availability is live state, not a
+  stored setting). Test: `audp2_3_b6_legacy_json_with_removed_\
+  provider_available_still_loads` — a legacy JSON record containing the
+  dead key still deserializes (serde ignores unknown fields, so no
+  persisted/fixture JSON breaks) and fresh serialization omits the key.
+- **AUD-P2-3-2 (D7)** — the webhook loopback-only reality surfaced
+  everywhere it matters, stating the CONSEQUENCE not just the mechanism:
+  (a) the worker's no-relay verdict (rendered by both the Settings
+  "Last check" row and the Sync Health engine card) now says
+  polling-only — conversations and customers still arrive on the
+  polling cadence, but beacon live chats and satisfaction ratings
+  cannot arrive at all, because Help Scout has no list endpoint for them
+  (the webhook IS the data path), with the tunnel action that closes
+  the gap (the `NO_RELAY_DETAIL` const); (b) the Settings "Webhook
+  relay & health" card gained the same consequence hint beside the
+  existing how-to hints; (c) the README's "true push is impossible"
+  parenthetical corrected to the honest relay reality (the relay closes
+  the gap; without it, polling-only, and chats/ratings simply do not
+  arrive) with a USER_MANUAL §6.6 pointer. Verified the other surfaces
+  were already honest (the live-chats empty state requires the relay
+  with an "Open Settings" CTA; manual §6.6/§10 state the polling
+  fallback and the no-list-endpoint constraint). Test:
+  `audp2_3_d7_no_relay_verdict_states_the_full_reality` pins all five
+  honesty elements.
+- **AUD-P2-3-3 (D8)** — the retention disclosure completed. The audit
+  found `retention_days` deletes audit history when enabled (default
+  off) with the only disclosure a manual table row — no Settings
+  surface at all. Fix: a real "Data retention" card on Settings →
+  Sync & AI (the horizon control, 0–3650, clamped defensively at load
+  AND save so a negative/absurd value can never silently arm an
+  aggressive deletion horizon), stating exactly what a non-zero horizon
+  deletes (webhook events, error reports, AUDIT-LOG entries, AI run
+  records, the translation cache, notifications; never conversations/
+  customers/threads), the ~6-hour maintenance cadence, the compliance
+  trade-off (audit-log entries are the accountability record — leave
+  0 under retention obligations like SOC 2 evidence/disputes/internal
+  policy; only raise it when the obligation itself demands a shorter
+  horizon), and a standing irreversible-deletion warning whenever the
+  horizon is armed. USER_MANUAL: the new card documented in §7's Sync &
+  AI tab, and the settings table row now carries the cadence, the
+  compliance trade-off, the range and the Settings-surface pointer.
+  Ride-along fix (forced by the new pinned-scope test, decision D14):
+  the notification retention clock now implements the manual's
+  long-shipped "for read notifications the clock runs from when they
+  were read" contract — the old `created_at OR read_at` predicate made
+  it false (read_at ≥ created_at always, so the created_at branch alone
+  deleted a 400-day-old notification read yesterday; the read_at
+  clause could never save a row the other had not already condemned).
+  Unread rows age from creation; read rows from read_at. Test:
+  `audp2_3_d8_retention_deletes_audit_history_and_never_domain_data`
+  pins the full scope — every pruned table proven, the read-clock
+  semantic, the boundary (fresh rows survive), and conversations/
+  customers NEVER pruned.
+
+**Verification (all local, CI to follow on push):** `cargo fmt --all
+--check` clean (after one `cargo fmt --all` pass) · clippy workspace
+`--all-targets -D warnings` clean · clippy sandbox lane
+`--all-targets -D warnings` clean · tests: workspace 293 + 520 + 528
+(sandbox feature) passed, 0 failed — the three new audp2_3 tests green
+· `cargo deny check advisories licenses bans sources` ok · xtask
+verify-icons ok · kittest drift gate: the settings suite diff-locked
+with 7 INTENDED golden changes (the six r3_settings_page_* — the new
+Data retention card on the General tab — plus the new
+`audp2_3_settings_retention_horizon_light` golden locking the armed-
+horizon warning state; VLM read-back confirmed the card, the 30-day
+control, the exact warning text and both hints render) and all 25
+other suites re-run diff-locked in the sandbox through lavapipe —
+zero unintended drift · ci.yml's drift-gate count comment re-stamped
+(26 suites, 207 tests — 205 kittest + 2 style lint — over 203 goldens;
+E3's discipline). Environment note for the record: the recycled
+sandbox lost the Rust toolchain and the repo; both were rebuilt
+(rustup 1.99.1, mesa-vulkan extracted to ~/mesa-prefix with
+LD_LIBRARY_PATH + VK_DRIVER_FILES for the lavapipe kittest lane), and
+the disk filled twice mid-battery — cleared via
+target/debug/incremental removal and stale test-binary cleanup, no
+code changed.
+
+**Full-finding accounting vs. the audit's 44: A1–A8, B1–B7, C1–C14,
+D1–D8, E1–E7 — ALL CLOSED. The audit program is complete (Rule 6:
+none skipped, none merged, none discarded).**

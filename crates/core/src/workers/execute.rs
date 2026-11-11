@@ -2342,7 +2342,10 @@ impl WorkerManager {
             crate::webhook_health::store_outcome(
                 &conn,
                 &crate::webhook_health::not_configured_outcome(
-                    "no relay URL configured — the listener stays loopback-only until you run a tunnel",
+                    // AUD-P2-3-2 (D7): the stored verdict must state the
+                    // operational reality, not just the listener state —
+                    // polling-only sync, and chats/ratings with no data path.
+                    crate::webhook_health::NO_RELAY_DETAIL,
                 ),
             )?;
             return Ok(());

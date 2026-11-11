@@ -162,3 +162,48 @@ fn audp1_settings_vector_reindex_light() {
         &SnapshotOptions::new().max_failed_pixels(32),
     );
 }
+
+/// AUD-P2-3-3 (D8): the Data retention card — the retention horizon's
+/// first Settings surface. With the horizon armed (30 days) the card
+/// carries the standing irreversible-deletion warning; at the default 0
+/// it sits quiet. This golden locks the disclosure shape.
+#[test]
+fn audp2_3_settings_retention_horizon_light() {
+    let (page, db) = seeded_page();
+    // Arm the horizon BEFORE the page loads its GeneralSettings snapshot.
+    db.with_write(|conn| spp_core::settings::set_i64(conn, "retention_days", 30))
+        .expect("arm retention");
+    let mut h = Harness::builder()
+        .with_size(egui::vec2(1440.0, 900.0))
+        .with_theme(egui::Theme::Light)
+        .build_ui_state(
+            move |ui, s| {
+                if !s.installed {
+                    design::install(ui.ctx());
+                    s.installed = true;
+                }
+                s.page.ui(ui, &s.db);
+            },
+            SettingsPageState {
+                installed: false,
+                page,
+                db,
+            },
+        );
+    h.run_ok();
+    h.run_steps(2);
+    assert!(
+        h.get_all_by_label("Data retention").next().is_some(),
+        "the Data retention card must live on the Sync & AI tab"
+    );
+    assert!(
+        h.get_all_by_label("Retention horizon (days, 0 = keep everything)")
+            .next()
+            .is_some(),
+        "the horizon control must be present"
+    );
+    h.snapshot_options(
+        "audp2_3_settings_retention_horizon_light",
+        &SnapshotOptions::new().max_failed_pixels(32),
+    );
+}

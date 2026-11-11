@@ -124,9 +124,16 @@ pub fn enforce_retention(conn: &Connection, retention_days: i64) -> Result<usize
             removed += n;
         }
     }
+    // AUD-P2-3-3 (D8): the notification clock. The manual has always
+    // documented "for read notifications the clock runs from when they
+    // were read" — but the old `created_at OR read_at` form made that
+    // false: since read_at >= created_at, the created_at branch alone
+    // deleted a 400-day-old notification you had read yesterday. The
+    // sweep now implements the documented contract exactly — unread
+    // rows age from creation, read rows age from when they were read.
     if let Ok(n) = conn.execute(
         "DELETE FROM notifications
-         WHERE julianday(created_at) < julianday('now', ?1)
+         WHERE (read_at IS NULL AND julianday(created_at) < julianday('now', ?1))
             OR (read_at IS NOT NULL AND julianday(read_at) < julianday('now', ?1))",
         [format!("-{retention_days} days")],
     ) {
@@ -198,5 +205,151 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM translation_cache", [], |r| r.get(0))
             .expect("count");
         assert_eq!(n, 1, "retention off keeps every cached row");
+    }
+
+    /// AUD-P2-3-3 (D8): `retention_days` deletes audit history when
+    /// enabled — the audit flagged this as compliance-relevant. The fix
+    /// discloses it honestly (the Settings "Data retention" card + the
+    /// USER_MANUAL trade-off) rather than changing the semantics, so the
+    /// semantics themselves are pinned here: the sweep prunes audit_log,
+    /// webhook_events, application_errors, ai_runs, translation_cache
+    /// and notifications past the horizon — and it NEVER touches
+    /// conversations or customers.
+    #[test]
+    fn audp2_3_d8_retention_deletes_audit_history_and_never_domain_data() {
+        let conn = migrated();
+        // One stale row per pruned table (plus a fresh control row in the
+        // audit log so the boundary is proven, not just the delete).
+        conn.execute(
+            "INSERT INTO audit_log (timestamp, actor, action)
+             VALUES (datetime('now', '-400 day'), 'agent', 'status.change'),
+                    (datetime('now', '-1 day'), 'agent', 'status.change')",
+            [],
+        )
+        .expect("seed audit_log");
+        conn.execute(
+            "INSERT INTO webhook_events (event_hash, event_type, received_at, payload)
+             VALUES ('h1', 'convo.created', datetime('now', '-400 day'), '{}')",
+            [],
+        )
+        .expect("seed webhook_events");
+        conn.execute(
+            "INSERT INTO application_errors (timestamp, service, message)
+             VALUES (datetime('now', '-400 day'), 'test', 'boom')",
+            [],
+        )
+        .expect("seed application_errors");
+        conn.execute(
+            "INSERT INTO ai_runs (input_hash, prompt_version, model, response_json, created_at)
+             VALUES ('k1', 'v1', 'm', '{}', strftime('%Y-%m-%dT%H:%M:%fZ','now','-400 day'))",
+            [],
+        )
+        .expect("seed ai_runs");
+        conn.execute(
+            "INSERT INTO notifications (type, title, dedup_key, created_at)
+             VALUES ('sync_failure', 't', 'd8-n1', datetime('now', '-400 day')),
+                    ('sync_failure', 't', 'd8-n2', datetime('now', '-400 day'))",
+            [],
+        )
+        .expect("seed notifications");
+        // Read clock: the second notification was READ 1 day ago — the
+        // delete runs from read_at for read rows, so it must survive a
+        // 365-day horizon despite its 400-day-old creation.
+        conn.execute(
+            "UPDATE notifications SET read_at = datetime('now', '-1 day')
+             WHERE dedup_key = 'd8-n2'",
+            [],
+        )
+        .expect("mark read");
+        // Domain data that must never be pruned by this setting.
+        conn.execute(
+            "INSERT INTO customers (id, remote_id, email, created_at, updated_at)
+             VALUES (1, 900, 'kept@example.com', datetime('now'), datetime('now'))",
+            [],
+        )
+        .expect("seed customer");
+        conn.execute(
+            "INSERT INTO mailboxes (id, remote_id, name, slug, email, created_at, updated_at)
+             VALUES (1, 1, 'kept', 'kept', 'kept@example.com',
+                     datetime('now'), datetime('now'))",
+            [],
+        )
+        .expect("seed mailbox");
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, status, mailbox_local_id, customer_local_id, created_at, updated_at)
+             VALUES (900, 900, 'kept', 'open', 1, 1,
+                     datetime('now', '-400 day'), datetime('now', '-400 day'))",
+            [],
+        )
+        .expect("seed conversation");
+
+        let removed = enforce_retention(&conn, 365).expect("retention");
+        assert!(removed >= 5, "each stale row counts: got {removed}");
+
+        let stale_audit: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM audit_log
+                  WHERE julianday(timestamp) < julianday('now', '-365 day')",
+                [],
+                |r| r.get(0),
+            )
+            .expect("count");
+        assert_eq!(
+            stale_audit, 0,
+            "the stale audit-history row is deleted (D8)"
+        );
+        let fresh_audit: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM audit_log
+                  WHERE julianday(timestamp) >= julianday('now', '-365 day')",
+                [],
+                |r| r.get(0),
+            )
+            .expect("count");
+        assert_eq!(fresh_audit, 1, "audit history inside the horizon survives");
+
+        let stale_hooks: i64 = conn
+            .query_row("SELECT COUNT(*) FROM webhook_events", [], |r| r.get(0))
+            .expect("count");
+        assert_eq!(stale_hooks, 0, "stale webhook events are deleted");
+        let stale_errors: i64 = conn
+            .query_row("SELECT COUNT(*) FROM application_errors", [], |r| r.get(0))
+            .expect("count");
+        assert_eq!(stale_errors, 0, "stale error reports are deleted");
+        let stale_runs: i64 = conn
+            .query_row("SELECT COUNT(*) FROM ai_runs", [], |r| r.get(0))
+            .expect("count");
+        assert_eq!(stale_runs, 0, "stale AI run records are deleted");
+        let kept_read_notification: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM notifications WHERE dedup_key = 'd8-n2'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("count");
+        assert_eq!(
+            kept_read_notification, 1,
+            "a read notification's clock runs from read_at — 1 day old survives a 365-day horizon"
+        );
+
+        let kept_conversation: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM conversations WHERE remote_id = 900",
+                [],
+                |r| r.get(0),
+            )
+            .expect("count");
+        assert_eq!(
+            kept_conversation, 1,
+            "conversations are never pruned by retention"
+        );
+        let kept_customer: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM customers WHERE remote_id = 900",
+                [],
+                |r| r.get(0),
+            )
+            .expect("count");
+        assert_eq!(kept_customer, 1, "customers are never pruned by retention");
     }
 }

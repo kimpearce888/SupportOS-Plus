@@ -479,3 +479,24 @@ gates inside AU2-13/AU2-15 were taken in-code this batch and recorded here.
   Rule 4 sync (no in-place completion annotations); new programs open in
   plan.md as numbered items; the archive files receive nothing new — they
   are frozen snapshots of the 2026-11-04 restructuring.
+
+## D14 — The notification retention clock: code follows the documented contract (AUD-P2-3, 2026-11-10)
+
+- **Trigger:** Batch AUD-P2-3 (D8) verification — the new pinned-scope
+  retention test asserted the manual's long-shipped parenthetical "for read
+  notifications the clock runs from when they were read" and failed: the
+  sweep's `created_at OR read_at` predicate made the parenthetical false
+  (read_at >= created_at always, so the created_at branch alone deleted a
+  400-day-old notification you had read yesterday — the read_at clause could
+  never save a row the created_at branch did not already condemn).
+- **Decision:** implement the documented contract rather than re-word the
+  docs. The read-clock semantic is the one the USER_MANUAL has promised
+  since the setting shipped, the one the new Settings "Data retention" card
+  states, and the one that respects the user: a notification read yesterday
+  does not vanish overnight for having been created long ago. Unread rows
+  still age from creation; read rows age from read_at.
+- **Scope guard:** the deletion table set itself (audit_log, webhook_events,
+  application_errors, ai_runs, translation_cache, notifications; never
+  conversations/customers) is unchanged and now pinned by the same test —
+  the compliance-relevant semantics the audit flagged (D8) can no longer
+  silently drift.

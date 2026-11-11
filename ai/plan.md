@@ -65,14 +65,29 @@ packages-arm64, and the kittest drift gate all success — the gate
 passed on its first run against the committed goldens, proving zero
 unintended drift).**
 
-**QUEUED (final batch AUD-P2-3 on "continue"): B6 vestigial
-`provider_available` column (remove or probe-populate honestly — it
-has zero consumers); D7 webhook loopback-only reality gap (the health
-system self-heals and instructs — verify the polling-only-without-
-relay reality is honestly surfaced everywhere it matters); D8
-retention_days deletes audit history when enabled (default off,
-disclosed in Settings — verify the disclosure is complete and
-document the compliance trade-off in USER_MANUAL).**
+**Batch AUD-P2-3 (the final three findings of the audit program —
+B6, D7, D8) CONSUMED 2026-11-10: opened on the owner's "continue"
+(the Rule 8 authorization after the AUD-P2-2 STOP). Items
+AUD-P2-3-1..3 (B6 the vestigial `AiStatus.provider_available`
+column resolved honestly — REMOVED with the live-probe contract
+documented where the field stood, legacy JSON proven compatible; D7
+the webhook loopback-only reality stated everywhere it matters — the
+no-relay verdict now says polling-only and chats/ratings cannot
+arrive at all, the Settings card carries the consequence hint, the
+README parenthetical corrected to the honest relay reality; D8 the
+retention disclosure completed — a real "Data retention" Settings
+card with the full deletion list, the compliance trade-off and the
+armed-horizon warning, the USER_MANUAL card + trade-off
+documentation, plus the forced D14 ride-along: the notification
+retention clock now implements the documented read-clock contract)
+moved to `progress.md` per Rule 2, implemented, verified (full
+battery + the settings kittest suite diff-locked with 7 intended
+golden changes + 1 new golden + VLM read-back, all 25 other suites
+re-run diff-locked — zero unintended drift), and closed the same
+session; record in `completed.md`. THE AUDIT PROGRAM IS COMPLETE:
+all 44 findings of `docs/audit/repo-audit-v1.9.6.md` are processed
+(Rule 6: none skipped). The queue is EMPTY — new work opens only on
+an owner directive.**
 
 **Batch AUD-P1-1 (fix the P1 backlog — the eight dead-end/workflow
 items of `docs/audit/repo-audit-v1.9.6.md` §5) CONSUMED 2026-11-10:

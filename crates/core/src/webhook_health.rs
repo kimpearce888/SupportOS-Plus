@@ -76,6 +76,20 @@ pub fn not_configured_outcome(detail: &str) -> WebhookHealthOutcome {
     WebhookHealthOutcome::new("not_configured", detail.to_string())
 }
 
+/// AUD-P2-3-2 (D7): the honest no-relay verdict. The listener is
+/// loopback-only by design; real-time delivery needs a user-run relay
+/// this health system cannot create. Without one the product is
+/// polling-only — and polling is not a partial fallback for chats and
+/// ratings, because Help Scout has no list endpoint for them: the
+/// webhook IS the data path. This reality is stated wherever the stored
+/// outcome renders (Settings "Last check" row, Sync Health engine card)
+/// instead of only naming the listener state.
+pub(crate) const NO_RELAY_DETAIL: &str = "no relay URL configured — polling-only: \
+ conversations and customers still arrive on the polling cadence, but beacon live \
+ chats and satisfaction ratings cannot arrive at all (Help Scout has no list \
+ endpoint for them — the webhook is the only data path); run a tunnel and save its \
+ public URL to close the gap";
+
 #[must_use]
 pub(crate) fn failed_outcome(detail: &str) -> WebhookHealthOutcome {
     WebhookHealthOutcome::new("failed", detail.to_string())
@@ -443,6 +457,30 @@ mod tests {
         let back = load_outcome(&conn).expect("load").expect("stored");
         assert_eq!(back, outcome);
         assert!(!cadence_due(&conn).expect("cadence"), "just ran -> not due");
+    }
+
+    /// AUD-P2-3-2 (D7): the no-relay verdict the worker stores must state
+    /// the polling-only reality — the polling fallback for conversations,
+    /// the NO data path for beacon chats and ratings, and the action that
+    /// closes the gap. Any of the three dropped is a regression.
+    #[test]
+    fn audp2_3_d7_no_relay_verdict_states_the_full_reality() {
+        assert_eq!(
+            not_configured_outcome(NO_RELAY_DETAIL).verdict,
+            "not_configured"
+        );
+        for must in [
+            "polling-only",
+            "still arrive on the polling cadence",
+            "cannot arrive at all",
+            "the webhook is the only data path",
+            "tunnel",
+        ] {
+            assert!(
+                NO_RELAY_DETAIL.contains(must),
+                "the no-relay verdict lost its honesty element: {must:?}"
+            );
+        }
     }
 
     struct FakeHooks {

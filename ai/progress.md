@@ -1,9 +1,10 @@
 ## Active items
 
-(none — Batch AUD-P2-2 (row 15's eight UI dead-end clusters + B4 + B7)
-closed 2026-11-10, record in `completed.md`; Rule 8 STOP. The final
-three findings — B6, D7, D8 — stay QUEUED in `plan.md` for batch
-AUD-P2-3 on the owner's "continue".)
+(none — Batch AUD-P2-3 (the final three findings: B6, D7, D8) closed
+2026-11-10, record in `completed.md`; Rule 8 STOP. The audit program is
+COMPLETE: all 44 findings of `docs/audit/repo-audit-v1.9.6.md` are
+processed. The queue is EMPTY — new work opens only on an owner
+directive.)
 
 **Batch AUD-P2-2 (moved here from `plan.md` per Rule 2, 2026-11-10,
 on the owner's standing "fix everything" directive re-confirmed after

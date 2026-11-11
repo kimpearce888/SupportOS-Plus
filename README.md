@@ -121,9 +121,14 @@ Scout within seconds, with a per-conversation status line that says
 sits on the Inbox header, every conversation has its own refresh, and
 Dashboard / Reports / Customers / Organizations / Knowledge all carry
 reload buttons that re-pull real data rather than repaint a stale
-cache. (True push via webhooks is impossible for a localhost desktop
-app — Help Scout needs a publicly reachable URL — so fast polling plus
-everywhere-refresh is the honest real-time design.)
+cache. (True push via webhooks cannot reach a loopback-only desktop app
+directly — Help Scout delivers to publicly reachable URLs only. The
+optional user-run relay closes that gap: a tunnel (cloudflared, ngrok —
+see USER_MANUAL §6.6) forwards a public https URL to the loopback
+listener, which the webhook health system then registers; without one,
+fast polling plus everywhere-refresh is the honest real-time design —
+polling-only, and beacon chats/satisfaction ratings, which have no list
+endpoint to pull, simply do not arrive.)
 
 **The Copilot** (new in 1.3.0): open the spark icon on any conversation
 and the panel reads the entire thread *locally* — no configuration, no
