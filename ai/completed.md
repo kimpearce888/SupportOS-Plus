@@ -5,6 +5,86 @@
 
 ## Completed
 
+## Batch REL-6 — Build & Release v1.9.7 from the final repository source (2026-11-11)
+
+**Owner directive:** the Build-and-Release mandate ("Build, test, and
+publish install-ready Linux `.deb` and `.AppImage` packages from the
+final repository source") — v1.9.6 (`81f1ccd`) predates the complete
+audit program (AUD-1 + AUD-P0 + AUD-P1-1 + AUD-P2-1/2/3, closed 44/44)
+plus UXH-1 and AIE-1; this release publishes the final source.
+
+**Items:** REL-6-1 version bump 1.9.6 → 1.9.7 + USER_MANUAL re-stamp ·
+REL-6-2 CHANGELOG `[1.9.7]` + link ref · REL-6-3 full local battery +
+local build/verification of both packages · REL-6-4 annotated tag
+`v1.9.7`, release.yml publish + live post-publish verification.
+
+**Release commit:** `3f5d7ee` (main tip; carries AUD-1, AUD-P0,
+AUD-P1-1, AUD-P2-1, AUD-P2-2, AUD-P2-3, UXH-1, AIE-1 — all unreleased
+in v1.9.6).
+
+**Local verification battery (eighth sandbox state — recycled again,
+repo re-cloned at `e21d44d`, rustup 1.99.1 + mesa lavapipe re-extracted
+to ~/mesa-prefix, xkb-common-x11/xcb-xkb placed from the Debian 13
+archive through a local ldconfig -p shim so `ensure_host_libs_bundled`
+could stage them):**
+- Gates: no-simulation clean; traceability OK (23 routes, 20 design.rs
+  DC tags, 27 DC ids). fmt `--all --check` clean; verify-icons OK;
+  clippy workspace `--all-targets -D warnings` clean (2m53s) · clippy
+  sandbox lane clean (38s).
+- Tests: app-shell 293/293 · core 520/520 (+3 ignored) · catalog
+  15/15 · xtask 2/2 · sandbox lane 528/528 (+3 ignored) — 1358
+  passed, 0 failed (test counts grew with the audit program's new
+  suites).
+- cargo-deny 0.20.2: advisories licenses bans sources all ok.
+- kittest drift gate: all 26 suites + style lint diff-locked green
+  through lavapipe (207 tests, zero unintended drift — no golden
+  changes in the release).
+- Release build (exact release profile, sandbox feature on): green;
+  31,436,304 B binary; SPP_SMOKE rc=0 (boot chain, workers, loopback
+  listener, automatic backup, 24 pages / 4359 shapes).
+- `.deb` via `xtask deb --skip-build`: 9,517,236 B;
+  Package/Version 1.9.7/Architecture amd64 + the 19-dep Depends set
+  correct; `dpkg-deb -x` payload verified (binary, desktop entry, 4
+  hicolor icons), payload SPP_SMOKE rc=0, GUI launch under Xvfb
+  rc=124 (window alive, first-run init complete).
+- AppImage via `xtask package --skip-build`: 13,015,544 B (appimagetool
+  1.9.1 + the pinned type-2 runtime, sha256-verified); bundled xkb
+  trio staged; `APPIMAGE_EXTRACT_AND_RUN=1 SPP_SMOKE=1` rc=0; GUI
+  launch under Xvfb rc=124. Local-host note: this sandbox's GL came
+  from the system Mesa swrast stack — the CI verify lanes ran the same
+  tests on ubuntu:22.04/24.04 and debian:12 containers.
+
+**CI on the bump push:** run 42946013382 green 4/4 (fmt/clippy/test/
+deny; AppImage + .deb build + smoke; arm64 lane; kittest snapshot
+locks).
+
+**Release pipeline (run 42947622842, all green):** build + test +
+package on ubuntu:22.04 (gates, fmt, clippy ×2, tests ×2, release
+build, both packages, dist staging with SHA-256 + BUILD-INFO) ·
+verify `.deb` on clean ubuntu:22.04, ubuntu:24.04, debian:12
+containers (checksum integrity, APT install with full dependency
+resolution, installed files + desktop-file-validate, SPP_SMOKE, the
+0.2.x → 1.x in-place data migration, GUI under Xvfb with declared
+dependencies only, reinstall, uninstall-keeps-user-data, purge) ·
+verify AppImage (integrity, SPP_SMOKE, GUI under Xvfb) · publish.
+Tag-CI run 42947622954 green 4/4 (tags run the full battery since
+AUD-P2-9/I1).
+
+**Published + live post-publish verification (release `v1.9.7`,
+published 2026-11-11T03:07:16Z, target `3f5d7ee` — the final source
+commit):** all four assets live (SupportOS-Plus-1.9.7-x86_64.AppImage
+12.4 MB, supportos-plus_1.9.7_amd64.deb 9.9 MB, SHA256SUMS.txt,
+BUILD-INFO.txt); every browser_download_url answers; both package
+SHA-256s verify against the published SHA256SUMS.txt; BUILD-INFO
+commit/version match the tagged source exactly; the PUBLISHED bytes
+themselves re-verified locally (deb payload SPP_SMOKE rc=0, AppImage
+SPP_SMOKE rc=0, published AppImage GUI under Xvfb rc=124); release
+notes carry the CHANGELOG `[1.9.7]` section, the download table with
+per-file SHA-256, install instructions for both formats, the 0.2.x
+upgrade note, system requirements (x86_64, glibc ≥ 2.35, Ubuntu
+22.04+/Debian 12+, desktop session + GL/Vulkan driver, ~200 MB), and
+the CI verification summary.
+
 ## Batch AUD-P2-2 — fix the P2 backlog, part two: row 15's eight UI dead-end clusters + the two remaining fixable no-op findings (2026-11-10)
 
 **Owner directive:** "check the repo again for latest update first and
