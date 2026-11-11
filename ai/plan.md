@@ -87,7 +87,11 @@ re-run diff-locked — zero unintended drift), and closed the same
 session; record in `completed.md`. THE AUDIT PROGRAM IS COMPLETE:
 all 44 findings of `docs/audit/repo-audit-v1.9.6.md` are processed
 (Rule 6: none skipped). The queue is EMPTY — new work opens only on
-an owner directive.**
+an owner directive. Ledger addendum: the batch push `b803034` is
+CI-green 4/4 — run 42927919207 (fmt/clippy/test/deny, packages,
+packages-arm64, and the kittest drift gate all success; the drift
+gate passed first-run against the committed goldens, proving the
+seven intended changes and the new golden were exactly right).**
 
 **Batch AUD-P1-1 (fix the P1 backlog — the eight dead-end/workflow
 items of `docs/audit/repo-audit-v1.9.6.md` §5) CONSUMED 2026-11-10:
