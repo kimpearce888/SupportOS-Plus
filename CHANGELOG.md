@@ -4,6 +4,42 @@ All notable changes to **SupportOS+** (SupportOS-Plus) are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.9.8] — 2026-11-12
+
+### Fixed — the visual integrity program: the 35-item visual register, closed
+
+The first counted visual baseline (`ai/audit/visual/visual-defect-register-v1.md`,
+35 defects in 5 classes found by an adversarial VLM pass over the CI goldens)
+was remediated to completion in fix batches VF-1/2/3 + the VF-4 close-out.
+Terminal state: **24 FIXED · 5 VERIFIED-satisfied · 3 ADDRESSED ·
+2 RECLASSIFIED · 1 SUPERSEDED — 0 open, 0 partial.**
+
+**The owner's three flagship complaints:**
+
+- **Inbox T-composition** (the "sidebar goes beneath the reply" one): at
+  1920 with the copilot docked, the composer now spans the reader+copilot
+  columns and the copilot panel ends exactly at the composer's top edge —
+  locked by 3 geometry-invariant suites across 12 monitor-class × state
+  combos (800–2560), asserting on live panel rects.
+- **The professional polish of the whole app**: spacing tokenized
+  (SP1–SP6; a CI style-lint gate now fails on literal margin numbers in
+  `pages/`), every page pass tier by tier, one chip/pill/rhythm treatment
+  per class, three-tier list-row hierarchy, true-height scroll areas
+  (the issue-radar `show_rows` row-height lie that clipped the last drill
+  link is dead), day separators as quiet muted pills, short pages now end
+  with a defined end-of-page marker instead of a background void.
+- **"Zero golden drift" certifies the real look**: goldens previously
+  rendered pages on a bare UI outside the production host — the 26 kittest
+  suites now render through the exact production funnel
+  (`design::host_standard_page` / `host_inbox_page`), all 203 goldens
+  rebaselined through it and diff-locked twice.
+
+**Battery on the final tree:** fmt, clippy (both lanes), the gates,
+style-lint, all 26 kittest suites (215 tests) on the rebaselined goldens,
+the workspace test battery, and SPP_SMOKE all green. Evidence pack with
+before/after pairs and adversarial VLM re-audits in
+`ai/audit/visual/evidence/`; the register itself is marked TERMINAL.
+
 ## [1.9.7] — 2026-11-11
 
 ### Fixed — the full audit program: all 44 findings of the repo audit closed
@@ -1293,6 +1329,7 @@ verified end-to-end by the tag-triggered release pipeline.
 - CI: fmt + clippy (`-D warnings`) + tests + cargo-deny on every push,
   plus a package job that builds and smoke-boots both formats.
 
+[1.9.8]: https://github.com/kimpearce888/SupportOS-Plus/releases/tag/v1.9.8
 [1.9.7]: https://github.com/kimpearce888/SupportOS-Plus/releases/tag/v1.9.7
 [1.9.6]: https://github.com/kimpearce888/SupportOS-Plus/releases/tag/v1.9.6
 [1.9.5]: https://github.com/kimpearce888/SupportOS-Plus/releases/tag/v1.9.5
