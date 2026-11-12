@@ -9,6 +9,19 @@ use crate::icons::Icon;
 const LIST_COL_W: f32 = 340.0;
 const SCROLL_H: f32 = 360.0;
 
+/// AUD-H-class polish: chat timestamps render as compact wall times,
+/// never raw ISO-8601 — the "2026-02-16T09:41:00.000Z" debug-register
+/// strings read as internals, not product metadata.
+fn compact_chat_time(iso: &str) -> String {
+    chrono::DateTime::parse_from_rfc3339(iso)
+        .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+        .unwrap_or_else(|_| {
+            let mut out = iso.replacen('T', " ", 1);
+            out.truncate(out.len().min(16));
+            out
+        })
+}
+
 #[derive(Clone)]
 pub(crate) struct LiveChatsModel {
     chats: Vec<MirrorChat>,
@@ -194,7 +207,7 @@ impl LiveChatsPage {
             .fill(t.card)
             .stroke(egui::Stroke::new(1.0, t.border))
             .corner_radius(egui::CornerRadius::same(10))
-            .inner_margin(egui::Margin::same(5))
+            .inner_margin(egui::Margin::same(design::scale::space::CLUSTER as i8))
             .show(ui, |ui| {
                 egui::ScrollArea::vertical()
                     .id_salt("spp-live-chats-list")
@@ -221,7 +234,10 @@ impl LiveChatsPage {
         let head = format!(
             "{} · {}",
             title,
-            chat.last_event_at.as_deref().unwrap_or("—")
+            chat.last_event_at
+                .as_deref()
+                .map(compact_chat_time)
+                .unwrap_or_else(|| "—".into())
         );
         let a11y = format!("chat with {title} — {}", chat.state);
         let t = design::tokens(ui);
@@ -386,7 +402,10 @@ impl LiveChatsPage {
                 "state: {} · mailbox #{} · last event {}",
                 chat.state,
                 chat.mailbox_remote_id,
-                chat.last_event_at.as_deref().unwrap_or("—")
+                chat.last_event_at
+                    .as_deref()
+                    .map(compact_chat_time)
+                    .unwrap_or_else(|| "—".into())
             )),
             |ui| {
                 // AUD-P2-18 (C14): the subtitle's cross-links — the chat's
@@ -453,6 +472,9 @@ impl LiveChatsPage {
                         .id_salt("spp-live-chat-messages")
                         .max_height(SCROLL_H)
                         .auto_shrink([false; 2])
+                        .scroll_bar_visibility(
+                            egui::scroll_area::ScrollBarVisibility::AlwaysVisible,
+                        )
                         .show(ui, |ui| {
                             for message in &messages {
                                 message_card_ui(ui, message);
@@ -461,24 +483,30 @@ impl LiveChatsPage {
                         });
                 }
 
-                ui.add_space(design::scale::space::PAD_TOOL);
-                design::badge(
-                    ui,
-                    &chat.state,
-                    if chat.is_open() {
-                        BadgeTone::Success
-                    } else {
-                        BadgeTone::Neutral
-                    },
-                );
-                if !guard.hint.is_empty() {
-                    ui.add_space(design::scale::space::SP2);
-                    if guard.can_send {
-                        design::callout(ui, CalloutRole::Neutral, &guard.hint);
-                    } else {
-                        design::callout(ui, CalloutRole::Err, &guard.hint);
+                // AUD-L5 polish: the state badge, the send-guard note,
+                // and the end-chat action form ONE grouped card under
+                // the transcript — a floating badge + stray callout +
+                // loose button read as debug residue.
+                ui.add_space(design::scale::space::SP2);
+                design::card_titled(ui, "Conversation", None, |ui| {
+                    design::badge(
+                        ui,
+                        &chat.state,
+                        if chat.is_open() {
+                            BadgeTone::Success
+                        } else {
+                            BadgeTone::Neutral
+                        },
+                    );
+                    if !guard.hint.is_empty() {
+                        ui.add_space(design::scale::space::SP2);
+                        if guard.can_send {
+                            design::callout(ui, CalloutRole::Neutral, &guard.hint);
+                        } else {
+                            design::callout(ui, CalloutRole::Err, &guard.hint);
+                        }
                     }
-                }
+                });
 
                 // AUD-P2-18 (C14): the agent's end-chat action — placed with
                 // the reply controls (the same place the send rule lives).
@@ -598,7 +626,12 @@ fn message_card_ui(ui: &mut egui::Ui, message: &MirrorMessage) {
         .sender_name
         .clone()
         .unwrap_or_else(|| fallback.to_string());
-    let time = message.created_at.as_deref().unwrap_or("—");
+    let time = message
+        .created_at
+        .as_deref()
+        .map(compact_chat_time)
+        .unwrap_or_else(|| "—".into());
+    let time = time.as_str();
     let body = message.text.as_deref().unwrap_or("(no text)");
     design::message_card_with(
         ui,
@@ -607,10 +640,17 @@ fn message_card_ui(ui: &mut egui::Ui, message: &MirrorMessage) {
         role_label.as_deref(),
         time,
         |ui| {
-            ui.label(
-                egui::RichText::new(body)
-                    .size(design::scale::text::LEAD)
-                    .color(design::tokens(ui).foreground),
+            // AUD-L5: the body ALWAYS wraps (explicit wrap mode + long
+            // token breaking, the inbox thread's treatment) — the old
+            // plain label could render a clipped sliver that read as a
+            // broken transcript.
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(spp_core::richtext::break_long_tokens(body, 40))
+                        .size(design::scale::text::LEAD)
+                        .color(design::tokens(ui).foreground),
+                )
+                .wrap(),
             );
         },
         |_ui| {},

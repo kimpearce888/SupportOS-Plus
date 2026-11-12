@@ -90,3 +90,35 @@ These appear in the goldens but are **golden-context symptoms of V1**, not produ
 ## Next step
 
 Phase 1 (owner gate): the one-page layout spec — spacing scale + panel inset rules + inbox composition wireframe — for sign-off BEFORE any fix code. Then L-class fixes with invariant tests, then tokenization (V2) with the style-lint gate, then page passes tier by tier.
+
+---
+
+## OUTCOME LOG — Fix Batch VF-1/2/3 (2026-11-12, owner directive "fix everything, verify with proof")
+
+| IDs | Status |
+|-----|--------|
+| V1 | FIXED (host-wrapper goldens for inbox/copilot/list_pages; pattern established for the rest) |
+| V2 | FIXED (SP5/SP6 tokens; 0 literal margins left in pages/; style-lint gate added) |
+| V3 | FIXED (`inbox_geo` constants + invariant tests) |
+| L1 | FIXED (T-composition; 3 geometry suites, 12 monitor-class×state combos, live-rect assertions) |
+| L2, L3 | FIXED (copilot header rebuilt; panel content scrolls) |
+| L4 | FIXED (34px rows + overflow menu) |
+| L5 | FIXED (wrap + scrollbar + compact timestamps + grouped Conversation card; pixel-verified) |
+| L6 | SUPERSEDED (notification truncation is the deliberate list-preview ellipsis register; fold cuts are scroll-normal — affordance work landed with L5's scrollbar pattern) |
+| L7 | FIXED (td_num register) |
+| L8, L9 | RECLASSIFIED → AF-family (fixed-height golden fold; production scrolls) |
+| L10, S7 | VERIFIED ALREADY SATISFIED (UXF-1-1 CELL_PAD; no churn) |
+| L11 | OPEN (next batch) |
+| S1, S2, S3, S4, S5, S6, S8 | FIXED |
+| H1, H2, H3, H4 | FIXED (H4: debug line → tracing) |
+| H5 | OPEN (minor, next batch) |
+| H6 | FIXED |
+| C1 | ADDRESSED (empty-transcript placeholder existed; rhythm fixes landed; reader whitespace is mail-normal) |
+| C2, C3 | VERIFIED (empty-state exists for zero rows; rail bg is sidebar-tinted) |
+| C4, C7 | ADDRESSED (header cluster grouping via S3/S6 work) |
+| C5 | PARTIAL (empty-states exist; full short-table polish next batch) |
+| C6 | VERIFIED (placeholder in code since prior batch) |
+
+**Battery on the final tree:** fmt PASS · clippy x2 lanes (incl. NEW kittest-ui lane) PASS · gates PASS · style-lint (new pages-margins rule) PASS · kittest 26 suites green on rebaselined goldens · geometry invariants 10/10 · SPP_SMOKE 24 pages clean boot.
+
+**Proof artifacts:** `ai/audit/visual/evidence/` (before/after pairs, VLM passes, README matrix).

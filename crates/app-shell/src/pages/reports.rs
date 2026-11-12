@@ -1428,7 +1428,13 @@ impl ReportsPage {
                                     .map(|v| v.to_string())
                                     .unwrap_or_else(|| "—".into()),
                             );
-                            ui.label(
+                            // AUD-L7: one cell, one value, one treatment —
+                            // the escalated column rides the same right-
+                            // aligned mono register as its peers (the old
+                            // plain label collided visually with the
+                            // neighboring reopens cell at narrow widths).
+                            design::td_num(
+                                ui,
                                 factors
                                     .get("escalated")
                                     .and_then(serde_json::Value::as_bool)

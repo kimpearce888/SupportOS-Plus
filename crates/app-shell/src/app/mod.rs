@@ -902,10 +902,13 @@ impl ShellApp {
         let mut nav: Option<NavRequest> = None;
         if self.page == PageKey::Inbox {
             egui::CentralPanel::default()
+                // AUD-V2: the production host inset is the SP5 token —
+                // the SAME value the inbox panels and the golden host
+                // wrapper use, so the goldens render the real look.
                 .frame(
                     egui::Frame::new()
                         .fill(t.background)
-                        .inner_margin(egui::Margin::symmetric(22, 14)),
+                        .inner_margin(egui::Margin::symmetric(design::scale::space::SP5 as i8, 14)),
                 )
                 .show(ui, |ui| self.inbox.ui(ui, &self.db, &bus, sync.as_ref()));
             nav = None;
@@ -929,7 +932,10 @@ impl ShellApp {
                             design::content_column(ui, |ui| {
                                 egui::Frame::new()
                                     .fill(egui::Color32::TRANSPARENT)
-                                    .inner_margin(egui::Margin::symmetric(22, 14))
+                                    .inner_margin(egui::Margin::symmetric(
+                                        design::scale::space::SP5 as i8,
+                                        14,
+                                    ))
                                     .show(ui, |ui| match self.page {
                                         PageKey::Dashboard => {
                                             self.dashboard.ui(ui, &self.db, sync.as_ref());

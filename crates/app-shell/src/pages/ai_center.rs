@@ -1083,21 +1083,21 @@ impl AiCenterPage {
                         }
                     }
                 });
-                design::hint_text(
-                    ui,
-                    &format!(
-                        "stored record: provider_kind={} chat_model={} embedding_model={} \
-                         dim={} base_url={}",
-                        record.provider_kind.as_str(),
-                        record.chat_model.as_deref().unwrap_or("(unset)"),
-                        record.embedding_model.as_deref().unwrap_or("(unset)"),
-                        record
-                            .embedding_dim
-                            .map(|d| d.to_string())
-                            .as_deref()
-                            .unwrap_or("(unset)"),
-                        record.base_url.as_deref().unwrap_or("(unset)"),
-                    ),
+                // AUD-H4: the raw provider record is DEBUG logging, not a
+                // product surface — the "stored record: provider_kind=none
+                // chat_model=(unset)…" line rendered into the UI and read
+                // as a debug dump. Diagnostics owns introspection.
+                tracing::debug!(
+                    provider_kind = record.provider_kind.as_str(),
+                    chat_model = record.chat_model.as_deref().unwrap_or("(unset)"),
+                    embedding_model = record.embedding_model.as_deref().unwrap_or("(unset)"),
+                    embedding_dim = record
+                        .embedding_dim
+                        .map(|d| d.to_string())
+                        .as_deref()
+                        .unwrap_or("(unset)"),
+                    base_url = record.base_url.as_deref().unwrap_or("(unset)"),
+                    "stored provider record"
                 );
             },
         );
@@ -1983,7 +1983,7 @@ fn golden_run_block(ui: &mut egui::Ui, run: &spp_core::ai_eval::GoldenRunRow) {
     egui::Frame::new()
         .fill(t.muted)
         .corner_radius(egui::CornerRadius::same(design::scale::radius::CONTROL))
-        .inner_margin(egui::Margin::same(10))
+        .inner_margin(egui::Margin::same(design::scale::space::SP3 as i8))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 let tone = if run.failed == 0 {

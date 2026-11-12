@@ -188,11 +188,19 @@ pub(crate) fn tokens_for(ctx: &egui::Context) -> &'static Tokens {
 }
 
 pub mod scale {
-    pub(crate) mod space {
-        pub(crate) const SP1: f32 = 4.0;
-        pub(crate) const SP2: f32 = 8.0;
-        pub(crate) const SP3: f32 = 12.0;
-        pub(crate) const SP4: f32 = 16.0;
+    /// AUD-V2: the spacing scale is public — the test harnesses and the
+    /// production host must reference the SAME tokens (V1 fidelity).
+    pub mod space {
+        pub const SP1: f32 = 4.0;
+        pub const SP2: f32 = 8.0;
+        pub const SP3: f32 = 12.0;
+        pub const SP4: f32 = 16.0;
+        /// AUD-V2 (register V2): the page-level horizontal inset (the
+        /// production host and every full-bleed pane share it — one
+        /// inset value on every monitor class, no more hand-rolled 22s).
+        pub const SP5: f32 = 24.0;
+        /// AUD-V2: the section-level break between major page blocks.
+        pub const SP6: f32 = 32.0;
         pub(crate) const CLUSTER: f32 = 6.0;
         /// Card horizontal pad (DC §3 DS-C-02).
         pub(crate) const PAD_CARD: f32 = 14.0;

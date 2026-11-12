@@ -981,7 +981,11 @@ impl KnowledgePage {
             "knowledge-documents",
             &["Title", "Source", "Visibility", "Chunks", "Actions"],
             documents.len(),
-            26.0,
+            // AUD-L4: 34px rows — the action buttons (28px) fit INSIDE
+            // the row they act on; the old 26px rows clipped the wrapped
+            // button cluster through the row divider and cut Delete at
+            // the fold.
+            34.0,
             |ui, i| {
                 let t = design::tokens(ui);
                 let doc = &documents[i];
@@ -1002,7 +1006,12 @@ impl KnowledgePage {
                         .color(t.foreground),
                 );
                 design::td_num(ui, &i64_field(doc, "chunk_count").to_string());
-                ui.horizontal_wrapped(|ui| {
+                // AUD-L4: two visible acts + one overflow menu — the six
+                // inline buttons wrapped to a second line and collided
+                // with the row divider; the rare acts (Re-index, Mark
+                // Reviewed, Verify, Delete) ride a popup menu so the row
+                // stays single-line at every legal width.
+                ui.horizontal(|ui| {
                     if design::button(ui, "Read", ButtonVariant::Outline)
                         .on_hover_text("open this document in the reader")
                         .clicked()
@@ -1015,21 +1024,52 @@ impl KnowledgePage {
                     {
                         edit = Some(id);
                     }
-                    if design::button(ui, "Re-index", ButtonVariant::Outline)
-                        .on_hover_text("re-embed this document's chunks — resets failed attempts")
-                        .clicked()
-                    {
-                        reindex = Some(id);
-                    }
-                    if design::button(ui, "Mark Reviewed", ButtonVariant::Outline).clicked() {
-                        action = Some((id, str_field(doc, "title"), "reviewed"));
-                    }
-                    if design::button(ui, "Verify", ButtonVariant::Outline).clicked() {
-                        action = Some((id, str_field(doc, "title"), "verify"));
-                    }
-                    if design::button(ui, "Delete", ButtonVariant::Destructive).clicked() {
-                        action = Some((id, str_field(doc, "title"), "delete"));
-                    }
+                    let more = design::button_with_icon(
+                        ui,
+                        crate::icons::Icon::ChevronDown,
+                        "More",
+                        ButtonVariant::Ghost,
+                    )
+                    .on_hover_text("re-index, review state, verify, or delete this document");
+                    let popup_id = ui.make_persistent_id(("spp-doc-more", id));
+                    egui::Popup::menu(&more)
+                        .id(popup_id)
+                        .width(220.0)
+                        .show(|ui| {
+                            ui.set_min_width(210.0);
+                            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+                            if ui
+                                .button(egui::RichText::new("Re-index").size(13.0))
+                                .on_hover_text(
+                                    "re-embed this document's chunks — resets failed attempts",
+                                )
+                                .clicked()
+                            {
+                                reindex = Some(id);
+                            }
+                            if ui
+                                .button(egui::RichText::new("Mark Reviewed").size(13.0))
+                                .clicked()
+                            {
+                                action = Some((id, str_field(doc, "title"), "reviewed"));
+                            }
+                            if ui
+                                .button(egui::RichText::new("Verify").size(13.0))
+                                .clicked()
+                            {
+                                action = Some((id, str_field(doc, "title"), "verify"));
+                            }
+                            if ui
+                                .button(
+                                    egui::RichText::new("Delete")
+                                        .size(13.0)
+                                        .color(design::tokens(ui).destructive),
+                                )
+                                .clicked()
+                            {
+                                action = Some((id, str_field(doc, "title"), "delete"));
+                            }
+                        });
                 });
             },
         );
@@ -1228,7 +1268,7 @@ impl KnowledgePage {
                 } else {
                     egui::Color32::TRANSPARENT
                 })
-                .inner_margin(egui::Margin::same(6));
+                .inner_margin(egui::Margin::same(design::scale::space::CLUSTER as i8));
             row.show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(

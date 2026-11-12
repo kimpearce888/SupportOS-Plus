@@ -10,9 +10,7 @@ use spp_core::inbox::{ConversationDetail, ConversationListItem, InboxFilters};
 use spp_core::sync_engine::SyncEngine;
 use spp_core::ticket_ops::{OperationResult, TicketOperation};
 
-use crate::design::{
-    self, AvatarSize, BadgeTone, ButtonVariant, ComposerAct, ComposerState, MessageRole,
-};
+use crate::design::{self, BadgeTone, ButtonVariant, ComposerAct, ComposerState, MessageRole};
 use crate::icons::Icon;
 use crate::mention_popup::{
     Directory, apply_completion, caret_query, char_index_to_byte, filter_matches,
@@ -106,6 +104,38 @@ pub(crate) fn filters_from_bar(
         filters.extra_params = frag_params;
     }
     filters
+}
+
+/// AUD-V3: named inbox geometry — the single source of truth for the
+/// four-column composition and its fold behavior, shared with the
+/// kittest geometry suite (kittest_inbox_geometry) so the invariants and
+/// the layout read the SAME constants.
+pub mod inbox_geo {
+    /// Views rail width (folded below `RAIL_FOLD_W`).
+    pub const RAIL_W: f32 = 168.0;
+    /// Docked copilot panel width.
+    pub const COPILOT_W: f32 = 300.0;
+    /// The reader never renders below this width.
+    pub const READER_FLOOR: f32 = 480.0;
+    /// Below this total width the views rail folds into the list.
+    pub const RAIL_FOLD_W: f32 = 900.0;
+    /// Conversation list proportional share, clamped.
+    pub const LIST_SHARE: f32 = 0.30;
+    /// Conversation list clamp range.
+    pub const LIST_MIN_W: f32 = 280.0;
+    /// Composer panel height bounds (measurement-based, capped).
+    pub const COMPOSER_MIN_H: f32 = 120.0;
+    /// Conversation list upper clamp (proportional default).
+    pub const LIST_MAX_W: f32 = 560.0;
+    /// Conversation list proportional clamp (default size).
+    pub const LIST_RESIZE_MAX_W: f32 = 520.0;
+    /// Composer panel default height (first frame fallback).
+    pub const COMPOSER_DEFAULT_H: f32 = 348.0;
+    /// Panel inner insets (the geometry suite restores true panel edges
+    /// from the recorded inner-ui rects with these).
+    pub const COPILOT_INSET: f32 = 12.0;
+    pub const COMPOSER_TOP_INSET: f32 = 8.0;
+    pub const COMPOSER_X_INSET: f32 = 24.0;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -265,6 +295,14 @@ pub struct InboxPage {
     /// at the window bottom (the owner's screenshot report; the defect
     /// is present in the pre-batch goldens).
     composer_panel_h: Option<f32>,
+    /// AUD-V2: live panel rects, recorded each frame — the geometry
+    /// invariant suite (kittest_inbox_geometry) asserts the composition
+    /// contracts on every monitor class from these measured values.
+    pub(crate) panel_rail_rect: Option<egui::Rect>,
+    pub(crate) panel_list_rect: Option<egui::Rect>,
+    pub(crate) panel_copilot_rect: Option<egui::Rect>,
+    pub(crate) panel_composer_rect: Option<egui::Rect>,
+    pub(crate) panel_reader_rect: Option<egui::Rect>,
     copilot: Option<spp_core::ai_local::CopilotReport>,
     copilot_error: Option<String>,
     triage: Vec<TriageChip>,
@@ -337,6 +375,11 @@ impl InboxPage {
             composer_cc: String::new(),
             composer_bcc: String::new(),
             composer_panel_h: None,
+            panel_rail_rect: None,
+            panel_list_rect: None,
+            panel_copilot_rect: None,
+            panel_composer_rect: None,
+            panel_reader_rect: None,
             mention_active: 0,
             mention_caret: 0,
             composer_focused: false,
@@ -1149,30 +1192,41 @@ impl InboxPage {
 
         let detail = self.detail.clone();
 
-        // UXE-1-4: width-aware inbox architecture. The old layout hard-
-        // coded a 172px views rail + a 330px-min list + a 320px copilot
-        // panel — on 1024-class displays the reader collapsed to a sliver
-        // and the composer clipped. Columns now adapt: the views rail
-        // folds into the list header below 900px of content width, the
-        // list is proportional (280–520), and the copilot docks as a
-        // 300px panel only while the reader keeps a 480px floor — below
-        // that it swaps in over the reader (narrow mode) instead of
-        // crushing it. The rail also folds when that alone is what keeps
-        // a docked copilot viable.
+        // AUD-L1 (register L1, the owner's complaint): the composition is
+        // now an explicit T — the composer strip is allocated BEFORE the
+        // copilot right panel, so it spans the full reader+copilot zone
+        // and BOTH columns end at its top edge. The old order allocated
+        // the copilot first (full window height) and the composer after
+        // (confined to the reader column), so the sidebar column ran
+        // beneath/beside the reply strip — the exact defect the owner
+        // photographed. Panel geometry is named constants (AUD-V3), not
+        // scattered magic numbers, and every inset is a scale token
+        // (AUD-V2): SP5 horizontal page inset, SP3 column insets.
         let avail = ui.available_width();
-        const RAIL_W: f32 = 168.0;
-        const COPILOT_W: f32 = 300.0;
-        const READER_FLOOR: f32 = 480.0;
-        let rail_fits = avail >= 900.0;
-        let mut rail_w = if rail_fits { RAIL_W } else { 0.0 };
-        let list_est = ((avail - rail_w) * 0.30).clamp(280.0, 520.0);
+        // AUD-V3: geometry constants live in `inbox_geo` at file scope.
+        let rail_fits = avail >= inbox_geo::RAIL_FOLD_W;
+        let mut rail_w = if rail_fits { inbox_geo::RAIL_W } else { 0.0 };
+        let list_est = ((avail - rail_w) * inbox_geo::LIST_SHARE)
+            .clamp(inbox_geo::LIST_MIN_W, inbox_geo::LIST_RESIZE_MAX_W);
         if self.copilot_open {
-            let fits_with_rail = avail - rail_w - list_est >= COPILOT_W + READER_FLOOR;
-            let fits_folded = avail - list_est >= COPILOT_W + READER_FLOOR;
+            let fits_with_rail =
+                avail - rail_w - list_est >= inbox_geo::COPILOT_W + inbox_geo::READER_FLOOR;
+            let fits_folded = avail - list_est >= inbox_geo::COPILOT_W + inbox_geo::READER_FLOOR;
             if !fits_with_rail && fits_folded {
                 rail_w = 0.0;
             }
         }
+
+        // AUD-V2: rect instrumentation for the geometry invariants —
+        // every panel records its exact rect each frame; the kittest
+        // geometry suite asserts the composition contracts (no sibling
+        // panel intersections, copilot ends at the composer's top, the
+        // reader floor holds) at every monitor class.
+        self.panel_rail_rect = None;
+        self.panel_list_rect = None;
+        self.panel_copilot_rect = None;
+        self.panel_composer_rect = None;
+        self.panel_reader_rect = None;
 
         if rail_w > 0.0 {
             egui::Panel::left("inbox-views")
@@ -1182,85 +1236,72 @@ impl InboxPage {
                 .frame(
                     egui::Frame::new()
                         .fill(t.sidebar)
-                        .inner_margin(egui::Margin {
-                            left: 10,
-                            right: 10,
-                            top: 12,
-                            bottom: 12,
-                        }),
+                        .inner_margin(egui::Margin::symmetric(
+                            design::scale::space::SP3 as i8,
+                            design::scale::space::SP3 as i8,
+                        )),
                 )
                 .show(ui, |ui| {
+                    self.panel_rail_rect = Some(ui.max_rect());
                     self.views_rail_ui(ui, db);
                 });
         }
         egui::Panel::left("inbox-list")
             // UX-8: the conversation list is proportional to the window
-            // and user-resizable (280–560; UXE-1-4 tightened the floor so
-            // small displays keep a reader).
-            .default_size((avail - rail_w).mul_add(0.30, 0.0).clamp(280.0, 520.0))
-            .size_range(280.0..=560.0)
+            // and user-resizable; the floor keeps small displays a reader.
+            .default_size(
+                (avail - rail_w)
+                    .mul_add(inbox_geo::LIST_SHARE, 0.0)
+                    .clamp(inbox_geo::LIST_MIN_W, inbox_geo::LIST_RESIZE_MAX_W),
+            )
+            .size_range(inbox_geo::LIST_MIN_W..=inbox_geo::LIST_MAX_W)
             .resizable(true)
-            .show_separator_line(false)
+            .show_separator_line(true)
             .frame(egui::Frame::new().fill(t.card).inner_margin(egui::Margin {
-                left: 12,
-                right: 12,
-                top: 12,
-                bottom: 8,
+                left: design::scale::space::SP3 as i8,
+                right: design::scale::space::SP3 as i8,
+                top: design::scale::space::SP3 as i8,
+                bottom: design::scale::space::SP2 as i8,
             }))
             .show(ui, |ui| {
+                self.panel_list_rect = Some(ui.max_rect());
                 self.list_ui(ui, db, engine, rail_w == 0.0);
             });
-        // After the side panels, whatever remains must host the reader
-        // (and the copilot when it fits beside it).
+        // The reader hosts whatever remains; the copilot docks beside it
+        // only when the reader keeps its floor.
         let remaining = ui.available_width();
-        let copilot_docked = self.copilot_open && remaining >= COPILOT_W + READER_FLOOR;
-        if copilot_docked {
-            egui::Panel::right("inbox-copilot")
-                .exact_size(COPILOT_W)
-                .resizable(false)
-                .show_separator_line(false)
-                .frame(
-                    egui::Frame::new()
-                        .fill(t.sidebar)
-                        .inner_margin(egui::Margin {
-                            left: 12,
-                            right: 12,
-                            top: 12,
-                            bottom: 12,
-                        }),
-                )
-                .show(ui, |ui| {
-                    self.copilot_pane_ui(ui, db, detail.as_ref());
-                });
-        }
-        // UXE-1-4: the composer is only meaningful with the reader in
-        // view — in copilot narrow mode it steps aside with the reader.
+        let copilot_docked =
+            self.copilot_open && remaining >= inbox_geo::COPILOT_W + inbox_geo::READER_FLOOR;
+
+        // AUD-L1 step 2: the composer is allocated BEFORE the copilot
+        // panel — in egui each panel splits the remaining rect in show
+        // order, so the bottom strip spans the reader+copilot zone and
+        // the right panel (shown next) ends exactly at its top edge.
+        // The composer is only meaningful with the reader in view — in
+        // copilot narrow mode it steps aside with the reader.
         if detail.is_some() && !(self.copilot_open && !copilot_docked) {
-            // UXE-1-7: the panel height TRACKS the composer card (last
-            // frame's measured height, capped by the window) instead of
-            // auto-sizing — the auto panel converged to a sliver and
-            // clipped the composer at the window bottom (the owner's
-            // screenshot report; the defect was present in the pre-batch
-            // goldens despite UX-27's scroll bound). The in-panel scroll
-            // still caps the pathological case (a huge draft on a tiny
-            // window).
             let composer_h = self
                 .composer_panel_h
-                .unwrap_or(348.0)
-                .clamp(120.0, (ui.available_height() - 12.0).max(120.0));
+                .unwrap_or(inbox_geo::COMPOSER_DEFAULT_H)
+                .clamp(
+                    inbox_geo::COMPOSER_MIN_H,
+                    (ui.available_height() - design::scale::space::SP3)
+                        .max(inbox_geo::COMPOSER_MIN_H),
+                );
             egui::Panel::bottom("inbox-composer")
                 .exact_size(composer_h)
                 .frame(
                     egui::Frame::new()
                         .fill(t.background)
                         .inner_margin(egui::Margin {
-                            left: 22,
-                            right: 22,
-                            top: 8,
-                            bottom: 10,
+                            left: design::scale::space::SP5 as i8,
+                            right: design::scale::space::SP5 as i8,
+                            top: design::scale::space::SP2 as i8,
+                            bottom: design::scale::space::SP2 as i8,
                         }),
                 )
                 .show(ui, |ui| {
+                    self.panel_composer_rect = Some(ui.max_rect());
                     if let Some(d) = detail.clone() {
                         let max_h = ui.available_height();
                         egui::ScrollArea::vertical()
@@ -1268,12 +1309,10 @@ impl InboxPage {
                             .max_height(max_h)
                             .auto_shrink([false, true])
                             .show(ui, |ui| {
-                                // UXG-1-2: the composer card rides the same
-                                // reading measure as the thread above it —
-                                // on 2K/4K/8K panes both hold at 860px and
-                                // center on the same edges, instead of the
-                                // editor stretching into a multi-thousand-
-                                // pixel single line.
+                                // The composer card rides the same reading
+                                // measure as the thread above it — on
+                                // 2K/4K/8K panes both hold and center on
+                                // the same edges.
                                 design::centered_column(ui, design::scale::READER_MEASURE, |ui| {
                                     self.composer_pane_ui(ui, db, bus, &d);
                                 });
@@ -1281,21 +1320,40 @@ impl InboxPage {
                     }
                 });
         }
+        if copilot_docked {
+            egui::Panel::right("inbox-copilot")
+                .exact_size(inbox_geo::COPILOT_W)
+                .resizable(false)
+                .show_separator_line(true)
+                .frame(
+                    egui::Frame::new()
+                        .fill(t.sidebar)
+                        .inner_margin(egui::Margin::symmetric(
+                            design::scale::space::SP3 as i8,
+                            design::scale::space::SP3 as i8,
+                        )),
+                )
+                .show(ui, |ui| {
+                    self.panel_copilot_rect = Some(ui.max_rect());
+                    self.copilot_pane_ui(ui, db, detail.as_ref());
+                });
+        }
         egui::CentralPanel::default()
             .frame(
                 egui::Frame::new()
                     .fill(egui::Color32::TRANSPARENT)
                     .inner_margin(egui::Margin {
-                        left: 22,
-                        right: 22,
+                        left: design::scale::space::SP5 as i8,
+                        right: design::scale::space::SP5 as i8,
                         top: 0,
                         bottom: 0,
                     }),
             )
             .show(ui, |ui| {
+                self.panel_reader_rect = Some(ui.max_rect());
                 if self.copilot_open && !copilot_docked {
-                    // UXE-1-4 narrow mode: the copilot swaps in over the
-                    // reader — never a crushed half-thread.
+                    // Narrow mode: the copilot swaps in over the reader —
+                    // never a crushed half-thread.
                     self.copilot_pane_ui(ui, db, detail.as_ref());
                 } else {
                     // UXG-1-2: the reader content (head, action bar,
@@ -1470,6 +1528,9 @@ impl InboxPage {
         );
 
         ui.horizontal(|ui| {
+            // AUD-S3: two coherent clusters — the filter pair (Filters /
+            // Reset) reads as ONE left group instead of a lone label
+            // mid-row; the sync action owns the right edge.
             if design::button(
                 ui,
                 if self.show_filters {
@@ -1482,6 +1543,20 @@ impl InboxPage {
             .clicked()
             {
                 self.show_filters = !self.show_filters;
+            }
+            if design::button(ui, "Reset", ButtonVariant::Ghost)
+                .on_hover_text("clear every filter and reload")
+                .clicked()
+            {
+                self.bar = FilterBar::default();
+                self.view_pick = ViewFilter::All;
+                self.mailbox_pick = None;
+                self.channel_pick = None;
+                self.tag_pick = None;
+                self.search_edit.clear();
+                self.number_edit.clear();
+                self.page = 0;
+                self.reload_list(db);
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let syncing = engine.is_some_and(|e| e.is_running());
@@ -1511,20 +1586,6 @@ impl InboxPage {
                     } else {
                         self.set_status_message("Syncing…", false);
                     }
-                }
-                if design::button(ui, "Reset", ButtonVariant::Ghost)
-                    .on_hover_text("clear every filter and reload")
-                    .clicked()
-                {
-                    self.bar = FilterBar::default();
-                    self.view_pick = ViewFilter::All;
-                    self.mailbox_pick = None;
-                    self.channel_pick = None;
-                    self.tag_pick = None;
-                    self.search_edit.clear();
-                    self.number_edit.clear();
-                    self.page = 0;
-                    self.reload_list(db);
                 }
             });
         });
@@ -1565,7 +1626,7 @@ impl InboxPage {
                     let response = egui::Frame::new()
                         .fill(fill)
                         .corner_radius(egui::CornerRadius::same(8))
-                        .inner_margin(egui::Margin::same(10))
+                        .inner_margin(egui::Margin::same(design::scale::space::SP3 as i8))
                         .show(ui, |ui| {
                             ui.set_width(ui.available_width());
                             ui.horizontal(|ui| {
@@ -1577,7 +1638,7 @@ impl InboxPage {
                                                 .unwrap_or("(no customer)"),
                                         )
                                         .size(design::scale::text::CONTROL)
-                                        .strong(),
+                                        .color(t.muted_foreground),
                                     )
                                     .truncate(),
                                 );
@@ -1597,16 +1658,19 @@ impl InboxPage {
                                     },
                                 );
                             });
-                            // UX-27: a breath between the three lines of the
-                            // row — the sender-name line used to jam against
-                            // the subject with zero leading. SP1 (the smallest
-                            // scale step) keeps the rows airy without
-                            // bloating the list.
+                            // AUD-H1: the subject is the PRIMARY line —
+                            // CONTROL strong foreground — and the sender
+                            // line above it is quiet metadata (muted,
+                            // not strong). The old inversion (strong
+                            // sender, weak subject) made every row read
+                            // at one flat weight: the owner's
+                            // "unprofessional inbox".
                             ui.add_space(design::scale::space::SP1);
                             ui.add(
                                 egui::Label::new(
                                     egui::RichText::new(&subject)
-                                        .size(design::scale::text::SMALL)
+                                        .size(design::scale::text::CONTROL)
+                                        .strong()
                                         .color(t.foreground),
                                 )
                                 .truncate(),
@@ -1767,15 +1831,6 @@ impl InboxPage {
     }
 
     fn reader_head_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle, detail: &ConversationDetail) {
-        let name = detail
-            .customer_name
-            .clone()
-            .unwrap_or_else(|| "customer".into());
-        let initials: String = name
-            .split_whitespace()
-            .filter_map(|w| w.chars().next())
-            .take(2)
-            .collect();
         let subject = format!(
             "#{}  {}",
             detail.number,
@@ -1798,19 +1853,13 @@ impl InboxPage {
             detail.priority.as_deref().unwrap_or("none"),
         );
         let t = design::tokens(ui);
-        // UXE-1-6: `Sides::shrink_left` lays the action cluster out first
-        // (anchored right) and gives the subject/meta block the bounded
-        // remainder — the old left-to-right row let a long subject push
-        // the cluster off the edge at narrow widths.
+        // AUD-S6: no avatar in the reader head — the subject block and
+        // the cards below it share the column's left edge (the old avatar
+        // row pushed the title off the grid); customer identity rides
+        // the meta line, the HelpScout register.
         let head = egui::containers::Sides::new().shrink_left().show(
             ui,
             |ui| {
-                design::avatar(
-                    ui,
-                    AvatarSize::Lg,
-                    &initials.to_uppercase(),
-                    BadgeTone::Neutral,
-                );
                 ui.vertical(|ui| {
                     ui.add(
                         egui::Label::new(
@@ -1871,15 +1920,27 @@ impl InboxPage {
         bus: &EventBus,
         detail: &ConversationDetail,
     ) {
-        design::card(ui, |ui| {
-            // UXE-1-6: the toolbar is two explicit rows — Status (segmented
-            // control) over Assignee (styled select + Assign) — replacing
-            // the old stacked rows with `status:`/`assign:` lowercase
-            // labels. egui cannot wrap opaque nested groups reliably, so
-            // the rows are explicit: deterministic at every width, and
-            // each label stays adjacent to its control.
+        // AUD-S2/S8/H2: the properties card is one titled, rhythm-locked
+        // form — a 64px label column shared by every row (controls start
+        // on ONE left edge, not staggered by label width), SP2 between
+        // rows, and a titled header instead of eight bare lowercase
+        // segmented rows that read as a debug panel.
+        design::card_titled(ui, "Conversation", None, |ui| {
+            // UXE-1-6: the toolbar is explicit rows — deterministic at
+            // every width, and each label stays adjacent to its control.
+            fn row_label(ui: &mut egui::Ui, text: &str) {
+                ui.allocate_ui(egui::vec2(64.0, 28.0), |ui| {
+                    ui.vertical(|ui| {
+                        ui.label(
+                            egui::RichText::new(text)
+                                .size(design::scale::text::SMALL)
+                                .color(design::tokens(ui).muted_foreground),
+                        );
+                    });
+                });
+            }
             ui.horizontal(|ui| {
-                design::field_label(ui, "Status");
+                row_label(ui, "Status");
                 let statuses = ["active", "pending", "closed", "spam"];
                 let active_idx = statuses
                     .iter()
@@ -1890,9 +1951,9 @@ impl InboxPage {
                     self.change_status(db, bus, status);
                 }
             });
-            ui.add_space(design::scale::space::SP1);
+            ui.add_space(design::scale::space::SP2);
             ui.horizontal(|ui| {
-                design::field_label(ui, "Assignee");
+                row_label(ui, "Assignee");
                 let assign_label: String = detail
                     .assignee_name
                     .clone()
@@ -1913,14 +1974,14 @@ impl InboxPage {
                     self.assign(db, bus, self.assign_pick);
                 }
             });
-            ui.add_space(design::scale::space::SP1);
+            ui.add_space(design::scale::space::SP2);
             // AUD-P0-10 (A3): the priority edit control — the local
             // (SupportOS) priority, written through ticket_ops and recorded
             // in ticket_state_transitions. No segment is highlighted while
             // the priority is unset (the reader header shows "Priority:
             // none"); it is not pushed to Help Scout.
             ui.horizontal(|ui| {
-                design::field_label(ui, "Priority");
+                row_label(ui, "Priority");
                 let priorities = ["low", "normal", "high", "urgent"];
                 let active_idx = priorities
                     .iter()
@@ -1933,7 +1994,7 @@ impl InboxPage {
                     self.set_priority(db, bus, priorities[i]);
                 }
             });
-            ui.add_space(design::scale::space::SP1);
+            ui.add_space(design::scale::space::SP2);
             // AUD-P2-19 (B4): the local workflow state control — the six
             // built-in states of `ticket_states`, written through the
             // existing `TicketOperation::SetTicketState` lane (supportos_state
@@ -1943,7 +2004,7 @@ impl InboxPage {
             // Priority row above. Pre-fix the operation existed in core
             // with no caller anywhere — built, never reachable.
             ui.horizontal(|ui| {
-                design::field_label(ui, "State");
+                row_label(ui, "State");
                 let states = spp_core::ticket_states::TICKET_WORKFLOW_STATES;
                 let active_idx = states
                     .iter()
@@ -1955,13 +2016,13 @@ impl InboxPage {
                     self.set_workflow_state(db, bus, states[i]);
                 }
             });
-            ui.add_space(design::scale::space::SP1);
+            ui.add_space(design::scale::space::SP2);
             // AUD-P1-4 (C5): the tag editor — current tags are removable
             // chips, new tags land in the same full-list replace the
             // provider models (local mirror write + the "update_tags"
             // outbound lane automation already uses).
             ui.horizontal(|ui| {
-                design::field_label(ui, "Tags");
+                row_label(ui, "Tags");
                 for tag in &detail.tags {
                     if design::chip(ui, false, tag.as_str())
                         .on_hover_text("click to remove this tag")
@@ -2000,12 +2061,12 @@ impl InboxPage {
                     }
                 }
             });
-            ui.add_space(design::scale::space::SP1);
+            ui.add_space(design::scale::space::SP2);
             // AUD-P1-4 (C5): the snooze control — core had the provider
             // calls and the local column; the presets ride the new
             // "snooze"/"unsnooze" outbound jobs.
             ui.horizontal(|ui| {
-                design::field_label(ui, "Snooze");
+                row_label(ui, "Snooze");
                 if let Some(until) = detail.snoozed_until.as_deref() {
                     design::badge(ui, until, BadgeTone::Warning)
                         .on_hover_text("snoozed until this moment (Help Scout)");
@@ -2036,6 +2097,9 @@ impl InboxPage {
                     }
                 }
             });
+            // AUD-S2: a bottom inset — the last row never sits flush
+            // against the card's bottom border.
+            ui.add_space(design::scale::space::SP2);
             self.expire_status_message();
             if let Some(msg) = &self.status_message {
                 if self.status_is_error {
@@ -2149,26 +2213,28 @@ impl InboxPage {
         db: &DbHandle,
         detail: Option<&ConversationDetail>,
     ) {
+        // AUD-L2/S4: one header row — icon + title left, close right —
+        // and the "local" nature as ONE quiet caption line under it. The
+        // old header packed the title, a Local badge, and the X button
+        // into a single row that collided at panel widths; the nature is
+        // no longer stated twice (badge + caption).
         ui.horizontal(|ui| {
             Icon::Sparkles.show(ui, 14.0, design::tokens(ui).ai);
-            ui.vertical(|ui| {
-                ui.label(
-                    egui::RichText::new("Copilot")
-                        .size(design::scale::text::CONTROL)
-                        .strong(),
-                );
-                design::hint_text(ui, "local · no configuration needed");
-            });
+            ui.label(
+                egui::RichText::new("Copilot")
+                    .size(design::scale::text::CONTROL)
+                    .strong(),
+            );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if design::icon_button(ui, Icon::X, ButtonVariant::Ghost, "close the copilot panel")
                     .clicked()
                 {
                     self.copilot_open = false;
                 }
-                // UXE-1-8: the "local" nature is a badge, not prose.
-                design::badge(ui, "Local", design::BadgeTone::Neutral);
             });
         });
+        design::hint_text(ui, "local · no configuration needed");
+        ui.add_space(design::scale::space::SP2);
         let Some(detail) = detail else {
             design::hint_text(
                 ui,
@@ -2191,6 +2257,9 @@ impl InboxPage {
                 let a = &report.analysis;
 
                 design::card_titled(ui, "Signals", None, |ui| {
+                    // AUD-S5: sentiment lives in the READER's triage row —
+                    // one placement per fact; this card keeps intent,
+                    // urgency, and escalation risk.
                     ui.horizontal_wrapped(|ui| {
                         design::badge(ui, &a.intent, design::BadgeTone::Info);
                         let urgency_tone = match a.urgency.as_str() {
@@ -2199,16 +2268,6 @@ impl InboxPage {
                             _ => design::BadgeTone::Neutral,
                         };
                         design::badge(ui, &format!("urgency: {}", a.urgency), urgency_tone);
-                        let sentiment_tone = match a.sentiment.as_str() {
-                            "negative" => design::BadgeTone::Warning,
-                            "positive" => design::BadgeTone::Success,
-                            _ => design::BadgeTone::Neutral,
-                        };
-                        design::badge(
-                            ui,
-                            &format!("sentiment: {}", a.sentiment),
-                            sentiment_tone,
-                        );
                         if a.escalation {
                             design::badge(
                                 ui,
@@ -2927,9 +2986,10 @@ impl InboxPage {
         self.composer_bcc = bcc;
         self.translate_lang = translate_lang;
         self.composer_focused = state.focused;
-        // UXE-1-7: feed the measured card height (plus the panel margins)
-        // back for the next frame's exact panel height.
-        self.composer_panel_h = Some(ui.min_rect().height() + 18.0);
+        // AUD-V2: the measured card height plus the panel's vertical
+        // frame margins (SP2 top + SP2 bottom) feeds the next frame's
+        // exact panel height — token-derived, not a magic 18.
+        self.composer_panel_h = Some(ui.min_rect().height() + 2.0 * design::scale::space::SP2);
         if let Some(caret) = state.caret {
             self.mention_caret = char_index_to_byte(&state.draft, caret);
         }
@@ -3291,6 +3351,31 @@ impl InboxPage {
     }
 }
 
+/// AUD-V2: the measured composition of the last frame — the geometry
+/// suite (kittest_inbox_page::aud_geo_*) reads these live rects to
+/// assert the inbox composition contracts on every monitor class.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct InboxPanelGeometry {
+    pub rail: Option<egui::Rect>,
+    pub list: Option<egui::Rect>,
+    pub copilot: Option<egui::Rect>,
+    pub composer: Option<egui::Rect>,
+    pub reader: Option<egui::Rect>,
+}
+
+impl InboxPage {
+    /// The exact rects the five inbox panels occupied on the last frame.
+    pub fn panel_geometry(&self) -> InboxPanelGeometry {
+        InboxPanelGeometry {
+            rail: self.panel_rail_rect,
+            list: self.panel_list_rect,
+            copilot: self.panel_copilot_rect,
+            composer: self.panel_composer_rect,
+            reader: self.panel_reader_rect,
+        }
+    }
+}
+
 impl Default for InboxPage {
     fn default() -> Self {
         Self::new()
@@ -3306,11 +3391,13 @@ fn truncate_chars(s: &str, max: usize) -> String {
     }
 }
 
-/// UXE-1-7: composer recipient rows — a fixed 28px label column so the
-/// To/Cc/Bcc rows align on one left edge (the mail-client layout).
+/// UXE-1-7/AUD-S1: composer recipient rows — one fixed label column
+/// and ONE field treatment: every row is a bordered 28px field on the
+/// same left grid (the static To row renders as a read-only field, not
+/// a floating label — three rows, three treatments was the defect).
 fn recipient_label(ui: &mut egui::Ui, text: &str) {
     ui.vertical(|ui| {
-        ui.set_min_width(28.0);
+        ui.set_min_width(34.0);
         ui.label(
             egui::RichText::new(text)
                 .size(design::scale::text::SMALL)
@@ -3320,24 +3407,41 @@ fn recipient_label(ui: &mut egui::Ui, text: &str) {
 }
 
 fn recipient_row_static(ui: &mut egui::Ui, label: &str, value: &str) {
+    let t = design::tokens(ui);
     ui.horizontal(|ui| {
         recipient_label(ui, label);
-        ui.add(
-            egui::Label::new(
-                egui::RichText::new(value)
-                    .size(design::scale::text::SMALL)
-                    .color(design::tokens(ui).foreground),
-            )
-            .truncate(),
-        );
+        let w = ui.available_width();
+        ui.allocate_ui(egui::vec2(w, 28.0), |ui| {
+            egui::Frame::new()
+                .fill(egui::Color32::TRANSPARENT)
+                .stroke(egui::Stroke::new(1.0, t.border))
+                .corner_radius(egui::CornerRadius::same(6))
+                .inner_margin(egui::Margin::symmetric(
+                    design::scale::space::CLUSTER as i8,
+                    0,
+                ))
+                .show(ui, |ui| {
+                    ui.centered_and_justified(|ui| {
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(value)
+                                    .size(design::scale::text::SMALL)
+                                    .color(t.foreground),
+                            )
+                            .truncate(),
+                        );
+                    });
+                });
+        });
     });
 }
 
 fn recipient_row_input(ui: &mut egui::Ui, label: &str, buf: &mut String) {
     ui.horizontal(|ui| {
         recipient_label(ui, label);
+        let w = ui.available_width();
         ui.add_sized(
-            [ui.available_width(), 28.0],
+            [w, 28.0],
             egui::TextEdit::singleline(buf).hint_text("comma-separated emails"),
         );
     });

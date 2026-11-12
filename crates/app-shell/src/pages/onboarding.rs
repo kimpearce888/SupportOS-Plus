@@ -194,14 +194,21 @@ impl OnboardingPage {
                 self.complete(db);
             }
         });
-        if !status.completed {
-            design::hint_text(ui, "Onboarding is not marked complete yet.");
-        }
-        if !status.hs_configured {
-            design::hint_text(
-                ui,
-                "No Help Scout credentials yet — add them in Settings → Help Scout first.",
-            );
+        // AUD-H6: the two status lines land in ONE quiet card — grouped,
+        // padded, and inset from the page edge instead of two bare lines
+        // flush against the fold.
+        if !status.completed || !status.hs_configured {
+            design::card(ui, |ui| {
+                if !status.completed {
+                    design::hint_text(ui, "Onboarding is not marked complete yet.");
+                }
+                if !status.hs_configured {
+                    design::hint_text(
+                        ui,
+                        "No Help Scout credentials yet — add them in Settings → Help Scout first.",
+                    );
+                }
+            });
         }
     }
 }

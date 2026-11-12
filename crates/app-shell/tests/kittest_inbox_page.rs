@@ -2,6 +2,7 @@
 
 use eframe::egui;
 use egui_kittest::Harness;
+use egui_kittest::kittest::Queryable;
 use spp_core::db::DbHandle;
 use spp_core::event_bus::EventBus;
 use spp_shell::design;
@@ -269,7 +270,23 @@ fn render_inbox_page(dark: bool, width: f32, name: &str) {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                s.page.ui(ui, &s.db, &s.bus, None);
+                // AUD-V1 (register V1): the golden renders through the
+                // PRODUCTION host wrapper — CentralPanel + fill + the
+                // SP5/14 inset app/mod.rs applies — so the drift gate
+                // finally gates the look the user sees. Bare-ui renders
+                // certified a synthetic composition.
+                egui::CentralPanel::default()
+                    .frame(
+                        egui::Frame::new()
+                            .fill(design::tokens(ui).background)
+                            .inner_margin(egui::Margin::symmetric(
+                                design::scale::space::SP5 as i8,
+                                14,
+                            )),
+                    )
+                    .show(ui, |ui| {
+                        s.page.ui(ui, &s.db, &s.bus, None);
+                    });
             },
             InboxPageState {
                 installed: false,
@@ -348,7 +365,23 @@ fn render_inbox_page_overflow(dark: bool, width: f32, name: &str) {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                s.page.ui(ui, &s.db, &s.bus, None);
+                // AUD-V1 (register V1): the golden renders through the
+                // PRODUCTION host wrapper — CentralPanel + fill + the
+                // SP5/14 inset app/mod.rs applies — so the drift gate
+                // finally gates the look the user sees. Bare-ui renders
+                // certified a synthetic composition.
+                egui::CentralPanel::default()
+                    .frame(
+                        egui::Frame::new()
+                            .fill(design::tokens(ui).background)
+                            .inner_margin(egui::Margin::symmetric(
+                                design::scale::space::SP5 as i8,
+                                14,
+                            )),
+                    )
+                    .show(ui, |ui| {
+                        s.page.ui(ui, &s.db, &s.bus, None);
+                    });
             },
             InboxPageState {
                 installed: false,
@@ -394,4 +427,211 @@ fn r3_inbox_page_1024_dark() {
 #[test]
 fn r3_inbox_page_800_dark() {
     render_inbox_page(true, 800.0, "r3_inbox_page_800_dark");
+}
+
+// ---------------------------------------------------------------------------
+// AUD-L1/V3: composition geometry invariants — the owner's complaint,
+// turned into hard assertions on the LIVE panel rects at every monitor
+// class. These are the tests the old battery never had: the goldens
+// compared pixels, nothing asserted that panels respect each other's
+// bounds. The rects come from InboxPage::panel_geometry (recorded each
+// frame inside the panel closures).
+//
+// Contracts (register L1/V3):
+//   G1  no sibling column overlaps (rail | list | reader | copilot)
+//   G2  when the copilot is docked and a conversation is selected, the
+//       copilot column ENDS at the composer's top edge — the sidebar
+//       never runs beneath the reply strip
+//   G3  the composer spans the reader+copilot zone (shared right edge
+//       with the copilot, left edge with the reader)
+//   G4  the reader never renders below READER_FLOOR while the copilot
+//       is docked
+//   G5  the composer height stays within its declared bounds
+// ---------------------------------------------------------------------------
+
+use std::sync::Arc;
+use std::sync::Mutex;
+
+use spp_shell::pages::inbox::InboxPanelGeometry;
+use spp_shell::pages::inbox::inbox_geo;
+
+const EPS: f32 = 0.75;
+
+fn rects_disjoint(a: egui::Rect, b: egui::Rect) -> bool {
+    let separate = a.max.x <= b.min.x + EPS
+        || b.max.x <= a.min.x + EPS
+        || a.max.y <= b.min.y + EPS
+        || b.max.y <= a.min.y + EPS;
+    let overlap_area = a.intersect(b).area();
+    separate && overlap_area < 1.0
+}
+
+fn assert_composition(w: f32, g: &InboxPanelGeometry) {
+    // G1: the columns never overlap each other.
+    if let (Some(rail), Some(list)) = (g.rail, g.list) {
+        assert!(rects_disjoint(rail, list), "{w}px: rail overlaps list");
+    }
+    if let (Some(list), Some(reader)) = (g.list, g.reader) {
+        assert!(
+            rects_disjoint(list, reader),
+            "{w}px: list overlaps reader — list right {}, reader left {}",
+            list.max.x,
+            reader.min.x
+        );
+    }
+    if let (Some(copilot), Some(reader)) = (g.copilot, g.reader) {
+        assert!(
+            rects_disjoint(copilot, reader),
+            "{w}px: copilot overlaps reader"
+        );
+    }
+    if let (Some(composer), Some(list)) = (g.composer, g.list) {
+        assert!(
+            rects_disjoint(composer, list),
+            "{w}px: composer intrudes into the list column"
+        );
+    }
+    // The reader always sits fully above the composer.
+    if let (Some(reader), Some(composer)) = (g.reader, g.composer) {
+        assert!(
+            reader.max.y <= composer.min.y + EPS,
+            "{w}px: reader runs beneath the composer (reader bottom {}, composer top {})",
+            reader.max.y,
+            composer.min.y
+        );
+    }
+    if let (Some(copilot), Some(composer), Some(reader)) = (g.copilot, g.composer, g.reader) {
+        // The recorded rects are the panels' INNER uis (post-inset); the
+        // composition contracts compare the true PANEL edges, restoring
+        // the insets first (SP3 copilot / SP2 composer / SP5 composer-x).
+        let cop_bottom_edge = copilot.max.y + inbox_geo::COPILOT_INSET;
+        let comp_top_edge = composer.min.y - inbox_geo::COMPOSER_TOP_INSET;
+        // G2: the copilot column ENDS at the composer's top edge — the
+        // exact register L1 demands (no sidebar beneath the reply).
+        assert!(
+            (cop_bottom_edge - comp_top_edge).abs() <= 1.5,
+            "{w}px: L1 REGRESSION — the sidebar does not end at the reply's \
+             top edge (copilot bottom edge {}, composer top edge {})",
+            cop_bottom_edge,
+            comp_top_edge
+        );
+        // G3: the composer spans the reader+copilot zone — both columns
+        // share the SAME right panel edge.
+        let comp_right_edge = composer.max.x + inbox_geo::COMPOSER_X_INSET;
+        let cop_right_edge = copilot.max.x + inbox_geo::COPILOT_INSET;
+        assert!(
+            (comp_right_edge - cop_right_edge).abs() <= 1.5,
+            "{w}px: composer does not span under the copilot (composer \
+             right edge {}, copilot right edge {})",
+            comp_right_edge,
+            cop_right_edge
+        );
+        // G4: the reader keeps its floor while the copilot is docked.
+        assert!(
+            reader.width() >= inbox_geo::READER_FLOOR - EPS,
+            "{w}px: reader collapsed below the floor ({}px)",
+            reader.width()
+        );
+    }
+    // G5: composer height bounds.
+    if let Some(composer) = g.composer {
+        assert!(
+            composer.height() >= inbox_geo::COMPOSER_MIN_H - EPS,
+            "{w}px: composer sliver ({})",
+            composer.height()
+        );
+    }
+    // When the copilot is docked, its PANEL width (inner + insets, the
+    // separator stroke may eat a pixel) is the declared panel width.
+    if let Some(copilot) = g.copilot {
+        assert!(
+            (copilot.width() + 2.0 * inbox_geo::COPILOT_INSET - inbox_geo::COPILOT_W).abs() <= 2.0,
+            "{w}px: copilot panel width {} drifts from the declared {}",
+            copilot.width() + 2.0 * inbox_geo::COPILOT_INSET,
+            inbox_geo::COPILOT_W
+        );
+    }
+}
+
+fn run_geometry(width: f32, open_copilot: bool) -> InboxPanelGeometry {
+    let (page, db, bus) = seeded_page();
+    let geo_out: Arc<Mutex<InboxPanelGeometry>> = Arc::new(Mutex::new(Default::default()));
+    let sink = geo_out.clone();
+    let mut h = Harness::builder()
+        .with_size(egui::vec2(width, 900.0))
+        .with_theme(egui::Theme::Light)
+        .build_ui_state(
+            move |ui, s| {
+                if !s.installed {
+                    design::install(ui.ctx());
+                    s.installed = true;
+                }
+                // The production host wrapper (AUD-V1).
+                egui::CentralPanel::default()
+                    .frame(
+                        egui::Frame::new()
+                            .fill(design::tokens(ui).background)
+                            .inner_margin(egui::Margin::symmetric(
+                                design::scale::space::SP5 as i8,
+                                14,
+                            )),
+                    )
+                    .show(ui, |ui| {
+                        s.page.ui(ui, &s.db, &s.bus, None);
+                    });
+                *sink.lock().unwrap() = s.page.panel_geometry();
+            },
+            InboxPageState {
+                installed: false,
+                page,
+                db,
+                bus,
+            },
+        );
+    h.run_ok();
+    if open_copilot {
+        h.get_by_label("Copilot").click();
+        // settle: the composer measurement + panel re-allocation need a
+        // couple of frames after the copilot docks.
+        h.run_ok();
+        h.run_ok();
+        h.run_ok();
+    } else {
+        h.run_ok();
+        h.run_ok();
+    }
+    *geo_out.lock().unwrap()
+}
+
+#[test]
+fn aud_geo_composition_copilot_closed_all_monitor_classes() {
+    for width in [800.0, 1024.0, 1280.0, 1440.0, 1920.0, 2560.0] {
+        let g = run_geometry(width, false);
+        assert!(g.reader.is_some(), "{width}px: no reader rect");
+        assert!(g.composer.is_some(), "{width}px: no composer rect");
+        assert!(g.copilot.is_none(), "{width}px: copilot must not be docked");
+        assert_composition(width, &g);
+    }
+}
+
+#[test]
+fn aud_geo_composition_copilot_docked_wide_monitors() {
+    for width in [1440.0, 1625.0, 1920.0, 2560.0] {
+        let g = run_geometry(width, true);
+        assert!(g.copilot.is_some(), "{width}px: copilot should dock here");
+        assert!(g.composer.is_some(), "{width}px: no composer rect");
+        assert_composition(width, &g);
+    }
+}
+
+#[test]
+fn aud_geo_composition_copilot_narrow_small_monitors() {
+    for width in [800.0, 1024.0] {
+        let g = run_geometry(width, true);
+        // Narrow mode: the copilot swaps in over the reader — no docked
+        // copilot column, and the composer steps aside with the reader.
+        assert!(g.copilot.is_none(), "{width}px: copilot must not dock");
+        assert!(g.composer.is_none(), "{width}px: composer must step aside");
+        assert!(g.reader.is_some(), "{width}px: no reader rect");
+    }
 }

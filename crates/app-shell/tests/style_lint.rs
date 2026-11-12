@@ -117,6 +117,38 @@ fn numeric_arg(line: &str, marker: &str) -> Vec<i64> {
     out
 }
 
+/// AUD-V2 (register V2): the pages-level margin token gate — inside
+/// `src/pages/`, widget margins must reference the spacing scale (the
+/// token expressions carry no digits); a numeric margin literal is a
+/// violation unless the line carries `style-lint:allow`. The design
+/// factory (`src/design/`) defines the tokens and stays exempt.
+fn lint_page_margins(file: &Path, rel: &str, lines: &[&str], violations: &mut Vec<Finding>) {
+    if !rel.replace('\\', "/").starts_with("src/pages/") {
+        return;
+    }
+    let skip = test_region_lines(lines);
+    for (idx, line) in lines.iter().enumerate() {
+        if skip[idx] || line.contains("style-lint:allow") {
+            continue;
+        }
+        if !line.contains("Margin") {
+            continue;
+        }
+        // Token references (design::scale::space::*) carry no digits; a
+        // numeric literal anywhere in a Margin line is the tell.
+        if line.chars().any(|c| c.is_ascii_digit() && c != '0') && !line.contains("scale::space") {
+            violations.push(Finding(
+                rel.to_string(),
+                idx + 1,
+                format!(
+                    "numeric Margin literal in pages/ — use design::scale::space tokens: {line}"
+                ),
+            ));
+        }
+        let _ = file;
+    }
+}
+
 fn lint_spacing(_file: &Path, rel: &str, lines: &[&str], violations: &mut Vec<Finding>) {
     for (idx, line) in lines.iter().enumerate() {
         if line.contains("style-lint:allow") {
@@ -167,6 +199,7 @@ fn run_lint() -> Result<(), BTreeMap<String, Vec<String>>> {
         let lines: Vec<&str> = text.lines().collect();
         lint_colors(path, &rel, &lines, &mut violations);
         lint_spacing(path, &rel, &lines, &mut violations);
+        lint_page_margins(path, &rel, &lines, &mut violations);
     }
 
     if violations.is_empty() {

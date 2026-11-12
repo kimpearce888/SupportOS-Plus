@@ -289,7 +289,7 @@ fn render_dashboard_page_capped(dark: bool, width: f32, name: &str) {
                 let bg = design::tokens(ui).background;
                 egui::CentralPanel::default()
                     .frame(egui::Frame::new().fill(bg))
-                    .show_inside(ui, |ui| {
+                    .show(ui, |ui| {
                         design::content_column(ui, |ui| {
                             egui::Frame::new()
                                 .fill(egui::Color32::TRANSPARENT)
