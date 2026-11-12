@@ -502,11 +502,6 @@ pub fn latest_ai_draft_row(
     conversation_local_id: i64,
 ) -> Option<(i64, String, String)> {
     conn.query_row(
-        // AUD-P0-3 (A4): discarded drafts (state 'rejected') must not be
-        // re-offered — the pre-fix query had no state filter, so after
-        // "Discard draft" the same rejected draft re-rendered in the
-        // copilot card and could be re-inserted. `IS NOT` keeps rows with
-        // a NULL state (legacy rows) selectable.
         "SELECT id, content, model FROM ai_drafts
           WHERE conversation_id = ?1 AND state IS NOT 'rejected'
           ORDER BY id DESC LIMIT 1",
@@ -732,9 +727,6 @@ mod audp0_tests {
         conn.last_insert_rowid()
     }
 
-    // AUD-P0-3 (A4): a discarded (rejected) draft must not come back as the
-    // latest draft — the pre-fix query had no state filter, so "Discard
-    // draft" appeared not to work and the rejected text could be re-inserted.
     #[test]
     fn a_rejected_draft_is_not_re_offered() {
         let db = db();

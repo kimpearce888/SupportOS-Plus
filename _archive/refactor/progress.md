@@ -7,9 +7,12 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 
 ## CURRENT POINTER
 
-- Next task: **R1.2 — core/ai_* strip** (~13 files; see `plan.md` §7 R1.2).
-- Pre-flight: confirm CI green on the session-2 head (run id in session log).
-- Session counter: 2 completed (R1.0 + R1.1 done).
+- Next task: **R1.3 — core/sync+workers strip** (`sync_engine/ workers/
+  connectors.rs loopback.rs it_loopback.rs it_sync.rs api_queue.rs jobs.rs
+  event_bus.rs events.rs provider_handle.rs`; see `plan.md` §7 R1.3).
+- Pre-flight: confirm CI green on the session-2 final head (run id in
+  session log).
+- Session counter: 2 completed (R1.0 + R1.1 + R1.2 — see log).
 - Environment: toolchain installed this session; target/ warm but disk-tight
   (see gotcha G-05 — delete target/debug/incremental when links bus-error).
 
@@ -19,8 +22,8 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 |---|---|---|
 | R0 pipeline alignment | terminal (session 1) | CI run#301 green — see `complete.md` |
 | R1.0 strip-comments tool | done (session 2) | lexer + 38 edge tests + --check mode; full battery green; commit 88e1770 |
-| R1.1 catalog+xtask strip | done (session 2) | 59 comment lines removed (catalog was already comment-free: 0 of 8 files); subset --check clean; commit pending CI |
-| R1.2 core/ai_* strip | pending | ~13 files |
+| R1.1 catalog+xtask strip | done (session 2) | 59 comment lines removed (catalog was already comment-free: 0 of 8 files); subset --check clean; CI run#303 green |
+| R1.2 core/ai_* strip | done (session 2) | 90 comment lines removed across 7 of 15 files; cumulative subset check clean (28/28); battery green; CI pending |
 | R1.3 core/sync+workers strip | pending | |
 | R1.4 core/helpscout strip | pending | |
 | R1.5 core/storage+config strip | pending | includes audit.rs — see invariant 7 |
@@ -56,8 +59,16 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 - R1.1 executed: catalog is ALREADY comment-free (0 lines across 8 files —
   plan batch was sized from the session-1 aggregate numbers); xtask had 59
   lines in package.rs (56) + bin/xtask.rs (3). Subset --check green (13/13).
-- Commits: `88e1770` (R1.0), R1.1 (this session's second commit).
-- CI: `<fill: run id + conclusion>`.
+- Commits: `88e1770` (R1.0), `6362842` (R1.1).
+- CI: run#303 (id 43269465470) — completed / success on `6362842`
+  (R1.0 + R1.1 CI-verified).
+- R1.2 executed (same session, time allowed): 90 comment lines removed from
+  7 of 15 core/ai_* files (ai_center 17, ai_lm_studio 33, ai_evidence 13,
+  ai_hub 10, ai_local 8, ai_pipeline/mod 6, ai_prompts 3; ai_attributes,
+  ai_tools, ai_eval, ai_memory_guard, ai_provider were already clean).
+  Full battery green: gate, fmt, clippy x2, tests x2 (293+2+520+56,
+  528 sandbox), verify-icons, cumulative subset --check 28/28.
+  Disk discipline applied (G-05: freed incremental before sandbox link).
 
 ### Session 1 — 2026-11-12
 - Research: full metrics snapshot (plan §6); read the no-simulation gate

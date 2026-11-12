@@ -65,13 +65,6 @@ pub struct OpenAiCompatibleClient {
     base_url: String,
     http: reqwest::Client,
     api_key: Option<String>,
-    /// AUD-P2-2 (A8): the configured request budget, re-applied on
-    /// every outbound request. The client-level builder timeout stays
-    /// the first line of defense, but a builder failure used to fall
-    /// back to `Client::default()` — silently losing the timeout (and
-    /// reqwest's `Client::default()` is itself a `build().expect`, so a
-    /// broken TLS backend panicked there). Per-request timeouts make
-    /// the guarantee independent of which client got built.
     request_timeout: Duration,
 }
 
@@ -192,21 +185,6 @@ impl OpenAiCompatibleClient {
             temperature: opts.temperature,
             max_tokens: opts.max_tokens,
             response_format: if opts.json_mode {
-                // UXF-2-1: LM Studio rejects OpenAI's legacy
-                // `{"type":"json_object"}` with HTTP 400 ("response_format.type'
-                // must be 'json_schema' or 'text'") — every failing
-                // golden_eval / ticket_analysis run in the owner's
-                // screenshot report died on exactly this. The portable
-                // form is `json_schema` with a permissive object schema:
-                // every json_mode caller wants "a JSON object, shape up
-                // to the model", which `{"type":"object"}` expresses
-                // without pinning properties. `strict` is deliberately
-                // omitted — LM Studio accepts the schema either way (the
-                // grammar allows any object), and OpenAI-compatible
-                // cloud endpoints treat an unset strict as hint-mode, so
-                // one payload works across LM Studio, Ollama and BYOK.
-                // The response side already tolerates fenced/free-form
-                // output via `extract_json`.
                 Some(serde_json::json!({
                     "type": "json_schema",
                     "json_schema": {
@@ -357,17 +335,6 @@ impl OpenAiCompatibleClient {
 }
 
 fn build_http_client(timeout_ms: u64) -> reqwest::Client {
-    // AUD-P2-2 (A8): this used to end in `.unwrap_or_default()`, which
-    // "recovered" from a builder failure by silently swapping in a
-    // client with NO timeout (a hung LM Studio could then hang a job
-    // for the 30-minute stale-job sweep) — and reqwest's
-    // `Client::default()` is itself `ClientBuilder::new().build()
-    // .expect("Client::new()")`, so the only realistic builder failure
-    // (TLS backend init) would have panicked right here. Keep the
-    // constructor infallible but make the failure loud and retry once;
-    // the timeout guarantee itself no longer depends on the
-    // client-level setting because every request builder in this
-    // client also applies `.timeout(self.request_timeout)`.
     let timeout = Duration::from_millis(timeout_ms.max(1));
     match reqwest::Client::builder().timeout(timeout).build() {
         Ok(client) => client,

@@ -199,9 +199,6 @@ pub fn remove_endpoint(conn: &Connection, id: &str) -> Result<()> {
     save_roles(conn, &roles)
 }
 
-/// AUD-P1-6 (C7): edit an endpoint's $/mtok prices after creation — the
-/// cost ledger's estimation input. Prices were write-only at creation
-/// before this (the page even hinted at them next to nothing).
 pub fn update_endpoint_prices(
     conn: &Connection,
     id: &str,
@@ -222,13 +219,6 @@ fn endpoint_by_id<'a>(list: &'a [EndpointConfig], id: &str) -> Option<&'a Endpoi
     list.iter().find(|e| e.id == id && e.enabled)
 }
 
-/// AUD-P1-7 (D1): is any AI backend actually configured? A fresh install
-/// has the AI features on by default but no model-role routed and no
-/// legacy base URL — `backend_for_role` would still synthesize a phantom
-/// default LM Studio endpoint, so every synced conversation spawned
-/// analyze/attribute jobs that really ran, really failed (twice), and
-/// really notified ("check that LM Studio… is running"). The enqueue sites
-/// gate on this predicate instead: no backend configured → no AI jobs.
 pub fn backend_configured(conn: &Connection) -> bool {
     if AiRole::ALL
         .iter()

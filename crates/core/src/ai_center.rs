@@ -56,16 +56,6 @@ impl ProviderKind {
     }
 }
 
-/// The settings record persisted in `ai_settings`.
-///
-/// Deliberately carries NO availability claim: a verdict like
-/// "provider reachable" is live network state, not a stored setting, and
-/// the honest source for it is the AI hub's `probe_endpoint` lane (the
-/// AI Center page polls it and renders "reachable — N models · X ms" /
-/// "offline — ..."). The audit (B6) found this struct previously carried a
-/// `provider_available: Option<bool>` that no constructor ever populated
-/// and no consumer ever read — an always-`None` dead field masquerading as
-/// a health signal; it was removed rather than fake-populated.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AiStatus {
     pub provider_kind: ProviderKind,
@@ -210,12 +200,6 @@ mod tests {
         assert!(ai_features_enabled(&status));
     }
 
-    /// AUD-P2-3-1 (B6): the record no longer carries an availability
-    /// claim — `provider_available` was removed (always-`None`, zero
-    /// readers; availability truth lives in the hub probe lane). A
-    /// serialized legacy record that still contains the dead key must
-    /// deserialize fine — serde ignores unknown fields — so removing the
-    /// field breaks no persisted/fixture JSON.
     #[test]
     fn audp2_3_b6_legacy_json_with_removed_provider_available_still_loads() {
         let legacy = serde_json::json!({
@@ -231,7 +215,6 @@ mod tests {
         assert_eq!(status.provider_kind, ProviderKind::LmStudio);
         assert_eq!(status.chat_model.as_deref(), Some("qwen2.5-7b-instruct"));
         assert_eq!(status.base_url.as_deref(), Some("http://127.0.0.1:1234"));
-        // And the fresh serialization round-trips without the dead key.
         let back = serde_json::to_value(&status).expect("serialize");
         assert!(back.get("provider_available").is_none());
     }

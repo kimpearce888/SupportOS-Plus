@@ -634,9 +634,6 @@ pub(crate) fn build_article_draft_user(
     let mut sources = String::new();
     for (i, c) in resolutions.iter().enumerate() {
         let subject = c.subject.as_deref().unwrap_or("(no subject)");
-        // AIE-1-2: the customer's own words beside the agent's resolution —
-        // the article must answer what customers actually asked, phrased the
-        // way they asked it, not just the subject the agent filed under.
         let customer_line = if c.customer_question.is_empty() {
             String::new()
         } else {

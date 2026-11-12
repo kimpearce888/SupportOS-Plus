@@ -47,12 +47,6 @@ impl std::fmt::Display for LmStudioError {
 
 impl std::error::Error for LmStudioError {}
 
-/// AUD-P2-1 (A7): recover the typed `LmStudioError` from a boxed
-/// `Error::Other` — the same downcast pattern `helpscout_real::hs_error`
-/// uses for `HsApiError`. The worker failure handler needs the
-/// `retryable` flag to decide whether a failed AI job should burn its
-/// remaining attempts; stringifying the error (the old
-/// `e.to_string().into()`) destroyed that information.
 pub(crate) fn lm_error(e: &crate::error::Error) -> Option<&LmStudioError> {
     if let crate::error::Error::Other(b) = e {
         b.downcast_ref::<LmStudioError>()

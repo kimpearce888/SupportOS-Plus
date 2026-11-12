@@ -250,9 +250,6 @@ pub fn build(
     })
     .collect();
 
-    // AIE-1-1: the Help Center rides the same knowledge lane — the
-    // customer-facing docs are often the strongest grounding for a reply,
-    // and the Docs sync keeps `docs_fts` current on every article.
     knowledge.extend(help_center_entries(conn, &query, include_internal, 4));
 
     let saved_replies: Vec<SavedReplyEntry> = search_saved_replies(conn, &query, 3)
@@ -556,13 +553,6 @@ pub(crate) struct AiSourceRef {
     pub timestamp: Option<String>,
 }
 
-/// AIE-1-1: Help Center articles as AI knowledge evidence. The Docs sync
-/// indexes every article into `docs_fts`; the reply-draft evidence searches
-/// it with the same query as the local knowledge lane. Published articles
-/// are customer-facing (`customer_safe`); draft/internal articles are
-/// `internal_only` and only ride along when internal evidence is allowed
-/// (`include_internal`), so the safety filter in `build_customer_draft_user`
-/// keeps them out of customer replies exactly like internal local documents.
 fn help_center_entries(
     conn: &Connection,
     query: &str,
@@ -670,9 +660,6 @@ pub(crate) fn sources_for(conn: &Connection, ctx: &EvidenceContext) -> Vec<AiSou
             params![k.title],
             |r| r.get(0),
         ) {
-            // AIE-1-1: help center articles are cited by their own id
-            // space (`help_center_article`), never folded into the
-            // knowledge_documents join.
             sources.push(AiSourceRef {
                 source_type: "help_center_article".into(),
                 source_id: id,
