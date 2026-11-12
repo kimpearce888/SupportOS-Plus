@@ -1,5 +1,6 @@
 pub mod icons;
 pub mod package;
+pub mod strip;
 
 #[cfg(test)]
 mod hygiene {

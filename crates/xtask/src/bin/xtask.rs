@@ -58,6 +58,11 @@ enum Cmd {
         #[arg(long)]
         db: Option<String>,
     },
+    StripComments {
+        #[arg(long)]
+        check: bool,
+        paths: Vec<String>,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -82,6 +87,7 @@ fn main() -> anyhow::Result<()> {
         Cmd::Restore { db, backup } => run_restore(&db, &backup),
         Cmd::Healthcheck { db } => run_healthcheck(&db),
         Cmd::VectorCount { data_dir, db } => run_vector_count(&data_dir, db.as_deref()),
+        Cmd::StripComments { check, paths } => run_strip_comments(check, &paths),
     }
 }
 
@@ -338,6 +344,31 @@ fn run_vector_count(data_dir: &str, db: Option<&str>) -> anyhow::Result<()> {
         println!(
             "vector-count: D4 gate -> {total} >= {D4_GATE_CHUNKS} chunks: above gate — revisit D4 \
              (the VectorStore seam stays swappable)"
+        );
+    }
+    Ok(())
+}
+
+fn run_strip_comments(check: bool, paths: &[String]) -> anyhow::Result<()> {
+    let stats = spp_xtask::strip::run(spp_xtask::strip::StripOptions {
+        workspace_root: workspace_root(),
+        roots: paths.to_vec(),
+        check,
+    })?;
+    if check {
+        println!(
+            "strip-comments: clean ({}/{} scanned)",
+            stats.files_scanned, stats.files_scanned
+        );
+    } else {
+        println!(
+            "strip-comments: {} file(s) rewritten, {} whole comment line(s) and {} inline \
+             comment(s) removed ({}/{} scanned had comments)",
+            stats.files_rewritten,
+            stats.whole_lines_removed,
+            stats.inline_comments_removed,
+            stats.files_with_comments,
+            stats.files_scanned
         );
     }
     Ok(())
