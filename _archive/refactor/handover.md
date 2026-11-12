@@ -60,8 +60,10 @@ cargo clippy --locked -p supportos-plus-core --all-targets --features sandbox --
 cargo test --locked --workspace
 cargo test --locked -p supportos-plus-core --features sandbox
 cargo run --locked -p supportos-plus-xtask -- verify-icons
-# from R1.0 on, additionally:
-cargo run --locked -p supportos-plus-xtask -- strip-comments --check
+# from R1.0 on, additionally — during R1.x use SUBSET paths (the stripped
+# batches so far); the whole-tree check becomes mandatory at R1.10:
+cargo run --locked -p supportos-plus-xtask -- strip-comments --check crates/catalog crates/xtask
+# strip batch procedure (R1.x): strip --write [paths] -> cargo fmt --all -> battery
 ```
 
 ## 5. CI monitor (GitHub API)

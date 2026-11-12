@@ -268,9 +268,6 @@ fn run_vector_count(data_dir: &str, db: Option<&str>) -> anyhow::Result<()> {
     println!("vector-count: total points  {total}");
 
     if total > 0 {
-        // AU2-13a: the per-entity count API on the vector store was deleted
-        // as program-dead; the diagnostic reads the store's payload table
-        // directly (a plain table — no sqlite-vec extension needed).
         let store_db = store_dir.join("vectors.db");
         match rusqlite::Connection::open_with_flags(
             &store_db,

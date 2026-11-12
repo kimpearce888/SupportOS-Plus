@@ -23,11 +23,6 @@ const ICON_SIZES: &[(&str, &str)] = &[
     ("1024x1024", "1024x1024.png"),
 ];
 
-// AUD-P2-9 (I1): appimagetool is pinned per build arch — the pin used
-// to be x86_64-only, so an aarch64 build host (now a real CI lane on
-// ubuntu-24.04-arm) would have downloaded and tried to execute the
-// x86_64 binary. Same release (1.9.1), same frozen-tag + sha256
-// discipline as APPIMAGE_RUNTIMES below.
 const APPIMAGETOOL_PINS: &[(&str, &str, &str)] = &[
     (
         "x86_64",
@@ -42,15 +37,6 @@ const APPIMAGETOOL_PINS: &[(&str, &str, &str)] = &[
         "f0837e7448a0c1e4e650a93bb3e85802546e60654ef287576f46c71c126a9158",
     ),
 ];
-// CI-1-2: appimagetool itself makes a second single-shot GitHub download
-// at pack time — the type-2 runtime it embeds into every AppImage — and
-// dies the same way on the flapping release CDN ("Failed to download
-// runtime file… pass it to appimagetool with --runtime-file", CI run
-// 42472196649). The runtime therefore gets the exact same discipline as
-// the tool: pinned to a frozen release tag (never `continuous`, which
-// rolls and would break the checksum pin), pinned sha256, retry-hardened
-// fetch, cached under target/tools, handed over via --runtime-file so
-// appimagetool never touches the network again.
 const APPIMAGE_RUNTIMES: &[(&str, &str, &str)] = &[
     (
         "x86_64",
@@ -63,11 +49,6 @@ const APPIMAGE_RUNTIMES: &[(&str, &str, &str)] = &[
         "00cbdfcf917cc6c0ff6d3347d59e0ca1f7f45a6df1a428a0d6d8a78664d87444",
     ),
 ];
-// CI-1-1: waits between download attempts — 5 tries total, 155s of
-// backoff, trivially inside the 60/90-min CI and release job budgets. The
-// observed CDN failure is flapping (intermittent 504s among 200s), so the
-// attempt count dominates: at a 1-in-3 failure rate, five tries leave a
-// ~0.4% chance the whole download still fails.
 const APPIMAGETOOL_RETRY_BACKOFF_SECS: &[u64] = &[5, 15, 45, 90];
 
 const BUNDLED_HOST_LIBS: &[&str] = &[
@@ -150,8 +131,6 @@ pub fn package(opts: PackageOptions) -> anyhow::Result<PathBuf> {
 
     let tool = resolve_appimagetool(&opts.workspace_root, opts.appimagetool.as_deref())?;
     let arch = appimage_arch()?;
-    // CI-1-2: supply the pinned type-2 runtime ourselves so appimagetool
-    // never exercises its own single-shot (retry-free) runtime download.
     let runtime = resolve_appimage_runtime(&opts.workspace_root, arch)?;
     let output = opts.out_dir.join(format!("{PRODUCT_ID}-{arch}.AppImage"));
     if output.exists() {
@@ -511,8 +490,6 @@ fn resolve_appimagetool(
         anyhow::ensure!(path.is_file(), "APPIMAGETOOL not found: {}", path.display());
         return Ok(path.to_path_buf());
     }
-    // AUD-P2-9 (I1): the cached tool is arch-named — an arm64 build
-    // host resolves its own pin instead of executing the x86_64 one.
     let arch = appimage_arch()?;
     let cached = workspace_root
         .join("target")
@@ -526,7 +503,6 @@ fn resolve_appimagetool(
     Ok(cached)
 }
 
-/// The pinned type-2 runtime row for a build arch, (url, sha256).
 fn appimage_runtime_for(arch: &str) -> anyhow::Result<(&'static str, &'static str)> {
     APPIMAGE_RUNTIMES
         .iter()
@@ -535,9 +511,6 @@ fn appimage_runtime_for(arch: &str) -> anyhow::Result<(&'static str, &'static st
         .ok_or_else(|| anyhow::anyhow!("no type-2 runtime pinned for arch {arch}"))
 }
 
-/// CI-1-2: resolves (downloading + checksum-verifying with retry if needed)
-/// the pinned type-2 runtime for the build arch, cached under target/tools
-/// beside appimagetool so repeated packaging runs stay offline.
 fn resolve_appimage_runtime(workspace_root: &Path, arch: &str) -> anyhow::Result<PathBuf> {
     let (url, sha) = appimage_runtime_for(arch)?;
     let cached = workspace_root
@@ -576,7 +549,6 @@ fn verify_appimagetool(path: &Path, arch: &str) -> anyhow::Result<()> {
     verify_pinned_file(path, sha, "appimagetool")
 }
 
-/// AUD-P2-9 (I1): the appimagetool pin row for a build arch, (url, sha256).
 fn appimagetool_pin_for(arch: &str) -> anyhow::Result<(&'static str, &'static str)> {
     APPIMAGETOOL_PINS
         .iter()
@@ -585,8 +557,6 @@ fn appimagetool_pin_for(arch: &str) -> anyhow::Result<(&'static str, &'static st
         .ok_or_else(|| anyhow::anyhow!("no appimagetool pinned for arch {arch}"))
 }
 
-/// Shared checksum gate for every pinned artifact that enters the release
-/// path (the appimagetool binary, the embedded type-2 runtime).
 fn verify_pinned_file(path: &Path, expected: &str, label: &str) -> anyhow::Result<()> {
     let got = sha256_file(path)?;
     anyhow::ensure!(
@@ -609,8 +579,6 @@ fn download_appimagetool(dest: &Path, arch: &str) -> anyhow::Result<()> {
     download_pinned_asset(dest, url, sha, "appimagetool 1.9.1")
 }
 
-/// Downloads one pinned release-path artifact atomically (temp file +
-/// rename, executable bit) using the retry-hardened fetch.
 fn download_pinned_asset(dest: &Path, url: &str, sha256: &str, label: &str) -> anyhow::Result<()> {
     if let Some(parent) = dest.parent() {
         fs::create_dir_all(parent)?;
@@ -628,21 +596,12 @@ fn download_pinned_asset(dest: &Path, url: &str, sha256: &str, label: &str) -> a
     Ok(())
 }
 
-/// Whether an HTTP status is worth retrying: 5xx (the GitHub release CDN
-/// occasionally 504s mid-request), 408 and 429. Pure over `StatusCode` so
-/// the policy is unit-testable without touching the network.
 fn is_retryable_status(status: reqwest::StatusCode) -> bool {
     status.is_server_error()
         || status == reqwest::StatusCode::REQUEST_TIMEOUT
         || status == reqwest::StatusCode::TOO_MANY_REQUESTS
 }
 
-/// CI-1-1: fetches one pinned release-path artifact, retrying transient
-/// upstream failures with backoff so one gateway blip (a 504 killed CI run
-/// 42465641980 after a clean 3m48s release build) cannot sink a full
-/// packaging run. Non-transient statuses (404 and friends) fail fast with
-/// the pinned URL in the message; every successful read still lands in the
-/// same sha256 gate that runs immediately after this returns.
 fn fetch_pinned_with_retry(
     client: &reqwest::blocking::Client,
     url: &str,
@@ -959,11 +918,6 @@ mod tests {
 
     #[test]
     fn appimage_runtime_pins_cover_both_ci_arches_on_one_frozen_tag() {
-        // CI-1-2: the embedded type-2 runtime must be pinned like every
-        // other release-path artifact — official type2-runtime releases
-        // only, a frozen release tag (never the rolling `continuous`),
-        // full 64-hex sha256 per arch, both CI arches, one shared tag so
-        // the pair cannot drift.
         assert_eq!(APPIMAGE_RUNTIMES.len(), 2, "exactly the two CI arches");
         for (arch, url, sha) in APPIMAGE_RUNTIMES {
             assert!(
@@ -1010,12 +964,6 @@ mod tests {
 
     #[test]
     fn appimagetool_pins_cover_both_ci_arches_on_one_frozen_tag() {
-        // AUD-P2-9 (I1): the aarch64 CI packaging lane made the "both
-        // CI arches" claim real — the tool pin gets the same frozen-tag
-        // + sha256 discipline the runtime pins already had (and that
-        // CI-1-2 established): official appimagetool releases only, one
-        // shared 1.9.1 tag (never `continuous`), full 64-hex sha per
-        // arch, asset name matching its arch row.
         assert_eq!(APPIMAGETOOL_PINS.len(), 2, "exactly the two CI arches");
         for (arch, url, sha) in APPIMAGETOOL_PINS {
             assert!(
@@ -1062,10 +1010,6 @@ mod tests {
 
     #[test]
     fn appimagetool_retry_schedule_stays_inside_ci_job_budgets() {
-        // 5 attempts (first try + 4 retries), 155s of total waiting — the
-        // packaging jobs carry 60/90-minute timeouts, so even the all-attempts-
-        // fail worst case (~3.4 min of 504s + backoff) is a rounding error
-        // against them.
         let waits = APPIMAGETOOL_RETRY_BACKOFF_SECS;
         assert_eq!(waits.len(), 4, "four backoff waits → five attempts");
         assert!(waits.iter().all(|w| *w > 0), "every wait is positive");

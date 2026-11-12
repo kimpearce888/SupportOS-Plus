@@ -7,20 +7,19 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 
 ## CURRENT POINTER
 
-- Next task: **R1.0 — build `xtask strip-comments`** (see `plan.md` §7 R1).
-- Pre-flight: confirm CI run#301 (id 43227385165) on `c6ab15d` is green — it
-  is (all 4 lanes, 2026-11-12); proceed directly to R1.0.
-- Session counter: 1 completed.
-- Environment note for session 2: toolchain must be provisioned first
-  (`handover.md` §2 step 3) — session 1 did not need cargo.
+- Next task: **R1.2 — core/ai_* strip** (~13 files; see `plan.md` §7 R1.2).
+- Pre-flight: confirm CI green on the session-2 head (run id in session log).
+- Session counter: 2 completed (R1.0 + R1.1 done).
+- Environment: toolchain installed this session; target/ warm but disk-tight
+  (see gotcha G-05 — delete target/debug/incremental when links bus-error).
 
 ## Task states
 
 | Task | Status | Notes |
 |---|---|---|
 | R0 pipeline alignment | terminal (session 1) | CI run#301 green — see `complete.md` |
-| R1.0 strip-comments tool | pending | spec in `plan.md` §5.1/§7 |
-| R1.1 catalog+xtask strip | pending | pilot batch, 12 files |
+| R1.0 strip-comments tool | done (session 2) | lexer + 38 edge tests + --check mode; full battery green; commit 88e1770 |
+| R1.1 catalog+xtask strip | done (session 2) | 59 comment lines removed (catalog was already comment-free: 0 of 8 files); subset --check clean; commit pending CI |
 | R1.2 core/ai_* strip | pending | ~13 files |
 | R1.3 core/sync+workers strip | pending | |
 | R1.4 core/helpscout strip | pending | |
@@ -42,6 +41,23 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 `module → construct → verdict(keep/merge/delete/rename) → outcome`)*
 
 ## Session log
+
+### Session 2 — 2026-11-12
+- Pre-flight: sandbox reset AGAIN (clone + toolchain gone) — re-provisioned
+  per handover §2 (~15 min incl. toolchain download).
+- R1.0 built: `crates/xtask/src/strip.rs` (lexer, ~280 lines + 38 unit
+  tests), wired as `xtask strip-comments [--check] [paths...]`; default root
+  `crates`; skips target/.git dirs; report: files scanned/rewritten, whole
+  lines + inline comments removed. One test-expectation fix during
+  development (inline block comment keeps the space AFTER it; rustfmt
+  canonicalizes).
+- Local battery green: gate, fmt, clippy x2, tests x2 (520 + 528),
+  verify-icons, pilot --check.
+- R1.1 executed: catalog is ALREADY comment-free (0 lines across 8 files —
+  plan batch was sized from the session-1 aggregate numbers); xtask had 59
+  lines in package.rs (56) + bin/xtask.rs (3). Subset --check green (13/13).
+- Commits: `88e1770` (R1.0), R1.1 (this session's second commit).
+- CI: `<fill: run id + conclusion>`.
 
 ### Session 1 — 2026-11-12
 - Research: full metrics snapshot (plan §6); read the no-simulation gate

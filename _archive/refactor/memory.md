@@ -41,6 +41,14 @@ session ends by adding what the next session must not have to rediscover.
   forbidden in production paths; exempt only `main.rs` bootstrap and
   `#[cfg(test)]` regions. 121 `unwrap()` currently sit in src; 2,300
   `expect(` in src are mostly inline test modules — triage separates them.
+- **D-11 (session 2).** The stripper's contract: whole-line comments
+  delete their line+newline; trailing comments trim preceding whitespace;
+  inline block comments keep the whitespace AFTER them (rustfmt
+  canonicalizes — the batch procedure always runs `cargo fmt --all` after
+  stripping).
+- **D-12 (session 2).** Battery order matters for the strip batches:
+  strip → `cargo fmt --all` → battery. fmt runs in WRITE mode between strip
+  and the battery; the battery's fmt item is the --check verification.
 
 ## Facts (F-xx)
 
@@ -62,6 +70,14 @@ session ends by adding what the next session must not have to rediscover.
 - **F-06.** No local Vulkan → kittest suites run in CI only.
 - **F-07.** rust-lang.org and github.com are reachable from the sandbox;
   crates.io was used by cold builds in earlier sessions.
+- **F-08.** `catalog` is already fully comment-free (0 lines across its 8
+  files) — the session-1 aggregate (~4.2K) lives almost entirely in core and
+  app-shell. The stripper's report matched a manual count exactly (13 files
+  scanned, 2 with comments).
+- **F-09.** Local workspace test lanes: 520 tests (core, default features) +
+  528 (core sandbox feature); kittest suites only run under
+  `--features kittest-ui` (CI snapshots lane). Full local battery on a cold
+  cache: ~25 min; incremental ~5-10 min.
 
 ## Gotchas (G-xx)
 
@@ -74,6 +90,14 @@ session ends by adding what the next session must not have to rediscover.
   install too.
 - **G-04.** `cargo` is never on PATH in a new shell — export it
   (handover §3).
+- **G-05.** Sandbox disk is TIGHT (9.9G rootfs; target/ grows to 5.6G with
+  both build lanes). When a link step dies with `ld terminated with signal 7
+  [Bus error]`, free space with `rm -rf target/debug/incremental` (~2.3G,
+  safe — it is only an incremental cache) and retry. Budget: keep ≥2G free
+  before starting a battery.
+- **G-06.** Huge test/link outputs exceed the tool frame — always redirect
+  to a log file (`> /tmp/x.log 2>&1`) and rg the log; never tail a raw
+  cargo test run.
 
 ## Open questions / deferred owner decisions
 
