@@ -248,10 +248,6 @@ fn handle_webhook(req: &Request, ctx: &LoopbackCtx) -> Response {
     let signature = req.header("x-helpscout-signature");
     let event_type = req.header("x-helpscout-event").unwrap_or("unknown");
 
-    // UX-26B: no truncation — the stored secret is passed to verification in
-    // full (verify_delivery handles cap-era-registered hooks via its legacy
-    // prefix fallback).
-
     let result = ctx.db.with_write(|conn| {
         webhook_handler::process_webhook(conn, secret.as_bytes(), &req.body, signature, event_type)
     });
@@ -1234,9 +1230,6 @@ mod batch22_audit32_tests {
             std::env::temp_dir().join(format!("spp-loopback-ux26b-key-{}.key", std::process::id()));
         crate::settings::init_master_key(&key_path).expect("init master key");
 
-        // UX-26B: a 60-char secret is stored in full and Help Scout signs
-        // with the full secret it holds — that delivery must verify (the
-        // audit's live probe 401'd exactly here).
         let long_secret: String = "s".repeat(60);
         c.db.with_write(|conn| {
             crate::settings::set_secret(conn, "webhook_secret", long_secret.as_bytes())
@@ -1266,8 +1259,6 @@ mod batch22_audit32_tests {
             "the full-secret signature (what the platform really signs) must verify"
         );
 
-        // Hooks registered by cap-era builds carry the capped prefix as
-        // their platform-side secret; those deliveries keep verifying.
         let legacy: String = long_secret.chars().take(40).collect();
         let legacy_sig = crate::webhook::compute_signature(legacy.as_bytes(), body);
         assert_eq!(

@@ -5,15 +5,7 @@ use std::time::Duration;
 
 use crate::error::{Error, Result};
 
-/// Rate-limit hook the queue consults before dispatching an item (GA-1).
-/// Defined on the consumer side so the generic queue stays provider-agnostic:
-/// this module must not import a concrete provider's limiter (the
-/// `api_queue.rs <-> helpscout_real/mod.rs` module cycle the graphify audit
-/// surfaced). `helpscout_real::HsRateLimiter` is the production impl; any
-/// other limiter can be supplied through the same trait.
 pub trait QueueRateLimiter: Send + Sync {
-    /// Milliseconds the queue must wait before dispatching; `0` dispatches
-    /// immediately.
     fn wait_time_ms(&self, is_write: bool) -> i64;
 }
 
@@ -23,9 +15,6 @@ pub(crate) const PRIORITY_SYNC: u8 = 2;
 pub(crate) const PRIORITY_ANALYTICS: u8 = 3;
 pub(crate) const PRIORITY_INDEXING: u8 = 4;
 
-/// AU2-13e: the write-only stats counters (dispatched/completed/failed/
-/// high_water) and the consumer-less snapshot() were deleted; the queue keeps
-/// only the counters its own scheduling actually reads.
 #[derive(Default)]
 pub(crate) struct ApiQueueStats {
     pub queued: AtomicI64,

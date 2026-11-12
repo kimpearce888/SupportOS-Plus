@@ -105,10 +105,6 @@ pub struct OutboundJobFinishedEvent {
     pub at: String,
 }
 
-/// AUD-P1-2 (C2): a connector refresh finished (ok or failed) — the
-/// completion signal the Connectors page never had. Carries the connector
-/// id/name so the toast can name the source, and the row count so the
-/// manual refresh answers "did it work?".
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectorRefreshedEvent {
@@ -282,7 +278,6 @@ impl ServerEvent {
         })
     }
 
-    /// AUD-P1-2 (C2): completion signal for a connector refresh.
     #[must_use]
     pub fn connector_refreshed(
         connector_id: i64,

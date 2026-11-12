@@ -61,8 +61,6 @@ pub fn enqueue_on(
     Ok(conn.last_insert_rowid())
 }
 
-/// True when at least one queued (not yet claimed) job of `kind` exists on `queue`.
-/// Used by UI callers to coalesce repeated triggers (e.g. per-keystroke commits).
 pub fn has_pending(conn: &Connection, queue: &str, kind: &str) -> Result<bool> {
     ensure_jobs_table(conn)?;
     let pending: i64 = conn.query_row(
@@ -115,10 +113,6 @@ pub(crate) fn claim_next(conn: &mut Connection, queue: Option<&str>) -> Result<O
         return Ok(None);
     };
 
-    // AU2-14: guard the claim on the status the row was selected with, so a
-    // concurrent claimer (or a state flip between select and update) can never
-    // re-claim a job that is no longer queued. Unreachable under the
-    // single-writer lane today; the guard makes the invariant local.
     let claimed = tx.execute(
         "UPDATE jobs
             SET status = 'running',

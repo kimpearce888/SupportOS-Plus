@@ -179,9 +179,6 @@ pub fn delete(conn: &Connection, id: i64) -> Result<bool> {
     Ok(n > 0)
 }
 
-/// AUD-P1-2 (C2): edit an existing connector — name, config, credentials
-/// (auth), refresh cadence and the AI permission. Mirrors `create`'s
-/// duplicate-name guard, excluding the row being edited.
 #[allow(clippy::too_many_arguments)]
 pub fn update(
     conn: &Connection,
@@ -375,9 +372,6 @@ fn sqlite_now() -> String {
     format!("{y:04}-{m:02}-{d:02} {h:02}:{mi:02}:{s:02}")
 }
 
-/// AUD-P1-2 (C2): refresh now takes the event bus and emits
-/// `ConnectorRefreshed` on completion (ok or failed) — the manual refresh
-/// button finally answers "did it work?" and the page can reload itself.
 pub async fn refresh(
     conn: &crate::db::DbHandle,
     bus: Option<&crate::event_bus::EventBus>,
@@ -569,11 +563,6 @@ impl CleanPath for Path {
 
 type NormalizedRow = (String, Map<String, Value>);
 
-/// Reads a jailed connector file without blocking the async runtime
-/// (RW-1): resolve inside the connectors folder, stat + size-cap, then
-/// read to string — all via `tokio::fs` so every hop awaits instead of
-/// stalling the shared executor. Error messages are byte-identical to
-/// the pre-RW-1 blocking version.
 async fn read_capped(data_dir: &Path, file: &str) -> Result<String> {
     let abs = jail_resolve(data_dir, file)?;
     let stat = tokio::fs::metadata(&abs)
@@ -625,9 +614,6 @@ async fn fetch_rows(connector: &Value, data_dir: &Path) -> Result<Vec<Normalized
             if !valid {
                 return Err(Error::Config("invalid table name".into()));
             }
-            // RW-1: rusqlite is synchronous; run the whole read on the
-            // blocking pool (the established workers/execute.rs pattern)
-            // instead of stalling the shared async executor.
             let table = table.to_string();
             let rows: Vec<Value> = tokio::task::spawn_blocking(move || -> Result<Vec<Value>> {
                 let sqlite =
@@ -1005,7 +991,6 @@ mod audp12_tests {
             })
             .expect("seed");
 
-        // edit Two: rename stays, credentials swap to a header, ai off
         let two_id = handle
             .with_read(|conn| {
                 list(conn).map(|rows| {
@@ -1035,7 +1020,6 @@ mod audp12_tests {
         assert_eq!(updated["auth"]["mode"], "header");
         assert_eq!(updated["allowed_ai"], 0);
 
-        // renaming onto the other connector's name is rejected
         let err = handle
             .with_write(|conn| {
                 update(
@@ -1053,7 +1037,6 @@ mod audp12_tests {
             .expect_err("duplicate name rejected");
         assert!(err.to_string().contains("already exists"), "got: {err}");
 
-        // unknown id reports not found
         let err = handle
             .with_write(|conn| {
                 update(
@@ -1082,7 +1065,6 @@ mod audp12_tests {
                 .map(|d| d.as_nanos())
                 .unwrap_or(0)
         ));
-        // the fetch branch jails `file` under <data_dir>/connectors/
         std::fs::create_dir_all(dir.join("connectors")).expect("dir");
         std::fs::write(
             dir.join("connectors/ledger.csv"),
@@ -1118,7 +1100,6 @@ mod audp12_tests {
         assert!(result.ok, "csv refresh succeeds: {:?}", result.error);
         assert_eq!(result.rows, 2);
 
-        // the completion event is on the bus — the manual refresh answers
         let event = rx.try_recv().expect("ConnectorRefreshed emitted");
         match event {
             crate::events::ServerEvent::ConnectorRefreshed(e) => {
@@ -1130,7 +1111,6 @@ mod audp12_tests {
             other => panic!("wrong event: {other:?}"),
         }
 
-        // a failing refresh emits the failure shape (bad file)
         handle
             .with_write(|conn| {
                 update(

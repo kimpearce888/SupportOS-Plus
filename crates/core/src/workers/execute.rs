@@ -17,10 +17,6 @@ impl WorkerManager {
             let mut composer_result: Option<String> = None;
             match kind {
                 "sync_conversation" | "sync_conversation_merge" => {
-                    // AUD-P0-4 (A5): a malformed payload (missing remoteId /
-                    // conversationId) must fail the job loudly — the pre-fix
-                    // `if let` with no else let a producer bug complete green
-                    // while doing nothing.
                     if let Some(remote) = num("remoteId").or_else(|| num("conversationId")) {
                         self.run_engine(|e| async move { e.sync_single_conversation(remote).await.map(|_| ()) })
                             .await?;
@@ -46,7 +42,6 @@ impl WorkerManager {
                             rusqlite::params![remote],
                         )?;
                     } else {
-                        // AUD-P0-4 (A5): fail loudly on a malformed payload.
                         let conn = self.lock();
                         jobs::fail(&conn, job_id, "delete_conversation missing remoteId", false)?;
                         return Ok(());
@@ -58,8 +53,6 @@ impl WorkerManager {
                             let conn = self.lock();
                             crate::mirror::upsert_customer(&conn, &customer)?;
                         } else if num("remoteId").is_none() {
-                        // AUD-P0-4 (A5): fail loudly on a malformed payload —
-                        // an absent remote customer is a legitimate no-op.
                         let conn = self.lock();
                         jobs::fail(&conn, job_id, "sync_customer missing remoteId", false)?;
                         return Ok(());
@@ -73,7 +66,6 @@ impl WorkerManager {
                             rusqlite::params![remote],
                         )?;
                     } else {
-                        // AUD-P0-4 (A5): fail loudly on a malformed payload.
                         let conn = self.lock();
                         jobs::fail(&conn, job_id, "delete_customer missing remoteId", false)?;
                         return Ok(());
@@ -168,9 +160,6 @@ impl WorkerManager {
                     )
                     .unwrap_or(0);
                     tracing::debug!(operation = kind, embedded = n, "embedding pass");
-                    // AUD-P1-8 (D2): a full pass means more chunks may be
-                    // waiting — requeue so a large corpus keeps flowing
-                    // instead of stalling at the 60-chunk cap.
                     if crate::embeddings::pass_hit_cap(n)
                         && !crate::jobs::has_pending(
                             &conn,
@@ -197,7 +186,6 @@ impl WorkerManager {
                     )
                     .unwrap_or(0);
                     tracing::debug!(operation = kind, embedded = n, "embedding pass");
-                    // AUD-P1-8 (D2): see embed_knowledge_chunks.
                     if crate::embeddings::pass_hit_cap(n)
                         && !crate::jobs::has_pending(&conn, "embeddings", "embed_docs_chunks")
                             .unwrap_or(false)
@@ -214,7 +202,6 @@ impl WorkerManager {
                     )
                     .unwrap_or(0);
                     tracing::debug!(operation = kind, embedded = n, "embedding pass");
-                    // AUD-P1-8 (D2): see embed_knowledge_chunks.
                     if crate::embeddings::pass_hit_cap(n)
                         && !crate::jobs::has_pending(
                             &conn,
@@ -450,10 +437,6 @@ impl WorkerManager {
                                     &kind,
                                 )?;
                             } else {
-                                // AUD-P0-6 (A6): an approved action that did
-                                // not execute used to record nothing at all
-                                // (and pre-batch, unknown kinds fake-completed
-                                // via the catch-all). Record the honest skip.
                                 let kind = action
                                     .get("kind")
                                     .and_then(|k| k.as_str())
@@ -506,15 +489,6 @@ impl WorkerManager {
         if let Err(e) = outcome {
             let msg = e.to_string();
             let conn = self.lock();
-            // AUD-P2-1 (A7): the catch-all used to hard-code
-            // `let retryable = true;`, so a deterministic AI failure
-            // (unparseable model output, "conversation not found",
-            // AI disabled — all `LmStudioError { retryable: false }`)
-            // burned every attempt and re-notified each time. Honor
-            // the flag when the error is a typed LmStudioError;
-            // anything else (sqlite, io, panic-adjacent) keeps the
-            // old retry-everything behavior. `jobs::fail` marks the
-            // job failed either way — only the requeue differs.
             let retryable = crate::ai_pipeline::lm_error(&e)
                 .map(|lm| lm.retryable)
                 .unwrap_or(true);
@@ -543,9 +517,6 @@ impl WorkerManager {
             );
         }
         if crate::ai_hub::ai_feature_enabled(&conn, "ticket_analysis")
-            // AUD-P1-7 (D1): no backend configured → no bulk AI jobs (the
-            // fresh-install noise: every conversation used to spawn a
-            // doomed analyze job pair).
             && crate::ai_hub::backend_configured(&conn)
         {
             let fresh: Vec<i64> = {
@@ -719,10 +690,6 @@ impl WorkerManager {
             }
             {
                 let conn = self.lock();
-                // AUD-P1-7 (D1): the per-conversation AI fan-out is gated on a
-                // configured backend — a fresh install (no role routed, no
-                // legacy base URL) no longer spawns jobs that can only fail
-                // with the "check that LM Studio… is running" notification.
                 if !crate::ai_hub::backend_configured(&conn) {
                     tracing::debug!(
                         conversation_id = conversation_local_id,
@@ -844,12 +811,6 @@ impl WorkerManager {
                     Some(r) => r,
                     None => {
                         return (
-                            // AUD-P2-1 (A7): a missing conversation is
-                            // deterministic — the pipeline's own
-                            // "Conversation not found" carries
-                            // retryable: false, and this pre-flight
-                            // guard now agrees instead of retrying a
-                            // job that can never succeed.
                             Err(Error::Other(Box::new(
                                 crate::ai_pipeline::LmStudioError::new(
                                     "Conversation not found locally.",
@@ -872,9 +833,6 @@ impl WorkerManager {
                         )
                         .await
                         .map(|_| ())
-                        // AUD-P2-1 (A7): box the typed error, don't
-                        // stringify — the failure handler downcasts it
-                        // back to read `retryable`.
                         .map_err(|e| Error::Other(Box::new(e)));
                         (r, None, Some(remote_id))
                     }
@@ -891,7 +849,6 @@ impl WorkerManager {
                         )
                         .await
                         .map(|_| ())
-                        // AUD-P2-1 (A7): typed box, see the Analyze arm.
                         .map_err(|e| Error::Other(Box::new(e)));
                         (r, None, Some(remote_id))
                     }
@@ -907,8 +864,6 @@ impl WorkerManager {
                         {
                             Ok(outcome) => outcome.analysis,
                             Err(e) => {
-                                // AUD-P2-1 (A7): typed box, see the
-                                // Analyze arm.
                                 return (Err(Error::Other(Box::new(e))), None, Some(remote_id));
                             }
                         };
@@ -1136,11 +1091,6 @@ impl WorkerManager {
         .map_err(|e| Error::Other(e.to_string().into()))?;
         let clustered = clustered?;
         tracing::info!(clusters = clustered, "issue clustering finished");
-        // AUD-P2-12 (C8): clustering completion now emits the same
-        // conversation_updated event the gap rebuild does — the issue
-        // radar is invalidated by it (queries.rs), so a queued "Cluster
-        // now" refreshes the Clusters tab instead of waiting for a
-        // manual reload (the audit's dead-end: no completion signal).
         {
             use crate::events::ServerEvent;
             self.bus.emit(&ServerEvent::conversation_updated(
@@ -1568,12 +1518,6 @@ impl WorkerManager {
             }
             Ok(Err(e)) => {
                 let conn = self.lock();
-                // AUD-P2-1 (A7): copilot failures were hard-marked
-                // non-retryable — a transient LM Studio outage killed
-                // the turn on the first try while every other AI lane
-                // retried. The flag already carries the right
-                // semantics (transport -> true, deterministic ->
-                // false); pass it through.
                 jobs::fail(&conn, job_id, &e.message, e.retryable)?;
                 let _ = jobs::log_error(
                     &conn,
@@ -2342,9 +2286,6 @@ impl WorkerManager {
             crate::webhook_health::store_outcome(
                 &conn,
                 &crate::webhook_health::not_configured_outcome(
-                    // AUD-P2-3-2 (D7): the stored verdict must state the
-                    // operational reality, not just the listener state —
-                    // polling-only sync, and chats/ratings with no data path.
                     crate::webhook_health::NO_RELAY_DETAIL,
                 ),
             )?;
@@ -2434,9 +2375,6 @@ impl WorkerManager {
                     None,
                 );
                 drop(conn);
-                // AU2-11: the failed run also stored a fresh outcome — pages
-                // (Settings wh_outcome, SyncHealth) must be told to reload it.
-                // Same refresh signal the non-healed success path emits.
                 use crate::events::ServerEvent;
                 self.bus.emit(&ServerEvent::sync_completed(
                     "incremental",

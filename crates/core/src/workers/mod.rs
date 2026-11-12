@@ -346,13 +346,6 @@ impl WorkerManager {
             });
         }
         {
-            // AUD-P2-5 (D6): the scheduled reconcile — see
-            // `scheduled_reconcile_tick`. Default: every 24 h; 0 turns
-            // it off; changes need a worker restart (Settings does that
-            // automatically when the value changes). The first tick of
-            // a tokio interval fires immediately — consume it so the
-            // first reconcile lands a full interval after boot instead
-            // of racing the startup auto-sync.
             let minutes = {
                 let conn = self.lock();
                 crate::settings::get_i64(&conn, "reconcile_interval_minutes", 1_440)
@@ -370,7 +363,7 @@ impl WorkerManager {
                     let mut interval = tokio::time::interval(Duration::from_secs(
                         u64::try_from(minutes * 60).unwrap_or(86_400),
                     ));
-                    interval.tick().await; // skip the immediate first tick
+                    interval.tick().await;
                     loop {
                         interval.tick().await;
                         Self::contained("scheduled_reconcile", this.scheduled_reconcile_tick())
@@ -720,9 +713,6 @@ impl WorkerManager {
                 }
             }
             "update_tags" => match payload.get("tags").and_then(|v| v.as_array()) {
-                // AUD-P1-4 (C5): a missing tags key is a malformed job, but
-                // an explicit empty array is a legitimate "clear all tags"
-                // from the inbox edit control.
                 None => Err(Error::Other("tag update job has no tags list".into())),
                 Some(values) => {
                     let tags: Vec<String> = values
@@ -735,9 +725,6 @@ impl WorkerManager {
                         .map(|_| format!("tags updated on conversation {remote_id}"))
                 }
             },
-            // AUD-P1-4 (C5): the snooze lane — core had the provider calls
-            // and the local column, but no outbound job kind ever reached
-            // them from the UI.
             "snooze" => {
                 let until = payload["snoozedUntil"]
                     .as_str()
@@ -900,11 +887,6 @@ impl WorkerManager {
         self.sync_nudge.notify_one();
     }
 
-    /// AUD-P2-5 (D6): the scheduled reconcile pass. The incremental
-    /// overlap is only `SYNC_OVERLAP_MINUTES` (10) and trusts the local
-    /// clock — a machine more than that ahead silently misses remote
-    /// changes until someone presses Reconcile by hand. This timer
-    /// closes the gap on a schedule (default: daily; 0 disables).
     async fn scheduled_reconcile_tick(&self) {
         if self.stopped.load(Ordering::SeqCst) {
             return;
@@ -991,10 +973,6 @@ impl WorkerManager {
         };
         match result {
             Ok(results) => {
-                // AU2-13: the post-initial follow-ups used to hang off the
-                // producer-less "initial_sync" job arm (deleted); they now run
-                // where the program actually pulls the account for the first
-                // time.
                 if initial_pull {
                     self.on_after_initial_sync();
                 }
@@ -1035,10 +1013,6 @@ impl WorkerManager {
         let bus = self.bus.clone();
         let provider_kind = self.provider.kind().to_string();
         let result = tokio::task::spawn_blocking(move || -> Result<()> {
-            // AU2-14: the backup block runs FIRST. It used to sit behind the
-            // trend/retention steps in the `?`-chain, so any failure up there
-            // silently disabled backups — the one maintenance output that
-            // must never depend on the rest of the chain succeeding.
             let conn = db_handle.write_guard();
             let backup_hours =
                 crate::settings::get_i64(&conn, "backup_interval_hours", 24).unwrap_or(24);
@@ -1079,9 +1053,6 @@ impl WorkerManager {
                 tracing::info!(operation = "backup", pruned, "Pruned old backups");
             }
             let conn = db_handle.write_guard();
-            // AU2-14: a trends failure no longer aborts the chain — every
-            // step behind the old `?` (webhook cadence, sweeps, retention)
-            // used to be skipped with it.
             if let Err(e) = crate::maintenance::compute_trends(&conn) {
                 tracing::warn!(error = %e, operation = "maintenance", "compute_trends failed");
             }
@@ -1405,8 +1376,6 @@ mod batch20_audit22_tests {
         })
     }
 
-    // ---- AUD-P1-7 (D1): the fresh-install AI circuit breaker ----
-
     fn ai_job_count(db: &crate::db::DbHandle) -> i64 {
         db.with_read(|conn| {
             conn.query_row("SELECT COUNT(*) FROM jobs WHERE queue = 'ai'", [], |r| {
@@ -1419,7 +1388,6 @@ mod batch20_audit22_tests {
     #[test]
     fn audp17_no_backend_configured_means_no_ai_jobs() {
         let db = temp_db();
-        // a fresh install: AI features default on, nothing routed
         db.with_write(|conn| {
             conn.execute(
                 "INSERT INTO conversations (remote_id, number, subject, preview, status)
@@ -1433,7 +1401,6 @@ mod batch20_audit22_tests {
             "precondition: a fresh mirror has no AI backend configured"
         );
 
-        // the bulk post-initial-sync fan-out stays quiet
         let manager = manager(&db);
         manager.on_after_initial_sync();
         assert_eq!(
@@ -1441,10 +1408,8 @@ mod batch20_audit22_tests {
             0,
             "no backend configured — no doomed analyze/attribute jobs"
         );
-        // the non-AI post-sync jobs still run
         assert_eq!(rebuild_activity_jobs(&db), 1);
 
-        // the per-conversation fan-out stays quiet too
         db.with_write(|conn| {
             let _ = conn.execute("DELETE FROM jobs", []);
         });
@@ -2499,8 +2464,6 @@ mod batch28_workers_tests {
     #[test]
     fn audit90_post_sync_ai_backfill_covers_every_conversation() {
         let db = temp_db();
-        // AUD-P1-7 (D1): the backfill is gated on a configured backend now —
-        // seed one so this test still exercises the backfill path itself.
         db.with_write(|conn| {
             crate::settings::set_string(conn, "lmstudio_base_url", "http://127.0.0.1:1234/v1")
                 .expect("backend");
@@ -2525,7 +2488,6 @@ mod batch28_workers_tests {
     fn audit90_post_sync_ai_backfill_skips_deleted_conversations() {
         let db = temp_db();
         db.with_write(|conn| {
-            // AUD-P1-7 (D1): configured backend — see the covers-every test.
             crate::settings::set_string(conn, "lmstudio_base_url", "http://127.0.0.1:1234/v1")
                 .expect("backend");
             seed_conversations(conn, 3);
@@ -2626,9 +2588,6 @@ mod audp2_workers_tests {
             &db,
             Arc::new(crate::helpscout::EmptyHelpScoutProvider::new()),
         );
-        // The backend resolves from settings (ai_enabled defaults on,
-        // base_url falls back to the LM Studio default) — no network is
-        // touched: the pre-flight conversation check fails first.
         let id = db.with_write(|conn| {
             jobs::enqueue(
                 conn,
@@ -2655,9 +2614,6 @@ mod audp2_workers_tests {
     fn audp21_transport_ai_failure_still_requeues_for_retry() {
         let db = temp_db();
         db.with_write(|conn| {
-            // A backend pointed at a port nothing listens on: the chat
-            // call dies on transport, which the pipeline marks
-            // retryable — the job must requeue exactly like before.
             crate::settings::set_string(conn, "lmstudio_base_url", "http://127.0.0.1:9/v1")
                 .expect("base url");
             crate::settings::set_i64(conn, "lmstudio_timeout_ms", 2_000).expect("timeout");
@@ -2743,7 +2699,6 @@ mod audp2_reconcile_tests {
             std::env::temp_dir(),
             None,
         ));
-        // No provider → the tick must return without touching sync state.
         runtime().block_on(async { manager.scheduled_reconcile_tick().await });
         let runs: i64 = db.with_read(|conn| {
             conn.query_row("SELECT COUNT(*) FROM sync_runs", [], |r| r.get(0))
@@ -2762,8 +2717,6 @@ mod audp2_reconcile_tests {
             db.clone(),
             Arc::new(crate::helpscout::EmptyHelpScoutProvider::new()),
         ));
-        // Simulate an in-flight sync: the engine's running flag is set.
-        // The tick must defer (no reconcile error, no run recorded).
         engine.set_running_for_tests(true);
         let manager = Arc::new(WorkerManager::new(
             db.clone(),
@@ -2791,8 +2744,6 @@ mod audp2_reconcile_tests {
 
     #[test]
     fn audp25_reconcile_interval_setting_clamps_and_disables() {
-        // The timer's settings read: default daily, clamp band 0..=10080,
-        // 0 = off. Locked here so the Settings row and the worker agree.
         let db = temp_db();
         let read = |key: &str, default: i64| {
             db.with_read(|conn| {

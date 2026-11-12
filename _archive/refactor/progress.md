@@ -7,14 +7,15 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 
 ## CURRENT POINTER
 
-- Next task: **R1.3 — core/sync+workers strip** (`sync_engine/ workers/
-  connectors.rs loopback.rs it_loopback.rs it_sync.rs api_queue.rs jobs.rs
-  event_bus.rs events.rs provider_handle.rs`; see `plan.md` §7 R1.3).
+- Next task: **R1.4 — core/helpscout strip** (`helpscout_real/ helpscout/
+  it_helpscout.rs it_lm_studio.rs oauth_state.rs mirror.rs mockserver.rs`;
+  see `plan.md` §7 R1.4).
 - Pre-flight: confirm CI green on the session-2 final head (run id in
   session log).
-- Session counter: 2 completed (R1.0 + R1.1 + R1.2 — see log).
+- Session counter: 2 completed (R1.0-R1.3 executed; see log).
 - Environment: toolchain installed this session; target/ warm but disk-tight
-  (see gotcha G-05 — delete target/debug/incremental when links bus-error).
+  (G-05: `cargo clean -p <crate>` + `rm -rf target/debug/incremental`
+  between lanes; per-crate test runs beat the 10-min tool window).
 
 ## Task states
 
@@ -23,8 +24,8 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 | R0 pipeline alignment | terminal (session 1) | CI run#301 green — see `complete.md` |
 | R1.0 strip-comments tool | done (session 2) | lexer + 38 edge tests + --check mode; full battery green; commit 88e1770 |
 | R1.1 catalog+xtask strip | done (session 2) | 59 comment lines removed (catalog was already comment-free: 0 of 8 files); subset --check clean; CI run#303 green |
-| R1.2 core/ai_* strip | done (session 2) | 90 comment lines removed across 7 of 15 files; cumulative subset check clean (28/28); battery green; CI pending |
-| R1.3 core/sync+workers strip | pending | |
+| R1.2 core/ai_* strip | done (session 2) | 90 comment lines removed across 7 of 15 files; cumulative subset check clean (28/28); battery green; CI run#304 green |
+| R1.3 core/sync+workers strip | done (session 2) | 162 whole lines + 1 trailing comment removed from 8 of 13 files; cumulative subset check clean (41/41); battery green (per-crate lanes); CI pending |
 | R1.4 core/helpscout strip | pending | |
 | R1.5 core/storage+config strip | pending | includes audit.rs — see invariant 7 |
 | R1.6 core/domain strip | pending | + core/tests |
@@ -69,6 +70,18 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
   Full battery green: gate, fmt, clippy x2, tests x2 (293+2+520+56,
   528 sandbox), verify-icons, cumulative subset --check 28/28.
   Disk discipline applied (G-05: freed incremental before sandbox link).
+- R1.3 executed (same session): 162 whole comment lines + 1 trailing comment
+  (jobs.rs tick line) removed from 8 of 13 files (execute.rs 62,
+  workers/mod 48, connectors 20, loopback 8, api_queue 11, events 5, jobs 6,
+  sync_engine/mod 2). Cumulative subset --check 41/41. CI run#304 green
+  on the R1.2 head mid-batch. Battery executed as per-crate lanes (the
+  10-min tool window kills a full `--workspace` run after cached compile;
+  per-crate == same coverage): catalog+xtask 56, app-shell 293+2,
+  core 520, core-sandbox 528 — all green; clippy x2 and fmt green before
+  the lanes.
+- Session-2 disk incidents (for G-05/G-07 refinement): sandbox link
+  bus-error fixed by rm incremental; later ENOSPC fixed by
+  `cargo clean -p supportos-plus-core` (2.6G freed) + rebuild.
 
 ### Session 1 — 2026-11-12
 - Research: full metrics snapshot (plan §6); read the no-simulation gate
