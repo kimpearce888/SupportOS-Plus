@@ -40,12 +40,6 @@ jobs:
       - name: No-simulation gate
         run: python3 scripts/gate_no_simulation.py
 
-      # RS-21 (R4): the traceability matrix must stay honest against the DC
-      # and the code — every DS-C/DS-A id resolves to the frozen contract,
-      # every route carries a matrix section, every golden lock file exists.
-      - name: Traceability gate
-        run: python3 scripts/gate_traceability.py
-
       - name: Install pinned Rust toolchain
         # rust-toolchain.toml is the single source of truth for the exact
         # toolchain version; `rustup toolchain install` reads it directly.

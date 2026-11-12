@@ -8,14 +8,17 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 ## CURRENT POINTER
 
 - Next task: **R1.0 — build `xtask strip-comments`** (see `plan.md` §7 R1).
-- Pre-flight: confirm CI run on commit `<fill after session-1 push>` is green.
+- Pre-flight: confirm CI run on the session-1 head is green (run id recorded
+  below in the session log / `complete.md`).
 - Session counter: 1 completed.
+- Environment note for session 2: toolchain must be provisioned first
+  (`handover.md` §2 step 3) — session 1 did not need cargo.
 
 ## Task states
 
 | Task | Status | Notes |
 |---|---|---|
-| R0 pipeline alignment | done (session 1) | traceability gate + 2 doc inputs archived; awaiting CI evidence in `complete.md` |
+| R0 pipeline alignment | done (session 1) | gate + doc inputs archived; CI evidence pending in `complete.md` |
 | R1.0 strip-comments tool | pending | spec in `plan.md` §5.1/§7 |
 | R1.1 catalog+xtask strip | pending | pilot batch, 12 files |
 | R1.2 core/ai_* strip | pending | ~13 files |
@@ -50,5 +53,12 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
   identity; toolchain NOT reinstalled this session (R0 needs no cargo;
   next session must provision per `handover.md` §2).
 - Created this folder: plan/progress/complete/handover/memory.
-- Executed R0 (pipeline alignment). Commits: `<fill>`.
-- CI: `<fill: run id + conclusion>`.
+- Executed R0 (pipeline alignment): traceability-gate step removed from
+  ci.yml and release.yml; `scripts/gate_traceability.py` →
+  `_archive/scripts/`; `docs/audit/design-contract-v1.md` +
+  `docs/audit/acceptance/traceability-matrix.md` → `_archive/docs/audit/`;
+  root `docs/` removed entirely (root = code + code-only build machinery).
+  Verified: zero references to `gate_traceability|docs/audit` outside
+  `_archive`; no-simulation gate clean.
+- Commits: `38f480b` (framework), R0 commit (see git log).
+- CI: pending at session close — session 2 must confirm green before R1.0.
