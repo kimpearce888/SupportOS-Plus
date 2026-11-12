@@ -54,8 +54,6 @@ fn seeded_page() -> (CustomObjectsPage, DbHandle) {
     )
     .expect("type");
     let _rmas = spp_core::custom_objects::create_type(&conn, "Rmas", None, &[]).expect("rmas");
-    // AUD-P2-11 (C3): a seeded customer + one real link on the first
-    // object so the links row renders with a resolved label.
     conn.execute(
         "INSERT INTO customers (id, remote_id, first_name, last_name, email)
          VALUES (77, 7077, 'Kim', 'Pearce', 'kim@example.com')",
@@ -81,8 +79,6 @@ fn seeded_page() -> (CustomObjectsPage, DbHandle) {
         &[],
     )
     .expect("object 1");
-    // AUD-P2-11 (C3): one link on the first object — the links row's
-    // chip renders the resolved customer label.
     spp_core::custom_objects::add_link(
         &conn,
         broken_hinge_id,
@@ -123,8 +119,6 @@ fn render_custom_objects_page(dark: bool, width: f32, name: &str) {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                // VF-4 (V1 completion): render through the shared
-                // production host — the exact funnel app/mod.rs uses.
                 design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db));
             },
             CustomObjectsPageState {
@@ -184,8 +178,6 @@ fn r3_custom_objects_new_type_light() {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                // VF-4 (V1 completion): render through the shared
-                // production host — the exact funnel app/mod.rs uses.
                 design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db));
             },
             CustomObjectsPageState {
@@ -208,8 +200,6 @@ fn r3_custom_objects_new_type_light() {
     h.snapshot("r3_custom_objects_new_type_light");
 }
 
-// AUD-P2-11 (C3): the links row (removable chip + add-link mini form)
-// must be visible on the object cards once a type is selected.
 #[test]
 fn audp2_custom_objects_links_light() {
     let (page, db) = seeded_page();
@@ -222,8 +212,6 @@ fn audp2_custom_objects_links_light() {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                // VF-4 (V1 completion): render through the shared
-                // production host — the exact funnel app/mod.rs uses.
                 design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db));
             },
             CustomObjectsPageState {

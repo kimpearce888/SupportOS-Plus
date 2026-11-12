@@ -45,8 +45,6 @@ pub(crate) struct ClusterRow {
     pub trend: Option<String>,
     pub conversation_count: i64,
     pub customer_count: Option<i64>,
-    /// AUD-P2-12 (C8): member conversation (id, number) pairs — the
-    /// cluster card's drill-down evidence (first five).
     pub sample_ids: Vec<(i64, i64)>,
 }
 
@@ -59,8 +57,6 @@ pub(crate) fn load_clusters(conn: &Connection) -> Vec<ClusterRow> {
     .and_then(|mut stmt| {
         stmt.query_map([], |r| {
             let cluster_id: i64 = r.get(0)?;
-            // AUD-P2-12 (C8): the member drill-down — first five linked
-            // conversations, resolved to (local id, number).
             let sample_ids: Vec<(i64, i64)> = conn
                 .prepare(
                     "SELECT c.id, c.number FROM issue_cluster_conversations icc
@@ -90,9 +86,6 @@ pub(crate) fn load_clusters(conn: &Connection) -> Vec<ClusterRow> {
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct KnownIssueRow {
-    /// AUD-P2-12 (C8): the row id — every lifecycle action (status edit,
-    /// text edit, delete, link management) targets it; the pre-fix loader
-    /// selected no id so rows could not be addressed.
     pub id: i64,
     pub title: String,
     pub symptoms: Option<String>,
@@ -124,9 +117,6 @@ pub(crate) fn load_known(conn: &Connection) -> Vec<KnownIssueRow> {
     .unwrap_or_default()
 }
 
-/// AUD-P2-12 (C8): the conversations linked to a known issue (page-local
-/// SQL, the established loader style) — rendered as clickable evidence
-/// chips with an unlink affordance.
 pub(crate) fn load_known_links(conn: &Connection, known_issue_id: i64) -> Vec<(i64, i64)> {
     conn.prepare(
         "SELECT kil.conversation_id, c.number
@@ -188,11 +178,7 @@ pub struct IssueRadarPage {
     notice: Option<String>,
     failed_ai_jobs: i64,
     reload_at: Option<std::time::Instant>,
-    /// AUD-P2-12 (C8): the known-issue edit draft (id, title, symptoms,
-    /// workaround) — the lifecycle the Known tab lacked.
     edit_known: Option<(i64, String, String, String)>,
-    /// AUD-P2-12 (C8): link-management draft: the target known issue id
-    /// and the typed conversation id.
     link_known_target: Option<i64>,
     link_conversation_id: String,
 }
@@ -345,14 +331,12 @@ impl IssueRadarPage {
         }
     }
 
-    /// Deep link `/issues?tab=known`: land on the Known tab.
     pub(crate) fn open_known_tab(&mut self) {
         self.tab = Tab::Known;
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) -> Option<NavRequest> {
-        // AUD-P2-12 (C8): alert/SLA/gap drill-downs surface as NavRequests.
-        #[allow(unused_mut)] // AUD-P2 stub: the drill-down writers land next
+        #[allow(unused_mut)]
         let mut nav: Option<NavRequest> = None;
         self.ensure_loaded(db);
 
@@ -627,8 +611,6 @@ impl IssueRadarPage {
             .map(|a| a.iter().filter_map(|v| v.as_i64()).take(5).collect())
             .unwrap_or_default();
         if !examples.is_empty() {
-            // AUD-P2-12 (C8): gap evidence examples are now clickable
-            // conversation deep-links (inert "#N" text pre-fix).
             let numbers: Vec<(i64, i64)> = db.with_read(|conn| {
                 examples
                     .iter()
@@ -733,9 +715,6 @@ impl IssueRadarPage {
                                     .size(design::scale::text::CONTROL)
                                     .color(design::tokens(ui).foreground),
                             );
-                            // AUD-P2-12 (C8): the drill-down the alerts tab
-                            // lacked — open the first member conversation
-                            // (the notifications deep-link idiom).
                             if let Some(conv_id) = alert
                                 .get("conversation_ids")
                                 .and_then(|v| v.as_array())
@@ -749,9 +728,6 @@ impl IssueRadarPage {
                                 *nav = Some(NavRequest::OpenConversation(conv_id));
                             }
                         });
-                        // VF-1 (L11): one SP2 row rhythm across both radar
-                        // cards — the old SP1 cadence read uneven next to the
-                        // SLA card's.
                         ui.add_space(design::scale::space::SP2);
                     }
                 }
@@ -779,16 +755,6 @@ impl IssueRadarPage {
                         "No conversations are breaching or at risk right now.",
                     );
                 } else {
-                    // VF-1 (L11): the old `ScrollArea::show_rows(_, 26.0, …)`
-                    // LIED about the row height — each painted row (callout +
-                    // drill link + spacing) is ~3× taller, so the scroll math
-                    // pushed the last row's "open →" link past the layout
-                    // height and clipped it against the card boundary (the
-                    // register's flagship L11 image). Rows now paint at
-                    // their true height in a plain scroll area: the callout,
-                    // SP1 gap, the link, SP2 inter-row rhythm; the last row's
-                    // trailing SP2 plus the card's own inner margin keeps the
-                    // bottom inset ≥ SP2 from the card bounds.
                     egui::ScrollArea::vertical()
                         .id_salt("issue-radar-sla-scroll")
                         .show(ui, |ui| {
@@ -807,8 +773,6 @@ impl IssueRadarPage {
                                     design::callout(ui, CalloutRole::Warn, &line);
                                 }
                                 ui.add_space(design::scale::space::SP1);
-                                // AUD-P2-12 (C8): the SLA drill-through —
-                                // open the breached conversation in the Inbox.
                                 if nav.is_none() {
                                     let open = ui.add(
                                         egui::Label::new(
@@ -869,8 +833,6 @@ impl IssueRadarPage {
                     if let Some(summary) = &cluster.summary {
                         design::hint_text(ui, summary.as_str());
                     }
-                    // AUD-P2-12 (C8): the cluster drill-down — member
-                    // conversations as clickable #N chips (first five).
                     if !cluster.sample_ids.is_empty() {
                         ui.horizontal(|ui| {
                             design::hint_text(ui, "members:");
@@ -944,8 +906,6 @@ impl IssueRadarPage {
                                 .color(t.foreground),
                         );
                     }
-                    // AUD-P2-12 (C8): the lifecycle controls the Known tab
-                    // lacked — status chips, edit, delete, link management.
                     ui.add_space(design::scale::space::SP1);
                     ui.horizontal(|ui| {
                         design::field_label(ui, "Status");
@@ -965,7 +925,6 @@ impl IssueRadarPage {
                         }
                     });
                     ui.add_space(design::scale::space::SP1);
-                    // Linked evidence: clickable chips + unlink + link form.
                     let links = db.with_read(|conn| load_known_links(conn, issue.id));
                     if !links.is_empty() {
                         ui.horizontal(|ui| {
@@ -1027,8 +986,6 @@ impl IssueRadarPage {
                             self.link_known_target = Some(issue.id);
                             self.link_conversation_id.clear();
                         }
-                        // AUD-P2-12 (C8): the shell's confirm dialog —
-                        // the same flow org/graph-node deletes use.
                         if design::button(ui, "Delete", ButtonVariant::Ghost)
                             .on_hover_text("delete this known issue and its links")
                             .clicked()
@@ -1044,8 +1001,6 @@ impl IssueRadarPage {
                 ui.add_space(design::scale::space::SP2);
             }
         });
-        // AUD-P2-12 (C8): the edit form (pre-filled title/symptoms/
-        // workaround; empty symptoms/workaround clears them on save).
         if let Some((id, mut title, mut symptoms, mut workaround)) = self.edit_known.clone() {
             design::card_titled(ui, "Edit known issue", None, |ui| {
                 design::form_grid(ui, "radar-edit-known", |ui| {
@@ -1072,7 +1027,6 @@ impl IssueRadarPage {
         }
     }
 
-    // AUD-P2-12 (C8): the known-issue lifecycle write paths.
     fn set_known_status(&mut self, db: &DbHandle, id: i64, status: &str) {
         match db.with_write(|conn| {
             spp_core::intelligence_features::set_known_issue_status(conn, id, status)
@@ -1422,7 +1376,6 @@ mod batch27_audit81_tests {
     }
 }
 
-// AUD-P2-12 (C8): the radar drill-downs + known-issue lifecycle.
 #[cfg(test)]
 mod audp2_tests {
     use super::*;
@@ -1453,7 +1406,6 @@ mod audp2_tests {
         let mut page = IssueRadarPage::new();
         page.reload(&db);
 
-        // Status transitions validate and reload.
         page.set_known_status(&db, known_id, "fix_in_progress");
         assert!(page.error.is_none(), "status write: {:?}", page.error);
         let status: String = db.with_read(|conn| {
@@ -1466,11 +1418,9 @@ mod audp2_tests {
         });
         assert_eq!(status, "fix_in_progress");
 
-        // A junk status is refused by the core vocabulary.
         page.set_known_status(&db, known_id, "magic");
         assert!(page.error.is_some(), "the vocabulary is closed");
 
-        // Text edits round-trip (empty workaround clears).
         page.save_known_edit(&db, known_id, "Login loop v2", "updated symptoms", "");
         let (name, symptoms, workaround): (String, Option<String>, Option<String>) =
             db.with_read(|conn| {
@@ -1485,7 +1435,6 @@ mod audp2_tests {
         assert_eq!(symptoms.as_deref(), Some("updated symptoms"));
         assert_eq!(workaround, None, "an empty save clears");
 
-        // Unlink + relink evidence.
         page.unlink_known(&db, known_id, 1);
         let links: i64 = db.with_read(|conn| {
             conn.query_row(
@@ -1508,7 +1457,6 @@ mod audp2_tests {
         });
         assert_eq!(links, 1);
 
-        // Delete removes the row and its links.
         let deleted = db
             .with_write(|conn| spp_core::intelligence_features::delete_known_issue(conn, known_id));
         assert!(deleted.unwrap_or(false));
@@ -1529,8 +1477,6 @@ mod audp2_tests {
     #[test]
     fn audp2_gap_examples_resolve_to_clickable_pairs() {
         let (db, known_id) = seeded();
-        // The gap path is exercised through load_known_links directly —
-        // evidence chips carry (local id, number).
         let links = db.with_read(|conn| load_known_links(conn, known_id));
         assert_eq!(links, vec![(1, 501)], "the fixture conversation resolves");
     }

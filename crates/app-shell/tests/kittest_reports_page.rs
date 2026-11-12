@@ -32,13 +32,6 @@ fn stamp(days_ago: i64, time: &str) -> String {
 }
 
 fn seeded_page() -> (ReportsPage, DbHandle) {
-    // UXG-1-9: the SLA tab renders wall-clock-dependent stats ("waiting
-    // oldest (min)" ticks every real minute — the first SLA-tab golden
-    // drifted +31 minutes between the update and diff runs). Pin the
-    // kittest clock (the UXB-T1 mechanism) to the fixture's own anchor so
-    // every now-read in the page — SLA waiting stats included — is
-    // deterministic. The default-tab goldens derive their ranges from
-    // `pin_today(anchor())` and don't read the clock, so they hold.
     assert!(
         spp_core::business_hours::pin_now_for_kittest(
             &spp_core::business_hours::now_iso_millis_at(anchor())
@@ -292,8 +285,6 @@ fn render_reports_page(dark: bool, width: f32, name: &str) {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                // VF-4 (V1 completion): render through the shared
-                // production host — the exact funnel app/mod.rs uses.
                 design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db, None));
             },
             ReportsPageState {
@@ -306,14 +297,6 @@ fn render_reports_page(dark: bool, width: f32, name: &str) {
     h.snapshot(name);
 }
 
-/// UXG-1-9: the 4K (3840 logical px) tier through the same
-/// `content_column` + margin frame the shell's page funnel wraps every
-/// standard page in — the swept data tables keep professional column
-/// widths inside the centered 1800px column instead of stretching
-/// seven-column lists across a 4K window. The optional tab opens a
-/// reports tab so the swept table registers (SLA's seven-column list,
-/// the Insights friction/graph tables) are locked, not just the default
-/// Overview.
 fn render_reports_page_capped(dark: bool, width: f32, tab: Option<&str>, name: &str) {
     let (page, db) = seeded_page();
     let mut h = Harness::builder()
@@ -329,12 +312,6 @@ fn render_reports_page_capped(dark: bool, width: f32, tab: Option<&str>, name: &
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                // The same funnel the shell renders every standard page
-                // in: full-width CentralPanel background → content_column
-                // cap → margin frame.
-                // VF-4 (V1 completion): the capped golden renders through
-                // the shared production host (scroll + column + SP5/14) —
-                // the old inline copy drifted with a literal 22 margin.
                 design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db, None));
             },
             ReportsPageState {
@@ -362,16 +339,11 @@ fn uxg_reports_capped_2560_dark() {
     render_reports_page_capped(true, 2560.0, None, "uxg_reports_capped_2560_dark");
 }
 
-/// UXG-1-3: the swept SLA list at a standard width — the exact-column
-/// data_table register (header strip, integer columns, span-the-card)
-/// replaces the old natural-width table on the SLA tab.
 #[test]
 fn uxg_reports_sla_tab_1440_light() {
     render_reports_page_capped(false, 1440.0, Some("SLA"), "uxg_reports_sla_tab_1440_light");
 }
 
-/// UXG-1-3: the swept Insights tables (friction + graph nodes) at a
-/// standard width.
 #[test]
 fn uxg_reports_insights_tab_1440_light() {
     render_reports_page_capped(
@@ -424,8 +396,6 @@ fn r3_reports_builder_tab_light() {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                // VF-4 (V1 completion): render through the shared
-                // production host — the exact funnel app/mod.rs uses.
                 design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db, None));
             },
             ReportsPageState {

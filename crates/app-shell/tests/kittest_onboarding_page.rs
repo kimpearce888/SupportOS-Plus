@@ -62,8 +62,6 @@ fn render_onboarding_page(dark: bool, width: f32, name: &str) {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                // VF-4 (V1 completion): render through the shared
-                // production host — the exact funnel app/mod.rs uses.
                 design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db, None));
             },
             OnboardingPageState {
@@ -118,8 +116,6 @@ fn r3_onboarding_mark_complete_light() {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                // VF-4 (V1 completion): render through the shared
-                // production host — the exact funnel app/mod.rs uses.
                 design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db, None));
             },
             OnboardingPageState {

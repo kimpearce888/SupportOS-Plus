@@ -13,9 +13,6 @@ enum TriggerKind {
 }
 
 impl TriggerKind {
-    // AU2-1/D10: the creation form offers exactly the engine's fire vocabulary.
-    // The legacy M007 triggers (status_changed/tag_added/sla_risk) have no
-    // emitter in program code — offering them created rules that could never fire.
     const ALL: [Self; 2] = [Self::NewConversation, Self::CustomerReply];
 
     fn label(self) -> &'static str {
@@ -35,8 +32,6 @@ enum ActionKind {
 }
 
 impl ActionKind {
-    // AU2-1/D10: only actions the engine executes. SetPriority was removed —
-    // the engine has no handler and silently recorded "completed" no-ops.
     const ALL: [Self; 4] = [
         Self::Assign,
         Self::AddTag,
@@ -67,17 +62,11 @@ pub(crate) fn trigger_description(trigger: &Trigger) -> String {
         }
         Trigger::TagAdded { tag } => format!("tag '{tag}' added"),
         Trigger::SlaRisk => "SLA at risk".into(),
-        // AU2-1/D10: the engine's fire vocabulary.
         Trigger::NewConversation => "a new customer conversation starts".into(),
         Trigger::CustomerReply => "the customer replies on a conversation".into(),
     }
 }
 
-// AUD-P0-5 (B1): the three M007 triggers have no emitter in program code —
-// the only production fire path emits new_conversation/customer_reply, and
-// the creation form deliberately offers nothing else (AU2-1/D10). Stored
-// legacy rules must not be presented as functional: they never fire and
-// record nothing.
 #[must_use]
 pub(crate) fn trigger_is_legacy(trigger: &Trigger) -> bool {
     matches!(
@@ -106,10 +95,6 @@ fn truncate(s: &str, max: usize) -> &str {
     }
 }
 
-/// AUD-P1-5 (C6): the Help Scout status vocabulary — the same list the
-/// inbox status control uses and `ticket_ops::execute_change_status`
-/// enforces. The automation form validates against it instead of accepting
-/// free text.
 pub(crate) const CONVERSATION_STATUSES: [&str; 4] = ["active", "pending", "closed", "spam"];
 
 #[derive(Debug, Clone)]
@@ -145,14 +130,10 @@ pub struct AutomationPage {
     loaded: bool,
     approvals: Vec<ApprovalRow>,
     show_new_rule: bool,
-    /// AUD-P1-5 (C6): Some(id) puts the form into edit mode for that rule
-    /// (prefilled); None is the plain create form.
     edit_id: Option<i64>,
     new_name: String,
     trigger_kind: TriggerKind,
     action_kind: ActionKind,
-    /// AUD-P1-5 (C6): the assignee picker (the assignable-users list the
-    /// Inbox already uses) replaces the raw numeric-id text field.
     action_assignee_pick: Option<i64>,
     action_tag: String,
     action_note: String,
@@ -198,8 +179,6 @@ impl AutomationPage {
             Err(e) => self.error = Some(e.to_string()),
         }
         self.approvals = db.with_read(load_pending_approvals);
-        // AUD-P1-5 (C6): the assignable-users list for the assignee picker —
-        // the same source the Inbox uses.
         self.users = db.with_read(crate::pages::inbox::assignable_users);
         self.loaded = true;
     }
@@ -220,7 +199,6 @@ impl AutomationPage {
     }
 
     fn form_trigger(&self) -> Result<Trigger, String> {
-        // AU2-1/D10: the creation form offers exactly the engine's vocabulary.
         match self.trigger_kind {
             TriggerKind::NewConversation => Ok(Trigger::NewConversation),
             TriggerKind::CustomerReply => Ok(Trigger::CustomerReply),
@@ -230,8 +208,6 @@ impl AutomationPage {
     fn form_action(&self) -> Result<Action, String> {
         match self.action_kind {
             ActionKind::Assign => {
-                // AUD-P1-5 (C6): the picker replaced the free numeric-id
-                // text field — an unpicked user is the only failure left.
                 let id = self
                     .action_assignee_pick
                     .ok_or_else(|| "assignee required — pick a user".to_string())?;
@@ -256,9 +232,6 @@ impl AutomationPage {
                 })
             }
             ActionKind::ChangeStatus => {
-                // AUD-P1-5 (C6): the status vocabulary is validated, not
-                // free text — a typo used to store silently and only
-                // Rejected at execute time.
                 let status = required(&self.action_status, "status")?;
                 if !CONVERSATION_STATUSES.contains(&status.as_str()) {
                     return Err(format!(
@@ -273,9 +246,6 @@ impl AutomationPage {
 
     fn start_edit(&mut self, db: &DbHandle, rule: &AutomationRule) {
         let id = rule.id;
-        // Only the form's own vocabulary is editable — legacy triggers
-        // (never fire) and action kinds the form doesn't offer are refused
-        // honestly; delete + recreate is the right path for those.
         let trigger_kind = match &rule.trigger {
             Trigger::NewConversation => Some(TriggerKind::NewConversation),
             Trigger::CustomerReply => Some(TriggerKind::CustomerReply),
@@ -283,8 +253,6 @@ impl AutomationPage {
         };
         let (action_kind, pick, tag, note, status) = match &rule.action {
             Action::Assign { assignee_remote_id } => {
-                // the executor resolves local OR remote ids — map the stored
-                // id onto the picker's local ids.
                 let local: Option<i64> = db.with_read(|conn| {
                     conn.query_row(
                         "SELECT id FROM users WHERE id = ?1 OR remote_id = ?1 LIMIT 1",
@@ -371,8 +339,6 @@ impl AutomationPage {
                 return;
             }
         };
-        // AUD-P1-5 (C6): edit mode reuses the same form — the write goes to
-        // update_rule and keeps the enabled flag untouched.
         if let Some(edit_id) = self.edit_id {
             let rule = AutomationRule {
                 id: Some(edit_id),
@@ -463,7 +429,6 @@ impl AutomationPage {
         let rules = self.rules.clone();
         let mut toggled: Option<(i64, bool)> = None;
         let mut delete_requested: Option<(i64, String)> = None;
-        // AUD-P1-5 (C6): the edit target, if any.
         let mut edit_requested: Option<AutomationRule> = None;
         design::card_titled_wide(
             ui,
@@ -474,9 +439,6 @@ impl AutomationPage {
                 if rules.len() == 1 { "" } else { "s" }
             )),
             |ui| {
-                // UX-2: a header-only table with no rows reads as a
-                // broken component — give the empty case a real
-                // empty state instead.
                 if rules.is_empty() {
                     design::empty_state(
                         ui,
@@ -489,8 +451,6 @@ impl AutomationPage {
                     );
                     return;
                 }
-                // UXG-1-5: exact-column data_table (virtualized rows built
-                // in) — the rules list spans the card at every width.
                 design::data_table(
                     ui,
                     "automation-rule-table",
@@ -507,9 +467,6 @@ impl AutomationPage {
                                 .strong()
                                 .color(t.foreground),
                         );
-                        // AUD-P0-5 (B1): legacy-trigger rules are displayed
-                        // with the truth — they never fire, so they must not
-                        // read as working automations.
                         if trigger_is_legacy(&rule.trigger) {
                             ui.horizontal(|ui| {
                                 ui.label(
@@ -559,8 +516,6 @@ impl AutomationPage {
                             {
                                 toggled = Some((id, !rule.enabled));
                             }
-                            // AUD-P1-5 (C6): edit the rule in the form above —
-                            // delete + recreate is no longer the only path.
                             if design::button(ui, "Edit", ButtonVariant::Outline)
                                 .on_hover_text("open this rule in the form above")
                                 .clicked()
@@ -628,8 +583,6 @@ impl AutomationPage {
                                     .strong()
                                     .color(t.foreground),
                                 );
-                                // AU2-1c: rows hold canonical engine actions —
-                                // describe both storage shapes.
                                 let human = spp_core::automation::describe_action_json(
                                     &approval.proposed_action,
                                 );
@@ -654,9 +607,6 @@ impl AutomationPage {
                     });
             },
         );
-        // VF-3 (C5): the page's short-content state — with a handful of
-        // rules the window's bottom half was an unmanaged void. The
-        // end-note bounds the page with the list's true count.
         if !rules.is_empty() {
             design::list_end_note(
                 ui,
@@ -675,7 +625,6 @@ impl AutomationPage {
 
     fn new_rule_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         let t = design::tokens(ui);
-        // AUD-P1-5 (C6): one form, two modes — create and edit.
         let editing = self.edit_id.is_some();
         design::card(ui, |ui| {
             design::section_title(ui, if editing { "Edit Rule" } else { "New Rule" });
@@ -707,7 +656,6 @@ impl AutomationPage {
                     }
                 });
                 ui.end_row();
-                // AU2-1/D10: the engine-vocabulary triggers carry no parameters.
 
                 design::field_label(ui, "Action");
                 ui.horizontal(|ui| {
@@ -721,9 +669,6 @@ impl AutomationPage {
 
                 match self.action_kind {
                     ActionKind::Assign => {
-                        // AUD-P1-5 (C6): the assignable-users list — the
-                        // same picker the Inbox uses — replaces the raw
-                        // numeric-id text field.
                         design::field_label(ui, "Assignee");
                         let assign_label = self
                             .action_assignee_pick
@@ -763,8 +708,6 @@ impl AutomationPage {
                         ui.end_row();
                     }
                     ActionKind::ChangeStatus => {
-                        // AUD-P1-5 (C6): the status vocabulary is a segmented
-                        // control — no unvalidated free text.
                         design::field_label(ui, "Status");
                         let active = CONVERSATION_STATUSES
                             .iter()
@@ -829,7 +772,6 @@ mod tests {
         let db = fixture(Vec::new());
         let mut page = AutomationPage::new();
         page.new_name = "Escalate urgent".into();
-        // AU2-1/D10: the form now offers the engine's fire vocabulary.
         page.trigger_kind = TriggerKind::CustomerReply;
         page.action_kind = ActionKind::ChangeStatus;
         page.action_status = "pending".into();
@@ -889,18 +831,13 @@ mod tests {
     fn form_validation_rejects_empty_fields() {
         let mut page = AutomationPage::new();
         page.new_name = "Rule".into();
-        // AU2-1/D10: trigger forms carry no parameters; validation lives on the
-        // action side now. The trigger form always succeeds.
         assert!(page.form_trigger().is_ok());
         page.action_kind = ActionKind::Assign;
-        // AUD-P1-5 (C6): the numeric-id text field is gone — an unpicked
-        // user is the rejection case now.
         assert!(page.form_action().is_err());
         page.action_kind = ActionKind::SendNote;
         assert!(page.form_action().is_err());
         page.action_note = "  ".into();
         assert!(page.form_action().is_err());
-        // AUD-P1-5 (C6): the status vocabulary is validated, not free text.
         page.action_kind = ActionKind::ChangeStatus;
         page.action_status = "Extenguished".into();
         let err = page.form_action().expect_err("junk status rejected");
@@ -990,8 +927,6 @@ mod tests {
         assert!(action_description(&note).starts_with("send note: "));
     }
 
-    // AUD-P0-5 (B1): exactly the three M007 triggers are legacy — the two
-    // fire-vocabulary triggers are live.
     #[test]
     fn legacy_triggers_are_identified_for_honest_display() {
         assert!(trigger_is_legacy(&Trigger::StatusChanged {
@@ -1074,7 +1009,6 @@ mod batch27_audit80_tests {
             "without a captured identity the Ada stand-in decides (pre-fix behavior)"
         );
     }
-    // ---- AUD-P1-5 (C6): rule editing + validated inputs ----
 
     #[test]
     fn audp15_edit_round_trips_through_the_form() {
@@ -1083,7 +1017,6 @@ mod batch27_audit80_tests {
         page.reload(&db);
         assert!(!page.users.is_empty(), "the assignee picker has users");
 
-        // create a rule to edit
         page.new_name = "Triage".into();
         page.trigger_kind = TriggerKind::CustomerReply;
         page.action_kind = ActionKind::AddTag;
@@ -1093,7 +1026,6 @@ mod batch27_audit80_tests {
         let rule = page.rules[0].clone();
         let id = rule.id.expect("id");
 
-        // open the edit form — prefilled
         page.start_edit(&db, &rule);
         assert_eq!(page.edit_id, Some(id));
         assert_eq!(page.new_name, "Triage");
@@ -1101,7 +1033,6 @@ mod batch27_audit80_tests {
         assert_eq!(page.action_kind, ActionKind::AddTag);
         assert_eq!(page.action_tag, "triage");
 
-        // change name + action, save
         page.new_name = "Triage v2".into();
         page.action_kind = ActionKind::ChangeStatus;
         page.action_status = "pending".into();

@@ -48,8 +48,6 @@ pub(crate) fn invalidated_pages(event: &ServerEvent) -> Vec<PageKey> {
         ServerEvent::OutboundJobFinished(_) => {
             vec![PageKey::Inbox, PageKey::Diagnostics]
         }
-        // AUD-P1-2 (C2): a finished connector refresh reloads the page that
-        // shows health/last-sync/rows — no more stale-until-unrelated-sync.
         ServerEvent::ConnectorRefreshed(_) => vec![PageKey::Connectors],
         ServerEvent::NotificationReceived(_) => {
             vec![PageKey::Inbox, PageKey::Notifications, PageKey::Operations]

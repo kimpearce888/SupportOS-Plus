@@ -19,9 +19,6 @@ fn seeded_page() -> (AiCenterPage, DbHandle) {
     (AiCenterPage::new(), DbHandle::new(conn))
 }
 
-/// UXF-1-7: a page seeded like the owner's screenshot report — failed
-/// golden_eval runs in the Jobs table and a 0/9 golden-set run whose
-/// cases all died on the LM Studio HTTP 400.
 fn seeded_failures_page() -> (AiCenterPage, DbHandle) {
     let (page, db) = seeded_page();
     db.with_write(|conn| {
@@ -60,10 +57,6 @@ fn seeded_failures_page() -> (AiCenterPage, DbHandle) {
             })
         })
         .collect();
-        // `started_at` is pinned explicitly: the column DEFAULTs to
-        // wall-clock `now`, and the Usage tab renders the raw stamp —
-        // an unset value drifts the golden text run-to-run (the exact
-        // nondeterminism class UXB-T1 closed for the other suites).
         conn.execute(
             "INSERT INTO golden_test_runs (backend, passed, failed, results, started_at)
              VALUES (?1, 0, 9, ?2, '2026-11-05T23:52:07.412Z')",
@@ -94,8 +87,6 @@ fn render_ai_center_page(dark: bool, width: f32, name: &str) {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                // VF-4 (V1 completion): render through the shared
-                // production host — the exact funnel app/mod.rs uses.
                 design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db));
             },
             AiCenterPageState {
@@ -150,8 +141,6 @@ fn r3_ai_center_usage_tab_light() {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                // VF-4 (V1 completion): render through the shared
-                // production host — the exact funnel app/mod.rs uses.
                 design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db));
             },
             AiCenterPageState {
@@ -174,9 +163,6 @@ fn r3_ai_center_usage_tab_light() {
     h.snapshot("r3_ai_center_usage_tab_light");
 }
 
-/// UXF-1-7: the seeded Jobs table (full-width card + data_table) —
-/// locked at a wide and a narrow viewport so the width discipline is
-/// diff-locked forever.
 #[test]
 fn r3_ai_center_jobs_tab_seeded_1440_light() {
     render_seeded_tab("Jobs", 1440.0, "r3_ai_center_jobs_tab_seeded_1440_light");
@@ -187,9 +173,6 @@ fn r3_ai_center_jobs_tab_seeded_800_light() {
     render_seeded_tab("Jobs", 800.0, "r3_ai_center_jobs_tab_seeded_800_light");
 }
 
-/// UXF-1-7: the Usage tab with a 0/9 failing golden run — the contained
-/// run block with the grouped mono error line (the owner-reported
-/// 27-line dump state, now collapsed) is diff-locked.
 #[test]
 fn r3_ai_center_usage_tab_failing_run_1440_light() {
     render_seeded_tab(
@@ -219,8 +202,6 @@ fn render_seeded_tab(tab: &str, width: f32, name: &str) {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                // VF-4 (V1 completion): render through the shared
-                // production host — the exact funnel app/mod.rs uses.
                 design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db));
             },
             AiCenterPageState {
@@ -239,11 +220,6 @@ fn render_seeded_tab(tab: &str, width: f32, name: &str) {
     h.snapshot(name);
 }
 
-/// AUD-P1-6 (C7): the price-editor state — a custom (non-builtin)
-/// endpoint carries the $/mtok line with the "Edit Prices" act; opening
-/// it shows the inline prompt/completion pair with Save/Cancel. The
-/// builtin endpoints (the base goldens) have no price line — prices are
-/// a remote-endpoint concept.
 #[test]
 fn audp1_ai_center_price_editor_light() {
     let (page, db) = seeded_page();
@@ -264,9 +240,6 @@ fn audp1_ai_center_price_editor_light() {
         Ok::<(), spp_core::Error>(())
     })
     .expect("seed");
-    // tall harness: the endpoints card sits below the Health tab's upper
-    // cards — the Edit Prices act must be inside the screen rect for the
-    // click to land (a found-but-below-the-fold widget ignores clicks).
     let mut h = Harness::builder()
         .with_size(egui::vec2(1440.0, 2400.0))
         .with_theme(egui::Theme::Light)
@@ -276,8 +249,6 @@ fn audp1_ai_center_price_editor_light() {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                // VF-4 (V1 completion): render through the shared
-                // production host — the exact funnel app/mod.rs uses.
                 design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db));
             },
             AiCenterPageState {

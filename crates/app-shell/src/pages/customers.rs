@@ -157,8 +157,6 @@ pub struct CustomersPage {
 }
 
 impl CustomersPage {
-    /// AU2-9: replace the click-time "syncing…" note with the completion
-    /// outcome (the note used to stick forever once set).
     pub(crate) fn sync_finished(&mut self, outcome: &str) {
         if !self.sync_note.is_empty() {
             self.sync_note = outcome.to_string();
@@ -436,12 +434,6 @@ impl CustomersPage {
                     dt_cell(
                         ui,
                         140.0,
-                        // UX-19: "—" carried no meaning — an absent contact
-                        // date is explicit information, so say it.
-                        // UXG-1-6: a raw ISO stamp ellipsizes in the 140px
-                        // column and reads as machine noise — the shared
-                        // relative-time formatter ("3d ago", "Yesterday")
-                        // keeps the column human at every width.
                         egui::RichText::new(
                             row.last_contact
                                 .as_deref()
@@ -488,10 +480,6 @@ impl CustomersPage {
             self.reload_search(db);
         }
 
-        // VF-3 (C5): the short-content end-of-page marker — a filtered list
-        // of a few rows left the window's bottom half unmanaged. The note
-        // bounds the page with the mirror's true total (the pager handles
-        // page math; this answers "is that all of them?").
         if !rows.is_empty() {
             let total = self.total;
             design::list_end_note(
@@ -523,8 +511,6 @@ impl CustomersPage {
             .filter(|n| !n.is_empty())
             .unwrap_or_else(|| "Customer".to_string());
         let mut panel_open = self.panel_open;
-        // AUD-P1-4 (C5): the profile panel can navigate (a conversation
-        // row opens the Inbox).
         let mut panel_nav: Option<NavRequest> = None;
         design::detail_panel(
             ui.ctx(),
@@ -570,8 +556,6 @@ impl CustomersPage {
                         interaction.as_ref(),
                         recommendation.as_ref(),
                     );
-                    // AUD-P1-4 (C5): a clicked conversation row surfaces as
-                    // the page's nav request.
                     if let Some(nav) = conversations_ui(&mut cols[1], &conversations)
                         && panel_nav.is_none()
                     {
@@ -875,17 +859,12 @@ fn conversations_ui(
     items: &[spp_core::inbox::ConversationListItem],
 ) -> Option<NavRequest> {
     let t = design::tokens(ui);
-    // AUD-P1-4 (C5): the clicked conversation, if any — the rows are
-    // finally clickable and land in the Inbox reader.
     let mut opened: Option<NavRequest> = None;
     design::card_titled_wide(ui, "Conversations", None, |ui| {
         if items.is_empty() {
             design::hint_text(ui, "(no conversations)");
             return;
         }
-        // UXG-1-5: exact-column data_table — the conversation list spans
-        // the card at every width (the detail panel's own column, not the
-        // full page).
         design::data_table(
             ui,
             "customer-conversations",
@@ -895,8 +874,6 @@ fn conversations_ui(
             |ui, i| {
                 let item = &items[i];
                 design::td_num(ui, &item.number.to_string());
-                // AUD-P1-4 (C5): the subject opens the conversation in the
-                // Inbox (the audit's "not clickable" dead end).
                 let response = ui
                     .add(
                         egui::Label::new(

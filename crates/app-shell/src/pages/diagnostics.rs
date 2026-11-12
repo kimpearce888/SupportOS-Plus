@@ -32,10 +32,6 @@ impl LevelFilter {
     }
 }
 
-/// UX-21: per-level counts taken from the full event fetch, so every filter
-/// chip can carry its count — the counts become the path to the events they
-/// describe (click "Errors 36" to see the 36 errors) instead of a dead-end
-/// subtitle line.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct EventCounts {
     all: usize,
@@ -141,10 +137,6 @@ impl DiagnosticsPage {
     }
 
     fn reload(&mut self, db: &DbHandle) {
-        // UX-21: one full fetch (no level filter) feeds both the per-level
-        // counts and the filtered view — the counts stay stable no matter
-        // which filter is active, so the chips always tell the truth about
-        // what is in the log.
         let all = db.with_read(|conn| {
             spp_core::audit::list_recent_events(conn, 200, None).unwrap_or_default()
         });
@@ -222,9 +214,6 @@ impl DiagnosticsPage {
         let audit = self.audit.clone().unwrap_or_default();
 
         let counts = self.event_counts;
-        // UX-21: proper pluralization — no more "event(s)" programmer
-        // notation; the error/warning counts moved onto the filter chips
-        // where they are actionable.
         let subtitle = format!(
             "{} event{} shown · newest first",
             events.len(),
@@ -343,8 +332,6 @@ impl DiagnosticsPage {
                 );
                 return;
             }
-            // UXG-1-5: exact-column data_table — the audit list spans the
-            // card at every width.
             design::data_table(
                 ui,
                 "diagnostics-audit",
@@ -438,8 +425,6 @@ impl DiagnosticsPage {
                     );
                     return;
                 }
-                // UXG-1-5: exact-column data_table — the runs list spans
-                // the card at every width (virtualized rows built in).
                 design::data_table(
                     ui,
                     "diagnostics-runs",
@@ -504,9 +489,6 @@ impl DiagnosticsPage {
                          assignments are dispatched to Help Scout within seconds.",
                 );
             } else {
-                // UXG-1-5: exact-column data_table (virtualized rows built
-                // in) — the failed-delivery list spans the card at every
-                // width; the trailing error column stays beside its header.
                 design::data_table(
                     ui,
                     "diagnostics-outbound",
@@ -609,8 +591,6 @@ mod tests {
         assert_eq!(events[0].message, "bad thing");
     }
 
-    /// UX-21: the chip counts must describe the whole log (so "Errors 36"
-    /// is honest) while the visible list honors the active filter.
     #[test]
     fn level_counts_cover_the_full_log_while_the_view_filters() {
         let db = fixture(Vec::new());
@@ -656,9 +636,6 @@ mod tests {
     fn audit_trail_card_lists_recorded_changes() {
         let db = fixture(Vec::new());
         db.with_write(|conn| {
-            // AU2-13: the dead AuditEntry builders (with_conversation_id /
-            // with_before_state) were deleted; the seeding goes through the
-            // program's own conversation-scoped audit API instead.
             spp_core::jobs::audit(
                 conn,
                 "user",

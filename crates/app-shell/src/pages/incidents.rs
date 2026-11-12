@@ -43,8 +43,6 @@ pub struct IncidentsPage {
     new_conversation_ids: String,
     new_note: String,
     link_conversation: String,
-    // AUD-P1-3 (C4): the lifecycle edit state — owner picker + the four
-    // editable long-text fields, prefilled from the detail on every load.
     users: Vec<(i64, String)>,
     owner_pick: Option<i64>,
     edit_description: String,
@@ -162,8 +160,6 @@ impl IncidentsPage {
         self.sync_editors();
     }
 
-    /// AUD-P1-3 (C4): prefill the lifecycle editors (and the owner picker)
-    /// from the freshly loaded detail, so saved changes round-trip.
     fn sync_editors(&mut self) {
         let Some(detail) = &self.detail else { return };
         let incident = detail
@@ -340,8 +336,6 @@ impl IncidentsPage {
         }
     }
 
-    // ---- AUD-P1-3 (C4): the lifecycle write paths ----
-
     fn set_status(&mut self, db: &DbHandle, status: &str) {
         let Some(incident_id) = self.selected else {
             return;
@@ -438,16 +432,10 @@ impl IncidentsPage {
 
     pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) -> Option<NavRequest> {
         self.ensure_loaded(db);
-        // AUD-P1-3 (C4): the owner picker needs the assignable users —
-        // the same list the Inbox uses.
         if self.users.is_empty() {
             self.users = db.with_read(assignable_users);
         }
 
-        // UXG-1-7: one count register — the counter pill carries the
-        // incident count; the subtitle describes the page's scope and only
-        // breaks into numbers for the "first X of Y" truncation case (the
-        // old subtitle repeated the count the pill already showed).
         let subtitle = if (self.rows.len() as i64) < self.total {
             format!("Showing the first {} of {}", self.rows.len(), self.total)
         } else {
@@ -473,8 +461,6 @@ impl IncidentsPage {
         let apply = design::filter_bar(
             ui,
             |ui| {
-                // UX-17: the two dropdowns carry visible labels — two bare
-                // "Any" combos were indistinguishable.
                 design::field_label(ui, "Status:");
                 let prev_status = self.filter_status.clone();
                 let status_label = self.filter_status.clone().unwrap_or_else(|| "Any".into());
@@ -557,8 +543,6 @@ impl IncidentsPage {
         let rows = self.rows.clone();
         let mut pick: Option<i64> = None;
         if rows.is_empty() {
-            // UX-17: the empty state must match reality — "no filters set"
-            // is a first-run state, not a filter mismatch.
             let filters_active = self.filter_status.is_some()
                 || self.filter_severity.is_some()
                 || self.filter_open_only
@@ -669,8 +653,6 @@ impl IncidentsPage {
             self.select(db, id);
         }
 
-        // VF-3 (C5): the short-content end-of-page marker — an incident list
-        // is short by nature; the note bounds the page with the true count.
         if !rows.is_empty() {
             design::list_end_note(
                 ui,
@@ -689,8 +671,6 @@ impl IncidentsPage {
             .filter(|t| !t.is_empty() && t != " · ")
             .unwrap_or_else(|| "Incident".to_string());
         let mut panel_open = self.panel_open;
-        // AUD-P1-3 (C4): the panel can now navigate (open a linked
-        // conversation) and arm the delete confirm.
         let mut panel_nav: Option<NavRequest> = None;
         design::detail_panel(
             ui.ctx(),
@@ -740,10 +720,6 @@ impl IncidentsPage {
                 });
                 design::divider(ui);
 
-                // AUD-P1-3 (C4): the lifecycle controls — status, severity
-                // and owner were permanently what the create form set
-                // (always `None` for the owner from the UI); they are live
-                // writes through the core lifecycle functions now.
                 design::card_titled(
                     ui,
                     "Lifecycle",
@@ -822,8 +798,6 @@ impl IncidentsPage {
                 );
                 ui.add_space(design::scale::space::SP2);
 
-                // AUD-P1-3 (C4): the long-text lifecycle fields are editable
-                // (and visible even when unset — an empty card can be filled).
                 for (label, key) in [
                     ("Description", "description"),
                     ("Customer-safe summary", "customer_safe_explanation"),
@@ -861,9 +835,6 @@ impl IncidentsPage {
                         &format!("Linked conversations ({})", conversations.len()),
                         None,
                         |ui| {
-                            // AUD-P1-3 (C4): each linked conversation opens in
-                            // the Inbox and can be unlinked (reversible — the
-                            // link form can bring it back).
                             for conv in &conversations {
                                 let conv_id = i64_field(conv, "conversation_id");
                                 ui.horizontal(|ui| {
@@ -922,10 +893,6 @@ impl IncidentsPage {
                             None,
                             |ui| {
                                 for release in &releases {
-                                    // AUD-P1-3 (C4): read the keys the reader
-                                    // actually emits (`version_label` /
-                                    // `released_at`) — the old `version` /
-                                    // `status` reads always rendered empty.
                                     ui.label(
                                         egui::RichText::new(format!(
                                             "{} · {}",
@@ -993,7 +960,6 @@ impl IncidentsPage {
         panel_nav
     }
 
-    /// AUD-P1-3 (C4): map a lifecycle field key to its editor slot.
     fn edit_slot(&mut self, field: &str) -> &mut String {
         match field {
             "description" => &mut self.edit_description,
@@ -1004,8 +970,6 @@ impl IncidentsPage {
         }
     }
 
-    /// AUD-P1-3 (C4): close the detail panel (called by the shell after a
-    /// confirmed delete).
     pub(crate) fn close_panel(&mut self) {
         self.panel_open = false;
         self.selected = None;
@@ -1231,8 +1195,6 @@ mod tests {
         assert_eq!(str_field(&page.rows[0], "title"), "Alpha");
     }
 
-    // ---- AUD-P1-3 (C4): the incident lifecycle ----
-
     fn lifecycle_db() -> (spp_core::db::DbHandle, i64) {
         let db = fixture(vec![(
             "conv",
@@ -1277,7 +1239,6 @@ mod tests {
         page.reload_list(&db);
         page.select(&db, id);
 
-        // status: resolved sets resolved_at and reorders the list honestly
         page.set_status(&db, "resolved");
         let incident = page.detail.as_ref().expect("detail");
         let incident = incident.get("incident").unwrap_or(incident);
@@ -1290,13 +1251,11 @@ mod tests {
             "resolved incidents sort last"
         );
 
-        // reopening clears the stamp
         page.set_status(&db, "investigating");
         let incident = page.detail.as_ref().expect("detail");
         let incident = incident.get("incident").unwrap_or(incident);
         assert!(opt_str_field(incident, "resolved_at").is_none());
 
-        // severity + owner
         page.set_severity(&db, "sev1");
         page.set_owner(&db, Some(5));
         let incident = page.detail.as_ref().expect("detail");
@@ -1311,7 +1270,6 @@ mod tests {
             Some("Ada Lovelace")
         );
 
-        // clearing the owner works
         page.set_owner(&db, None);
         let incident = page.detail.as_ref().expect("detail");
         let incident = incident.get("incident").unwrap_or(incident);
@@ -1322,7 +1280,6 @@ mod tests {
                 .is_none()
         );
 
-        // junk values are rejected by core, surfaced by the page
         page.set_status(&db, "extinguished");
         assert!(
             page.error
@@ -1355,17 +1312,14 @@ mod tests {
             opt_str_field(incident, "workaround").as_deref(),
             Some("Clear the cache")
         );
-        // the editor round-trips the saved value
         assert_eq!(page.edit_workaround, "Clear the cache");
 
-        // clearing: an empty save writes NULL
         page.edit_resolution = "   ".into();
         page.save_field(&db, "resolution", &page.edit_resolution.clone());
         let incident = page.detail.as_ref().expect("detail");
         let incident = incident.get("incident").unwrap_or(incident);
         assert!(opt_str_field(incident, "resolution").is_none());
 
-        // unknown fields are rejected
         page.save_field(&db, "title", "nope");
         assert!(page.error.as_deref().unwrap_or("").contains("not editable"));
     }
@@ -1373,7 +1327,6 @@ mod tests {
     #[test]
     fn audp13_unlink_and_events() {
         let (db, id) = lifecycle_db();
-        // link one conversation, then unlink it from the page
         let conv_id = 1;
         db.with_write(|conn| {
             spp_core::intelligence_features::link_incident_conversation(conn, id, conv_id, "manual")

@@ -94,9 +94,6 @@ impl SupportGraphPage {
         }
     }
 
-    // AU2-13a (census disposition "gate"): this hook exists only for the
-    // kittest suites — the program itself never seeds a search. Gated to the
-    // kittest-ui feature so release builds carry no test surface.
     #[cfg(feature = "kittest-ui")]
     pub fn kittest_seed_search(&mut self, db: &DbHandle, query: &str) {
         self.query = query.to_string();
@@ -177,8 +174,6 @@ impl SupportGraphPage {
                 super::i64_field(stats, "human_edges"),
             )
         });
-        // UX-16: an all-zero graph explains itself and points at the fix
-        // instead of listing empty counters like debug output.
         let graph_empty = graph_links.is_some_and(|(a, b, c)| a + b + c == 0);
         let subtitle = if graph_empty {
             "No graph data yet — connect a source and sync to build links".to_string()
@@ -222,8 +217,6 @@ impl SupportGraphPage {
 
         if self.query.is_empty() {
             if graph_empty {
-                // UX-16: dead end → the CTA opens Connectors, where sources
-                // are actually configured.
                 if design::empty_state_cta_with(
                     ui,
                     Icon::ShareGraph,

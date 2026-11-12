@@ -40,7 +40,6 @@ pub enum DestructiveAction {
     DeleteConnector {
         id: i64,
     },
-    /// AUD-P1-3 (C4): delete an incident (with confirm).
     DeleteIncident {
         id: i64,
     },
@@ -62,15 +61,12 @@ pub enum DestructiveAction {
         mailbox_remote_id: i64,
         remote_id: i64,
     },
-    /// AUD-P2-16 (C12): delete an organization (soft delete, with confirm).
     DeleteOrganization {
         id: i64,
     },
-    /// AUD-P2-14 (C10): delete a manually-added support-graph node.
     DeleteGraphNode {
         id: i64,
     },
-    /// AUD-P2-12 (C8): delete a known issue.
     DeleteKnownIssue {
         id: i64,
     },
@@ -141,7 +137,6 @@ impl ConfirmRequest {
     }
 
     #[must_use]
-    /// AUD-P2-16 (C12): organization delete confirm.
     pub(crate) fn delete_organization(id: i64, name: &str) -> Self {
         Self {
             title: "Delete organization?".into(),
@@ -155,7 +150,6 @@ impl ConfirmRequest {
         }
     }
 
-    /// AUD-P2-14 (C10): graph-node delete confirm.
     pub(crate) fn delete_graph_node(id: i64, label: &str) -> Self {
         Self {
             title: "Delete graph node?".into(),
@@ -168,7 +162,6 @@ impl ConfirmRequest {
         }
     }
 
-    /// AUD-P2-12 (C8): known-issue delete confirm.
     pub(crate) fn delete_known_issue(id: i64, name: &str) -> Self {
         Self {
             title: "Delete known issue?".into(),
@@ -192,8 +185,6 @@ impl ConfirmRequest {
         }
     }
 
-    /// AUD-P1-3 (C4): incident deletion confirm — the workspace (links,
-    /// notes, events) is removed with the incident.
     #[must_use]
     pub(crate) fn delete_incident(id: i64, code: &str, title: &str) -> Self {
         Self {
@@ -318,15 +309,10 @@ pub enum NavRequest {
     InboxTile(String),
     Page(PageKey),
     Confirm(ConfirmRequest),
-    /// Deep link `/inbox/conversation/{id}` — open Inbox on that conversation.
     OpenConversation(i64),
-    /// Deep link `/customers/{id}` — open the customer profile panel.
     OpenCustomer(i64),
-    /// Deep link `/knowledge?doc={id}` — open Knowledge on the documents list.
     OpenKnowledgeDoc(i64),
-    /// Deep link `/knowledge/help-center/{id}` — open the help-center article reader.
     OpenHelpArticle(i64),
-    /// Deep link `/issues?tab=known` — open Issue Radar on the Known tab.
     OpenKnownIssues,
 }
 
@@ -423,9 +409,6 @@ mod queries;
 pub(crate) use json_fields::{i64_field, opt_str_field, str_field};
 pub(crate) use queries::invalidated_pages;
 
-/// UX-14: shared relative-time formatter (moved from the notifications page
-/// so every page can render ISO stamps in human terms — "2m ago", not
-/// `2026-11-05T22:56:25.925Z`).
 pub(crate) fn relative_time(created_at: &str) -> String {
     let now = spp_core::business_hours::now_iso_millis();
     let Some(minutes) = spp_core::business_hours::wall_minutes_between(created_at, &now) else {
@@ -449,8 +432,6 @@ pub(crate) fn format_intraday_minutes(minutes: f64) -> String {
     }
 }
 
-/// UX-22: human-readable byte sizes — "2.1 MB", not "2145280 bytes" —
-/// for user-facing metadata like backup files.
 pub(crate) fn human_bytes(bytes: i64) -> String {
     const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
     if bytes < 0 {
@@ -585,8 +566,6 @@ mod tests {
         assert_eq!(opt_str_field(&v, "name").as_deref(), Some("Kim"));
     }
 
-    /// UX-22: metadata reads in user units, with the byte count exact for
-    /// small files and one decimal past KB.
     #[test]
     fn human_bytes_renders_user_facing_sizes() {
         assert_eq!(human_bytes(0), "0 B");

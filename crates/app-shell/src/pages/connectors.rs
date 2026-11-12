@@ -36,9 +36,6 @@ impl Kind {
     }
 }
 
-/// AUD-P1-2 (C2): HTTP connector credentials — the shapes the fetch branch
-/// already consumes (`connectors.rs` auth modes). CSV connectors read local
-/// files and need none.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AuthMode {
     None,
@@ -58,8 +55,6 @@ impl AuthMode {
     }
 }
 
-/// AUD-P1-2 (C2): build the auth JSON from the form fields — the exact
-/// payload shapes the HTTP fetch branch understands.
 fn auth_json(
     mode: AuthMode,
     header_name: &str,
@@ -80,7 +75,6 @@ fn auth_json(
     }
 }
 
-/// AUD-P1-2 (C2): prefill the auth form from a stored connector record.
 fn auth_prefill(record: &serde_json::Value) -> (AuthMode, String, String, String) {
     let auth = record.get("auth").cloned().unwrap_or(serde_json::json!({}));
     let mode = auth.get("mode").and_then(|m| m.as_str()).unwrap_or("");
@@ -126,8 +120,6 @@ pub struct ConnectorsPage {
     rows_total: i64,
     rows_query: String,
     show_new: bool,
-    /// AUD-P1-2 (C2): Some(id) puts the form into edit mode for that
-    /// connector (prefilled); None is the plain create form.
     edit_id: Option<i64>,
     new_name: String,
     new_kind: Kind,
@@ -231,9 +223,6 @@ impl ConnectorsPage {
         }
     }
 
-    /// AUD-P1-2 (C2): shared form validation — name, refresh cadence, the
-    /// per-kind source field, and (new) HTTP credential completeness.
-    /// Returns (name, refresh_seconds, config, auth).
     fn validate_form(&mut self) -> Option<(String, i64, serde_json::Value, serde_json::Value)> {
         let name = self.new_name.trim().to_string();
         if name.is_empty() {
@@ -326,7 +315,6 @@ impl ConnectorsPage {
         }
     }
 
-    /// AUD-P1-2 (C2): save the edit form back to the connector.
     fn save_edit(&mut self, db: &DbHandle) {
         let Some(id) = self.edit_id else { return };
         let Some((name, refresh_seconds, config, auth)) = self.validate_form() else {
@@ -357,7 +345,6 @@ impl ConnectorsPage {
         }
     }
 
-    /// AUD-P1-2 (C2): open the form prefilled with an existing connector.
     fn start_edit(&mut self, record: &serde_json::Value) {
         self.edit_id = Some(i64_field(record, "id"));
         self.show_new = true;
@@ -422,10 +409,6 @@ impl ConnectorsPage {
                     .build();
                 if let Ok(rt) = runtime {
                     rt.block_on(async move {
-                        // AUD-P1-2 (C2): core emits `ConnectorRefreshed` on
-                        // the bus — the shell toasts the outcome and
-                        // invalidates this page, so health/last-sync/rows
-                        // land without waiting for an unrelated sync.
                         let _ = spp_core::connectors::refresh(&db, Some(&bus), id, &data_dir).await;
                     });
                 }
@@ -471,10 +454,6 @@ impl ConnectorsPage {
         let mut deleted: Option<(i64, String)> = None;
         let mut refreshed: Option<i64> = None;
         let mut edit_requested: Option<serde_json::Value> = None;
-        // UXG-1-5: exact-column data_table (virtualized rows built in) —
-        // the connector list spans the content column at every width; the
-        // empty case gets a real empty state instead of a header-only
-        // strip (the automation register).
         if connectors.is_empty() {
             design::empty_state(
                 ui,
@@ -501,9 +480,6 @@ impl ConnectorsPage {
                     let refresh_method = str_field(record, "refresh_method");
                     let last_sync =
                         opt_str_field(record, "last_sync_at").unwrap_or_else(|| "—".into());
-                    // AUD-P1-2 (C2): the last-sync cell answers "and how many
-                    // rows?" — the count core already records — and the
-                    // failure detail rides the hover.
                     let last_sync_rows = record.get("last_sync_rows").and_then(|v| v.as_i64());
                     let sync_label = match last_sync_rows {
                         Some(n) => format!("{last_sync} · {n} rows"),
@@ -540,8 +516,6 @@ impl ConnectorsPage {
                         {
                             refreshed = Some(id);
                         }
-                        // AUD-P1-2 (C2): edit an existing connector — name,
-                        // source, credentials, cadence, AI permission.
                         if design::button(ui, "Edit", ButtonVariant::Outline).clicked() {
                             edit_requested = Some(record.clone());
                         }
@@ -569,9 +543,6 @@ impl ConnectorsPage {
             ui.add_space(10.0);
             self.rows_ui(ui, db);
         }
-        // VF-3 (C5): the short-content end-of-page marker — the connector
-        // list is short by nature; the note bounds the page with the true
-        // count instead of leaving the bottom half an unmanaged void.
         if !connectors.is_empty() {
             design::list_end_note(
                 ui,
@@ -692,10 +663,6 @@ impl ConnectorsPage {
                 ui.checkbox(&mut self.new_allowed_ai, "AI tools may query");
                 ui.end_row();
             });
-            // AUD-P1-2 (C2): HTTP credentials — the shapes the fetch branch
-            // already consumes. Before this, `auth` was hard-coded to an
-            // empty object at creation and could never be configured or
-            // edited from the UI at all.
             if self.new_kind == Kind::Http {
                 ui.add_space(4.0);
                 design::form_grid(ui, "connector-auth", |ui| {
@@ -855,8 +822,6 @@ mod tests {
         assert_eq!(page.rows.len(), 2);
     }
 
-    // ---- AUD-P1-2 (C2): credentials, edit, refresh-event feedback ----
-
     #[test]
     fn audp12_http_credentials_ride_the_create_path() {
         let db = fixture(Vec::new());
@@ -893,7 +858,6 @@ mod tests {
         page.new_url = "https://example.com".into();
         page.new_auth_mode = AuthMode::Header;
         page.new_header_name = "X-Api-Key".into();
-        // header value missing
         page.create(&db);
         let error = page.error.clone().expect("rejected");
         assert!(error.contains("header auth"), "got: {error}");
@@ -901,7 +865,6 @@ mod tests {
 
         page.error = None;
         page.new_auth_mode = AuthMode::Bearer;
-        // token missing
         page.create(&db);
         let error = page.error.clone().expect("rejected");
         assert!(error.contains("bearer auth"), "got: {error}");
@@ -920,7 +883,6 @@ mod tests {
         page.create(&db);
         assert!(page.error.is_none(), "{:?}", page.error);
 
-        // open the edit form from the stored record — prefilled
         let record = page.connectors[0].clone();
         page.start_edit(&record);
         assert_eq!(page.edit_id, Some(i64_field(&record, "id")));
@@ -930,7 +892,6 @@ mod tests {
         assert_eq!(page.new_auth_mode, AuthMode::Bearer);
         assert_eq!(page.new_token, "tok-1");
 
-        // change the credentials and the source, save
         page.new_url = "https://example.com/b".into();
         page.new_auth_mode = AuthMode::Header;
         page.new_header_name = "X-Api-Key".into();
@@ -969,7 +930,6 @@ mod tests {
         page.create(&db);
         assert!(page.error.is_none(), "{:?}", page.error);
 
-        // editing "One" without touching its name is fine
         let one = page
             .connectors
             .iter()
@@ -981,7 +941,6 @@ mod tests {
         page.save_edit(&db);
         assert!(page.error.is_none(), "{:?}", page.error);
 
-        // renaming to the other connector's name is rejected
         let one = page
             .connectors
             .iter()

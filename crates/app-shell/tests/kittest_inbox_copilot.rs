@@ -187,9 +187,6 @@ fn render_copilot_state(dark: bool, w: f32, h: f32, open_copilot: bool, name: &s
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                // AUD-V1: production host wrapper (see kittest_inbox_page).
-                // VF-4 (V1 completion): the shared inbox production host —
-                // one definition, no inline copies left to drift.
                 design::host_inbox_page(ui, |ui| {
                     s.page.ui(ui, &s.db, &s.bus, None);
                 });
@@ -210,10 +207,6 @@ fn render_copilot_state(dark: bool, w: f32, h: f32, open_copilot: bool, name: &s
     harness.snapshot(name);
 }
 
-// AIE-1-3: with a Draft-role model routed (the legacy LM Studio settings
-// form), the copilot pane carries the "Draft reply with LM Studio"
-// trigger above the draft card it feeds; unrouted installs show the
-// routing hint instead (the four open-copilot goldens above).
 fn render_copilot_routed(name: &str) {
     let (page, db, bus) = seeded_page();
     db.with_write(|conn| {
@@ -229,9 +222,6 @@ fn render_copilot_routed(name: &str) {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                // AUD-V1: production host wrapper (see kittest_inbox_page).
-                // VF-4 (V1 completion): the shared inbox production host —
-                // one definition, no inline copies left to drift.
                 design::host_inbox_page(ui, |ui| {
                     s.page.ui(ui, &s.db, &s.bus, None);
                 });
@@ -289,11 +279,6 @@ fn r4_inbox_copilot_closed_1625_light() {
     );
 }
 
-// UXE-1-4 responsive states — the inbox columns adapt across displays:
-// 1920 keeps the views rail + a docked 300px copilot beside the reader;
-// 1024 has no room for reader+copilot side by side, so the copilot swaps
-// in over the reader (narrow mode); 800 folds the views rail into chips.
-
 #[test]
 fn r5_inbox_copilot_docked_1920_light() {
     render_copilot_state(
@@ -327,10 +312,6 @@ fn r5_inbox_folded_views_800_light() {
     );
 }
 
-/// UXG-1-2/9: the 2K tier — at 2560 the reader pane spans ~1810px after
-/// the rail and the clamped list; the reading column holds at the 860px
-/// measure and centers, instead of stretching the thread cards across
-/// the pane (the Gmail/Help Scout wide-window register).
 #[test]
 fn uxg_inbox_reader_2560_light() {
     render_copilot_state(false, 2560.0, 960.0, false, "uxg_inbox_reader_2560_light");

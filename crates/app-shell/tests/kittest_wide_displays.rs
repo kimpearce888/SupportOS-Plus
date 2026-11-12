@@ -1,14 +1,5 @@
 #![cfg(feature = "kittest-ui")]
 
-// UXG-1-9: the 8K (7680 logical px) width-discipline probes. The wide
-// goldens live in the page suites (dashboard 2560/3840 and reports 3840
-// through `content_column`, the inbox reader at 2560); a 7680px PNG would
-// be multi-megabyte dead weight in the repo, so the 8K tier is proven by
-// exact pixel probes instead: the content-column primitive holds at
-// CONTENT_MAX centered, the reading measure holds at READER_MEASURE
-// centered, and the real inbox page at 7680 keeps its reader thread
-// inside the reading measure (uncapped it would stretch ~6700px).
-
 use eframe::egui;
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
@@ -19,10 +10,6 @@ use spp_shell::pages::inbox::InboxPage;
 
 const W_8K: f32 = 7680.0;
 
-/// The content-column primitive at 8K: marker widgets pin the column's
-/// exact left and right edges — the column must hold at CONTENT_MAX and
-/// center (the width discipline every standard page rides through the
-/// shell funnel).
 #[test]
 fn uxg_content_column_cap_7680() {
     let mut h = Harness::builder()
@@ -54,8 +41,6 @@ fn uxg_content_column_cap_7680() {
     );
 }
 
-/// The reading-measure primitive at 8K: same exact-edge proof at
-/// READER_MEASURE — the cap the inbox reader thread and composer ride.
 #[test]
 fn uxg_reader_measure_cap_7680() {
     let mut h = Harness::builder()
@@ -146,10 +131,6 @@ fn seeded_reader() -> (InboxPage, DbHandle, EventBus) {
     (page, db, EventBus::new(8))
 }
 
-/// The real inbox at 8K: the reader pane spans ~6900px after the rail and
-/// the clamped list — the subject line (a truncate label that fills its
-/// column) must hold inside READER_MEASURE instead of stretching across
-/// the pane, and the reading column must sit centered in it.
 #[test]
 fn uxg_inbox_reader_capped_7680() {
     let (page, db, bus) = seeded_reader();
@@ -162,9 +143,6 @@ fn uxg_inbox_reader_capped_7680() {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                // VF-4 (V1 completion): the 8K geometry check runs
-                // through the shared inbox production host, like the
-                // goldens.
                 design::host_inbox_page(ui, |ui| {
                     s.page.ui(ui, &s.db, &s.bus, None);
                 });
@@ -178,9 +156,6 @@ fn uxg_inbox_reader_capped_7680() {
         );
     h.run_ok();
     h.run_ok();
-    // The subject text matches two nodes (the list row and the reader
-    // head); the reader's copy is the one inside the reader pane (x past
-    // the rail + clamped list, i.e. > 1000px on an 8K window).
     let reader_subject = h
         .get_all_by_label("#501  Wide display check")
         .find(|node| node.rect().min.x > 1000.0)
@@ -192,10 +167,6 @@ fn uxg_inbox_reader_capped_7680() {
         design::scale::READER_MEASURE,
         reader_subject.width()
     );
-    // The reader pane's content starts ≈ 168 (rail) + 560 (clamped list)
-    // + 22 (margin) = 750px; a centered 860px column in the ~6908px pane
-    // puts the subject well past 3000px — a left-hugging (uncapped)
-    // reader would sit at ≈ 790px.
     assert!(
         reader_subject.min.x > 3000.0,
         "the reading column must center in the 8K reader pane, subject starts at {}",

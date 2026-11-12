@@ -16,11 +16,6 @@ struct NotificationsPageState {
 fn seeded_page() -> (NotificationsPage, DbHandle) {
     let mut conn = rusqlite::Connection::open_in_memory().expect("in-memory db");
     spp_core::bootstrap::apply_all(&mut conn).expect("bootstrap");
-    // UXB-T1: pin the shot clock BEFORE the `iso_days_ago` seeding so the
-    // seeds anchor to the same instant the page renders against — fully
-    // deterministic "just now"/"Yesterday"/"Nd ago" strings (the wall-
-    // relative seeds were stable, but exposed to the same UTC-midnight race
-    // that fired mid-UXB-1).
     assert!(
         spp_core::business_hours::pin_now_for_kittest(
             spp_core::business_hours::KITTEST_PINNED_NOW_ISO
@@ -120,9 +115,6 @@ fn seeded_page() -> (NotificationsPage, DbHandle) {
         true,
         3,
     );
-    // UX-35: a job-failure notification in the new shape — friendly title
-    // and body, verbatim error preserved in the structured payload (the
-    // card reveals it on hover).
     row(
         7,
         "job_failure",
@@ -153,8 +145,6 @@ fn render_notifications_page(dark: bool, width: f32, name: &str) {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                // VF-4 (V1 completion): render through the shared
-                // production host — the exact funnel app/mod.rs uses.
                 design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db));
             },
             NotificationsPageState {
@@ -209,8 +199,6 @@ fn r3_notifications_mentions_tab_light() {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                // VF-4 (V1 completion): render through the shared
-                // production host — the exact funnel app/mod.rs uses.
                 design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db));
             },
             NotificationsPageState {
@@ -233,16 +221,10 @@ fn r3_notifications_mentions_tab_light() {
     h.snapshot("r3_notifications_mentions_tab_light");
 }
 
-/// AUD-P1-1 (C1): the deep-link state — a notification whose row carries
-/// the conversation deep-link columns gets the live "Open" act (its hover
-/// names the destination). The base goldens above lock the bare rows
-/// (no deep-link columns → no act, unchanged).
 #[test]
 fn audp1_notifications_deep_link_light() {
     let (page, db) = seeded_page();
     db.with_write(|conn| {
-        // the conversation the deep-link points at (the notifications FK
-        // references the mirror's conversations table)
         conn.execute(
             "INSERT INTO mailboxes (id, remote_id, name, email)
              VALUES (1, 101, 'Support', 'support@example.com')",
@@ -288,8 +270,6 @@ fn audp1_notifications_deep_link_light() {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                // VF-4 (V1 completion): render through the shared
-                // production host — the exact funnel app/mod.rs uses.
                 design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db));
             },
             NotificationsPageState {

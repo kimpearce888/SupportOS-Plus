@@ -107,8 +107,6 @@ fn render_knowledge_page(dark: bool, width: f32, name: &str) {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                // VF-4 (V1 completion): render through the shared
-                // production host — the exact funnel app/mod.rs uses.
                 design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db, None));
             },
             KnowledgePageState {
@@ -163,8 +161,6 @@ fn r3_knowledge_help_center_tab_light() {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                // VF-4 (V1 completion): render through the shared
-                // production host — the exact funnel app/mod.rs uses.
                 design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db, None));
             },
             KnowledgePageState {
@@ -187,11 +183,6 @@ fn r3_knowledge_help_center_tab_light() {
     h.snapshot("r3_knowledge_help_center_tab_light");
 }
 
-// UXH-1: the article reader must render the synced Help Scout HTML body
-// as readable rich text — paragraphs, headings, list items and code runs
-// as their own styled labels — never the raw `<p>`/`<code>` source the
-// owner reported. The fixture keeps exactly one article so the one
-// "Read" button deterministically opens the HTML-bodied reader.
 fn seeded_page_with_html_article() -> (KnowledgePage, DbHandle) {
     let (page, db) = seeded_page();
     db.with_write(|conn| {
@@ -230,8 +221,6 @@ fn render_help_center_reader(dark: bool, width: f32, name: &str) {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                // VF-4 (V1 completion): render through the shared
-                // production host — the exact funnel app/mod.rs uses.
                 design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db, None));
             },
             KnowledgePageState {
@@ -253,10 +242,6 @@ fn render_help_center_reader(dark: bool, width: f32, name: &str) {
         .click();
     h.run_ok();
     h.run_steps(2);
-    // The rendered rich text: the inline code run, the heading and the
-    // bulleted item each exist as their own label — in the raw-source
-    // rendering the whole body was one monospace `<p>…</p>` label and
-    // none of these exact labels could exist.
     assert!(
         h.get_all_by_label("Retry-After").next().is_some(),
         "the inline code run renders as its own styled label"
@@ -295,13 +280,6 @@ fn uxh1_help_center_reader_html_body_800_light() {
     render_help_center_reader(false, 800.0, "uxh1_help_center_reader_html_body_800_light");
 }
 
-/// AUD-P2-15 (C11): the Documents-tab document reader — the audit dead
-/// end where the palette deep link and the row hits had no per-document
-/// view at all. The fixture's documents carry full content (the list rows
-/// only ever showed a preview); clicking "Read" on the first row (the
-/// title-sorted "Billing FAQ") opens the reading surface with that
-/// content rendered — the plain-text body degrades to one readable
-/// block through the same UXH-1 pipeline.
 #[test]
 fn audp2_knowledge_doc_reader_light() {
     let (page, db) = seeded_page();
@@ -314,8 +292,6 @@ fn audp2_knowledge_doc_reader_light() {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                // VF-4 (V1 completion): render through the shared
-                // production host — the exact funnel app/mod.rs uses.
                 design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db, None));
             },
             KnowledgePageState {

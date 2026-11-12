@@ -102,8 +102,6 @@ impl OnboardingPage {
         );
 
         let status = self.status.clone().unwrap_or_default();
-        // UX-4: present setup as a step checklist instead of a raw key–value
-        // status dump — same data, human progression.
         let credentials_step = status.hs_configured;
         let sync_step = status.conversations > 0 || status.sync_state == "receiving";
         let complete_step = status.completed;
@@ -194,9 +192,6 @@ impl OnboardingPage {
                 self.complete(db);
             }
         });
-        // AUD-H6: the two status lines land in ONE quiet card — grouped,
-        // padded, and inset from the page edge instead of two bare lines
-        // flush against the fold.
         if !status.completed || !status.hs_configured {
             design::card(ui, |ui| {
                 if !status.completed {
@@ -210,9 +205,6 @@ impl OnboardingPage {
                 }
             });
         }
-        // VF-3 (C5): the hero's short-content state — the checklist card
-        // ended and the window's bottom half was an unmanaged void. The
-        // end-note bounds the page with the setup's true progress.
         let done_steps = [credentials_step, sync_step, complete_step]
             .iter()
             .filter(|done| **done)

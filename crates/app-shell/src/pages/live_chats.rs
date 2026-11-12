@@ -9,9 +9,6 @@ use crate::icons::Icon;
 const LIST_COL_W: f32 = 340.0;
 const SCROLL_H: f32 = 360.0;
 
-/// AUD-H-class polish: chat timestamps render as compact wall times,
-/// never raw ISO-8601 — the "2026-02-16T09:41:00.000Z" debug-register
-/// strings read as internals, not product metadata.
 fn compact_chat_time(iso: &str) -> String {
     chrono::DateTime::parse_from_rfc3339(iso)
         .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
@@ -103,8 +100,6 @@ impl LiveChatsPage {
     pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) -> Option<NavRequest> {
         self.ensure_loaded(db);
 
-        // UX-16: the subtitle explains the feature in user terms — the old
-        // copy leaked webhook event names and API-shape trivia.
         design::page_header(
             ui,
             "Live chats",
@@ -144,8 +139,6 @@ impl LiveChatsPage {
             .collect();
 
         if visible.is_empty() {
-            // UX-16: the empty state carries the next step as a real button
-            // instead of naming Settings in dead prose.
             if self.show_ended {
                 design::empty_state(
                     ui,
@@ -168,9 +161,6 @@ impl LiveChatsPage {
         }
 
         if ui.available_width() > 860.0 {
-            // AUD-P2-18 (C14): the detail card's drill-downs (the customer
-            // and the conversation the chat became) return the frame's
-            // first navigation request.
             let opened = ui
                 .horizontal(|ui| {
                     ui.vertical(|ui| {
@@ -197,9 +187,6 @@ impl LiveChatsPage {
                 return Some(request);
             }
         }
-        // VF-3 (C5): the short-content end-of-page marker — the chat list is
-        // short by nature; the note bounds the page with the true count so a
-        // tall window reads "complete page", never a void.
         design::list_end_note(
             ui,
             &format!(
@@ -390,9 +377,6 @@ impl LiveChatsPage {
             (guard, messages)
         };
 
-        // AUD-P2-18 (C14): resolve the chat's cross-links to local mirror
-        // rows before the card — the conversation an ended chat became,
-        // and the customer behind it (both route the clicks).
         let conversation = chat
             .conversation_remote_id
             .and_then(|remote| conversation_link(db, remote));
@@ -400,8 +384,6 @@ impl LiveChatsPage {
             .customer_remote_id
             .and_then(|remote| customer_local_id(db, remote));
 
-        // AUD-P2-18 (C14): the drill-down targets collect here — the card
-        // body closure can't return, so the page returns them after.
         let mut nav: Option<NavRequest> = None;
         design::card_titled(
             ui,
@@ -419,12 +401,6 @@ impl LiveChatsPage {
                     .unwrap_or_else(|| "—".into())
             )),
             |ui| {
-                // AUD-P2-18 (C14): the subtitle's cross-links — the chat's
-                // customer, and (once it ends) the conversation it became.
-                // card_titled's hint slot renders plain text, so the links
-                // live on their own row directly beneath it. Unresolved
-                // remotes get the honest "not in the mirror yet" note —
-                // the webhook knows them, the local mirror doesn't.
                 ui.horizontal(|ui| {
                     let t = design::tokens(ui);
                     if let Some(customer_id) = customer_id {
@@ -494,10 +470,6 @@ impl LiveChatsPage {
                         });
                 }
 
-                // AUD-L5 polish: the state badge, the send-guard note,
-                // and the end-chat action form ONE grouped card under
-                // the transcript — a floating badge + stray callout +
-                // loose button read as debug residue.
                 ui.add_space(design::scale::space::SP2);
                 design::card_titled(ui, "Conversation", None, |ui| {
                     design::badge(
@@ -519,11 +491,6 @@ impl LiveChatsPage {
                     }
                 });
 
-                // AUD-P2-18 (C14): the agent's end-chat action — placed with
-                // the reply controls (the same place the send rule lives).
-                // It stays available for open chats even when the reply box
-                // is guarded (held by another agent): the outcome's own
-                // refusal explains, instead of the button vanishing.
                 if chat.is_open() {
                     ui.add_space(design::scale::space::SP2);
                     if design::button(ui, "End chat", ButtonVariant::Destructive)
@@ -565,11 +532,6 @@ impl LiveChatsPage {
         nav
     }
 
-    /// AUD-P2-18 (C14): the agent's end-chat action — routed through the
-    /// core lane so the assignee guard (Help Scout refuses a foreign
-    /// agent's writes) and the sticky ended upsert stay in one place. A
-    /// chat the loaded view already knows as ended is a quiet no-op (the
-    /// button never offers on one — this is the stale-click path).
     fn end_chat(&mut self, db: &DbHandle, chat_id: &str) {
         let me = self.model.as_ref().and_then(|m| m.me_remote_id);
         let known_ended = self
@@ -588,7 +550,6 @@ impl LiveChatsPage {
                 self.detail_cache = None;
             }
             Ok(EndChatOutcome::AlreadyEnded) => {
-                // no-op: the mirror already says ended — just refresh the view.
                 self.reload(db);
                 self.detail_cache = None;
             }
@@ -651,10 +612,6 @@ fn message_card_ui(ui: &mut egui::Ui, message: &MirrorMessage) {
         role_label.as_deref(),
         time,
         |ui| {
-            // AUD-L5: the body ALWAYS wraps (explicit wrap mode + long
-            // token breaking, the inbox thread's treatment) — the old
-            // plain label could render a clipped sliver that read as a
-            // broken transcript.
             ui.add(
                 egui::Label::new(
                     egui::RichText::new(spp_core::richtext::break_long_tokens(body, 40))
@@ -680,11 +637,6 @@ fn send_payload(chat_id: &str, text: &str) -> (String, String) {
     (payload, message_id)
 }
 
-/// AUD-P2-18 (C14): resolve the conversation an ended chat became — the
-/// chat stores the remote conversation id; the mirror's local row carries
-/// the id the Inbox deep link routes to and the number the user cites.
-/// `None` means the webhook referenced a conversation the mirror has not
-/// synced yet (the honest fallback text renders instead of a link).
 fn conversation_link(db: &DbHandle, remote_id: i64) -> Option<(i64, i64)> {
     db.with_read(|conn| {
         conn.query_row(
@@ -697,9 +649,6 @@ fn conversation_link(db: &DbHandle, remote_id: i64) -> Option<(i64, i64)> {
     })
 }
 
-/// AUD-P2-18 (C14): resolve the chat's customer to the local mirror row
-/// (the profile deep link routes to the local id). `None` = the mirror
-/// has no such customer yet — the honest fallback text renders instead.
 fn customer_local_id(db: &DbHandle, remote_id: i64) -> Option<i64> {
     db.with_read(|conn| {
         conn.query_row(
@@ -823,13 +772,8 @@ mod tests {
         assert!(page.notice.is_none(), "a stale notice clears on selection");
     }
 
-    /// AUD-P2-18 (C14): the conversation link resolves the chat's remote
-    /// conversation id to the mirror's local row — the click routes to the
-    /// Inbox reader; an unsynced remote resolves to nothing (the honest
-    /// fallback renders instead of a dead link).
     #[test]
     fn the_conversation_link_resolves_and_misses_honestly() {
-        // the fixture's seed_conversation: local id 1, remote 1001, number 501
         let db = fixture(vec![(
             "probe",
             1,
@@ -869,12 +813,8 @@ mod tests {
         );
     }
 
-    /// AUD-P2-18 (C14): the customer link resolves the chat's remote
-    /// customer id to the local profile row; soft-deleted customers and
-    /// unsynced remotes resolve to nothing (the honest fallback renders).
     #[test]
     fn the_customer_link_resolves_and_misses_honestly() {
-        // the fixture seeds customers 9 (remote 909) and 10 (remote 910)
         let db = fixture(vec![]);
         assert_eq!(customer_local_id(&db, 909), Some(9));
         assert_eq!(
@@ -902,10 +842,6 @@ mod tests {
         );
     }
 
-    /// AUD-P2-18 (C14): the end-chat guards — the connected user can end
-    /// an open chat (the view reloads with it ended), another agent's chat
-    /// refuses with the held-by hint, an already-ended chat is a no-op,
-    /// and a chat outside the mirror says so.
     #[test]
     fn end_chat_guards_ending_refusal_and_the_no_op() {
         let db = fixture(vec![]);
@@ -936,7 +872,6 @@ mod tests {
         let mut page = LiveChatsPage::new();
         page.reload(&db);
 
-        // held by another agent: refused with the hint, the chat stays open
         page.end_chat(&db, "chat-2");
         assert!(
             page.notice
@@ -956,7 +891,6 @@ mod tests {
             .expect("chat-2 row");
         assert_eq!(state, "open", "a held chat is not ended");
 
-        // the connected user ends the unassigned chat: it lands as ended
         page.notice = None;
         page.end_chat(&db, "chat-1");
         assert_eq!(
@@ -980,12 +914,10 @@ mod tests {
         );
         assert!(page.detail_cache.is_none(), "the stale guard cache drops");
 
-        // an already-ended chat: a no-op — no new notice
         page.notice = None;
         page.end_chat(&db, "chat-1");
         assert!(page.notice.is_none(), "AlreadyEnded stays silent");
 
-        // a chat outside the mirror: said so, nothing written
         page.notice = None;
         page.end_chat(&db, "chat-999");
         assert_eq!(

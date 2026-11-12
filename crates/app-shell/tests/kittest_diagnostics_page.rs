@@ -92,8 +92,6 @@ fn render_diagnostics_page(dark: bool, width: f32, name: &str) {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                // VF-4 (V1 completion): render through the shared
-                // production host — the exact funnel app/mod.rs uses.
                 design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db));
             },
             DiagnosticsPageState {
@@ -148,8 +146,6 @@ fn r3_diagnostics_errors_filter_light() {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                // VF-4 (V1 completion): render through the shared
-                // production host — the exact funnel app/mod.rs uses.
                 design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db));
             },
             DiagnosticsPageState {
@@ -159,11 +155,6 @@ fn r3_diagnostics_errors_filter_light() {
             },
         );
     h.run_ok();
-    // UXG-1-5: the old exact-label query matched the runs table's header
-    // cell ("Errors") — a non-interactive label, so the click was a no-op
-    // and the golden silently captured the UNfiltered log. The chips carry
-    // their counts ("Errors 36"); the contains-query lands on the chip,
-    // which actually filters.
     h.get_all_by_label_contains("Errors")
         .next()
         .expect("the Errors filter chip")

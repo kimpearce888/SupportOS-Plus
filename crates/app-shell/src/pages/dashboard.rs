@@ -19,11 +19,6 @@ const CHANNELS: [(&str, &str); 3] = [
     ("chat", "Chat (Beacon)"),
 ];
 
-/// UXD-1-2: product-language disclosure of the by-channel card's quirk —
-/// the old hint leaked a dev-facing `dashboard.rs:337-345` source
-/// reference into the UI. The behavior is unchanged (the card lists every
-/// channel regardless of the channel chip; asserted by the scope-chip
-/// kittest), only the wording is user-facing now.
 const CHANNEL_NOTE: &str =
     "every channel is listed — the Channel filter scopes the other cards, not this one";
 
@@ -461,8 +456,6 @@ pub struct DashboardPage {
 }
 
 impl DashboardPage {
-    /// AU2-9: replace the click-time "syncing…" note with the completion
-    /// outcome (the note used to stick forever once set).
     pub(crate) fn sync_finished(&mut self, outcome: &str) {
         if !self.sync_note.is_empty() {
             self.sync_note = outcome.to_string();
@@ -550,9 +543,6 @@ impl DashboardPage {
             },
         );
 
-        // UX-28: the filter card spans the content width and flows its chip
-        // groups in one wrapped row — the old content-hugging card sat at
-        // ~360px and left the right two-thirds of the header row dead.
         design::card(ui, |ui| {
             ui.set_min_width(ui.available_width());
             ui.horizontal_wrapped(|ui| {
@@ -611,22 +601,9 @@ impl DashboardPage {
             }
         };
 
-        // UXD-1-2: the page follows the 2024–25 helpdesk-dashboard pattern
-        // (Help Scout / Zendesk / Linear / Stripe / Vercel): KPI stat row →
-        // trend chart + insight side panel → equal-width breakdown grid →
-        // full-width data tables. Every card width below is computed from
-        // the page's own available width and handed to the exact-width
-        // card helpers, so nothing reads the unbounded widths egui gives
-        // out inside grid cells — the frame-over-frame inflation that used
-        // to push cards off-screen cannot re-trigger.
         let width = ui.available_width();
         let gap = 10.0;
 
-        // KPI row: equal-width responsive tiles (2/3/4/6 columns by
-        // content width). All twelve tiles are two lines — the unit lives
-        // in the label, not a third hint line — so every tile in a row is
-        // the same height and the rows align. 12 divides by 2/3/4/6, so
-        // no tier leaves a ragged last row.
         let kpi_cols = if width >= 1400.0 {
             6
         } else if width >= 900.0 {
@@ -638,12 +615,10 @@ impl DashboardPage {
         };
         let card_w = ((width - gap * (kpi_cols - 1) as f32) / kpi_cols as f32).floor();
         let metrics: [(&str, i64); 12] = [
-            // volume
             ("New", data.new_conversations),
             ("Active", data.active_conversations),
             ("Pending", data.pending_conversations),
             ("Closed", data.closed_conversations),
-            // workload
             ("Unassigned", data.unassigned),
             ("Backlog (7d stale)", data.backlog),
             ("Replies sent", data.replies_sent),
@@ -651,9 +626,7 @@ impl DashboardPage {
                 "First response (min)",
                 data.first_response_avg_min.unwrap_or(0),
             ),
-            // responsiveness
             ("Resolution avg (min)", data.resolution_avg_min.unwrap_or(0)),
-            // happiness
             ("Great ratings", data.ratings_great),
             ("Okay ratings", data.ratings_okay),
             ("Not-good ratings", data.ratings_not_good),
@@ -671,12 +644,6 @@ impl DashboardPage {
             });
         ui.add_space(gap);
 
-        // Hero row: the conversations-per-day trend chart with the
-        // Issue-radar panel beside it (62/38 — the chart keeps enough
-        // width for its hover readout, the alerts get a real column).
-        // Side-by-side from 1000px of content width; below that the two
-        // stack full-width. The radar card stretches to the chart card's
-        // height so the row reads as one band.
         let points = daily_new_points(data);
         let range_hint = format!(
             "{} → {} · {} points",
@@ -687,10 +654,6 @@ impl DashboardPage {
         let range_from = iso_date_only(&data.range_from);
         let range_to = iso_date_only(&data.range_to);
         if width >= 1000.0 {
-            // Integer widths: egui rounds fractional widget rects per
-            // column, and the drift accumulates across a row — flooring
-            // the column math keeps every row ending inside the content
-            // area at every width.
             let chart_w = ((width - gap) * 0.62).floor();
             let radar_w = (width - chart_w - gap).floor();
             ui.horizontal_top(|ui| {
@@ -724,10 +687,6 @@ impl DashboardPage {
         }
         ui.add_space(gap);
 
-        // Breakdown grid: equal-width cards, top-aligned rows, 1/2/3
-        // columns by content width. (3 columns start at 900px so a column
-        // is never narrower than the bar-row minimum; 2 columns start at
-        // 560px for the same reason.)
         let breakdown_cols = if width >= 900.0 {
             3
         } else if width >= 560.0 {
@@ -757,8 +716,6 @@ impl DashboardPage {
         }
         ui.add_space(gap);
 
-        // Full-width data tables (detailed records live at the bottom of
-        // the page; both are bounded by the card they sit in).
         channel_metrics_table(ui, &data.channel_metrics);
         ui.add_space(gap);
 
@@ -779,8 +736,6 @@ pub(crate) fn iso_date_only(iso: &str) -> std::borrow::Cow<'_, str> {
     }
 }
 
-/// UXD-1-2: the trend-chart card body — empty state when the range has
-/// no conversations, the axis-labeled line chart otherwise.
 fn chart_body(ui: &mut egui::Ui, points: &[chart::Point], range_from: &str, range_to: &str) {
     if points.is_empty() {
         design::empty_state(
@@ -799,10 +754,6 @@ fn chart_body(ui: &mut egui::Ui, points: &[chart::Point], range_from: &str, rang
     }
 }
 
-/// UXD-1-2: breakdown card on an exact outer width — every card in the
-/// grid shares the computed column width, so rows align and no card can
-/// outgrow its column (the old content-hugging cards made the empty
-/// "By team" card a ~170px sliver next to full-width siblings).
 fn breakdown(ui: &mut egui::Ui, title: &str, note: &str, rows: &[NameCount], outer_w: f32) {
     design::card_titled_exact(
         ui,
@@ -816,9 +767,6 @@ fn breakdown(ui: &mut egui::Ui, title: &str, note: &str, rows: &[NameCount], out
                 return;
             }
             let max = rows.iter().map(|r| r.count).max().unwrap_or(1).max(1);
-            // UX-28: cap the visible bars so a long tail (a tag list with
-            // dozens of entries) cannot push the card past the viewport —
-            // the overflow is named, never hidden.
             const VISIBLE: usize = 8;
             for row in rows.iter().take(VISIBLE) {
                 design::bar_row(ui, &row.name, row.count, max, true);
@@ -925,9 +873,6 @@ fn comparison_table(ui: &mut egui::Ui, rows: &[MailboxComparison]) {
     });
 }
 
-/// UXD-1-2: the Issue-radar panel — an exact-width card (stretched to
-/// the hero chart's height when they share a row) so it reads as the
-/// insight column of the trend chart, not a footnote at the page bottom.
 fn radar_panel(ui: &mut egui::Ui, alerts: &[serde_json::Value], outer_w: f32, min_h: Option<f32>) {
     design::card_titled_exact(
         ui,

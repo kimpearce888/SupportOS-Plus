@@ -205,8 +205,6 @@ fn render_organizations_page(dark: bool, width: f32, name: &str) {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                // VF-4 (V1 completion): the shared standard-page production
-                // host — one definition, no inline copies left to drift.
                 design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db, None));
             },
             OrganizationsPageState {
@@ -258,12 +256,6 @@ struct CustomersPageState {
 fn seeded_customers_page() -> (CustomersPage, DbHandle) {
     let mut conn = rusqlite::Connection::open_in_memory().expect("in-memory db");
     spp_core::bootstrap::apply_all(&mut conn).expect("bootstrap");
-    // AIE-1-4: pin the shot clock so the fixed 2026-02 seeds render the
-    // same "Nd ago" Last Contact column on every calendar day — the
-    // UXB-T1 freeze covered sync_health, operations, notifications and
-    // reports, but the customers fixtures were left on the wall clock and
-    // their goldens ticked one day further at a UTC midnight (the drift
-    // gate fired on 2026-11-09, a day after the UXG-1 regen).
     assert!(
         spp_core::business_hours::pin_now_for_kittest(
             spp_core::business_hours::KITTEST_PINNED_NOW_ISO
@@ -537,8 +529,6 @@ fn render_customers_page(dark: bool, width: f32, name: &str) {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                // VF-4 (V1 completion): the shared standard-page production
-                // host — one definition, no inline copies left to drift.
                 design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db, None));
             },
             CustomersPageState {
@@ -659,9 +649,6 @@ fn organizations_open_detail_light() {
     h.snapshot("r3_organizations_detail_light");
 }
 
-/// AUD-P2-16 (C12): the detail panel's member rows are deep links — the
-/// first row (Acme) opens its panel, and clicking a member routes to that
-/// customer's profile.
 struct OrganizationsPageNavState {
     installed: bool,
     page: OrganizationsPage,
@@ -681,8 +668,6 @@ fn audp2_organizations_members_clickable_light() {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                // Sticky capture: a later no-nav frame must not erase a
-                // nav the click frame produced.
                 if let Some(nav) = s.page.ui(ui, &s.db, None) {
                     s.nav = Some(nav);
                 }

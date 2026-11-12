@@ -80,9 +80,6 @@ impl SearchPage {
             self.error = None;
             return;
         }
-        // AUD-P2-8: the vestigial `status_filter` field (never set,
-        // always None) is gone — the page searches with default
-        // filters, which is what it always effectively did.
         let filters = SearchFilters::default();
         let result = db.with_read(|conn| {
             spp_core::search::search_with_semantics(
@@ -127,9 +124,6 @@ impl SearchPage {
                 self.query_edit = query;
             }
             let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
-            // AU2-3: the search button must render on every frame (it used to sit
-            // behind a `lost_focus() &&` short-circuit, so it only existed during
-            // the single frame the text field lost focus).
             let search_clicked = design::button(ui, "Search", ButtonVariant::Primary).clicked();
             if search_clicked || (response.lost_focus() && enter) {
                 self.query = self.query_edit.clone();
@@ -163,9 +157,6 @@ impl SearchPage {
         }
         let Some(response) = &self.response else {
             if self.query.is_empty() {
-                // UX-15: the empty state explains what is searchable and
-                // offers one-click example queries — the old "+ Try 'export'"
-                // CTA invented a nonsensical action for a search page.
                 design::empty_state(
                     ui,
                     Icon::Search,
@@ -258,9 +249,6 @@ impl SearchPage {
                         design::hint_text(ui, hit.snippet.as_str());
                     }
                 });
-                // AU2-7: hit cards are clickable and carry the record id through
-                // the same href→nav mapping the command palette uses. The interact
-                // id derives from the card frame's stable response id.
                 let hit_response = ui.interact(
                     inner.response.rect,
                     inner.response.id.with("open-hit"),

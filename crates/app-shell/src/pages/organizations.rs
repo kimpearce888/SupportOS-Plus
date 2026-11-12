@@ -6,8 +6,6 @@ use crate::design::{self, AvatarSize, BadgeTone, ButtonVariant};
 use crate::icons::Icon;
 
 const ROW_HEIGHT: f32 = 32.0;
-/// AUD-P2-16 (C12): the list query's hard cap — the page must never
-/// report a capped load as the mirror's total.
 const LIST_CAP: usize = 200;
 
 pub struct OrganizationsPage {
@@ -21,19 +19,13 @@ pub struct OrganizationsPage {
     new_name: String,
     new_domains: String,
     error: Option<String>,
-    /// AUD-P2-16 (C12): the create/edit outcome line (errors still go
-    /// through `error`, which renders as a failure).
     message: Option<String>,
-    /// AUD-P2-16 (C12): the organization being edited — None means the
-    /// shared form below is in create mode (the connectors idiom).
     edit_id: Option<i64>,
     loaded: bool,
     panel_open: bool,
 }
 
 impl OrganizationsPage {
-    /// AU2-9: replace the click-time "syncing…" note with the completion
-    /// outcome (the note used to stick forever once set).
     pub(crate) fn sync_finished(&mut self, outcome: &str) {
         if !self.sync_note.is_empty() {
             self.sync_note = outcome.to_string();
@@ -110,8 +102,6 @@ impl OrganizationsPage {
         }
     }
 
-    /// AUD-P2-16 (C12): comma-separated form text → the domain list the
-    /// core lanes store (shared by create and edit so both parse alike).
     fn domains_from_text(text: &str) -> Vec<String> {
         text.split(',')
             .map(str::trim)
@@ -143,8 +133,6 @@ impl OrganizationsPage {
         }
     }
 
-    /// AUD-P2-16 (C12): open the shared form prefilled with an existing
-    /// organization (the connectors edit idiom — one form, two modes).
     fn start_edit(&mut self, org: &serde_json::Value) {
         self.edit_id = Some(i64_field(org, "id"));
         self.error = None;
@@ -153,8 +141,6 @@ impl OrganizationsPage {
         self.new_domains = domains_text(org);
     }
 
-    /// AUD-P2-16 (C12): cancel the edit — the form returns to blank
-    /// create mode.
     fn close_form(&mut self) {
         self.edit_id = None;
         self.error = None;
@@ -162,8 +148,6 @@ impl OrganizationsPage {
         self.new_domains.clear();
     }
 
-    /// AUD-P2-16 (C12): save the prefilled form through the core update
-    /// lane, then reload (the selected detail follows along).
     fn save_edit(&mut self, db: &DbHandle) {
         let Some(id) = self.edit_id else { return };
         let name = self.new_name.trim().to_string();
@@ -185,23 +169,16 @@ impl OrganizationsPage {
                 self.reload(db);
             }
             Ok(false) => {
-                // the id is gone (soft-deleted elsewhere) — say so instead
-                // of implying the save landed.
                 self.error = Some("organization not found — it may have been deleted".into());
             }
             Err(e) => self.error = Some(e.to_string()),
         }
     }
 
-    /// AUD-P2-16 (C12): the destructive confirm a delete click arms —
-    /// the shell owns the dialog and the execution.
     fn delete_request(id: i64, name: &str) -> NavRequest {
         NavRequest::Confirm(ConfirmRequest::delete_organization(id, name))
     }
 
-    /// AUD-P2-16 (C12): the member row's deep link — the detail payload
-    /// already carries the customer's local id; factored so the row's
-    /// click handler stays one line.
     fn member_request(member: &serde_json::Value) -> Option<NavRequest> {
         Some(NavRequest::OpenCustomer(i64_field(member, "id")))
     }
@@ -212,8 +189,6 @@ impl OrganizationsPage {
         db: &DbHandle,
         engine: Option<&std::sync::Arc<spp_core::sync_engine::SyncEngine>>,
     ) -> Option<NavRequest> {
-        // AUD-P2-16 (C12): members deep-link to customer profiles, rows
-        // edit and delete, and the capped list says it is capped.
         let mut nav: Option<NavRequest> = None;
         self.ensure_loaded(db);
 
@@ -251,8 +226,6 @@ impl OrganizationsPage {
                     }
                 }
                 design::page_counter(ui, &format!("{} organizations", self.orgs.len()));
-                // AUD-P2-16 (C12): the list query is capped at LIST_CAP —
-                // a full page means "200 of more", not "200 total".
                 if self.orgs.len() >= LIST_CAP {
                     design::hint_text(ui, "showing the first 200 — refine the search to see more");
                 }
@@ -280,8 +253,6 @@ impl OrganizationsPage {
         if let Some(err) = &self.error {
             design::error_text(ui, &format!("error: {err}"));
         }
-        // AUD-P2-16 (C12): the create/edit outcome line (create used to
-        // succeed silently).
         if let Some(msg) = &self.message {
             design::status_line(ui, true, msg);
         }
@@ -289,8 +260,6 @@ impl OrganizationsPage {
 
         let orgs = self.orgs.clone();
         let mut pick: Option<i64> = None;
-        // AUD-P2-16 (C12): row actions — edit (prefilled form) and delete
-        // (the shell's destructive confirm).
         let mut edit_requested: Option<serde_json::Value> = None;
         let mut delete_requested: Option<(i64, String)> = None;
         if orgs.is_empty() {
@@ -313,8 +282,6 @@ impl OrganizationsPage {
                     let id = i64_field(org, "id");
                     let name = str_field(org, "name");
                     let domains = domains_text(org);
-                    // UX-19: a blank cell explains nothing — name the
-                    // absence so the column reads as intentional.
                     let domains = if domains.is_empty() {
                         "No domains yet".to_string()
                     } else {
@@ -371,9 +338,6 @@ impl OrganizationsPage {
                             {
                                 pick = Some(id);
                             }
-                            // AUD-P2-16 (C12): the row finally acts on the
-                            // org — edit its name/domains, delete it with a
-                            // confirm (the page was create-only end to end).
                             if design::button(ui, "Edit", ButtonVariant::Outline)
                                 .on_hover_text(format!("edit {name} — its name and domains"))
                                 .clicked()
@@ -399,12 +363,9 @@ impl OrganizationsPage {
             self.panel_open = true;
             self.reload_detail(db, id);
         }
-        // AUD-P2-16 (C12): a row's Edit opens the shared form prefilled.
         if let Some(org) = edit_requested {
             self.start_edit(&org);
         }
-        // AUD-P2-16 (C12): a row's Delete arms the shell's confirm dialog
-        // (it owns the dialog and executes DestructiveAction::DeleteOrganization).
         if let Some((id, name)) = delete_requested
             && nav.is_none()
         {
@@ -412,8 +373,6 @@ impl OrganizationsPage {
         }
 
         ui.add_space(design::scale::space::SP2);
-        // AUD-P2-16 (C12): the shared form — prefilled with the row's (or
-        // panel's) organization when editing, blank when creating.
         let editing = self.edit_id.is_some();
         design::card_titled(
             ui,
@@ -470,8 +429,6 @@ impl OrganizationsPage {
                             self.create(db);
                         }
                     }
-                    // AUD-P2-16 (C12): cancel — the form returns to blank
-                    // create mode.
                     if editing && design::button(ui, "Cancel", ButtonVariant::Outline).clicked() {
                         self.close_form();
                     }
@@ -479,8 +436,6 @@ impl OrganizationsPage {
             },
         );
 
-        // VF-3 (C5): the short-content end-of-page marker — the org list is
-        // short by nature; the note bounds the page with the true count.
         if !orgs.is_empty() {
             design::list_end_note(
                 ui,
@@ -499,8 +454,6 @@ impl OrganizationsPage {
             .filter(|n| !n.is_empty())
             .unwrap_or_else(|| "Organization".to_string());
         let mut panel_open = self.panel_open;
-        // AUD-P2-16 (C12): the panel's requests flow out through locals —
-        // the panel body can't borrow the page.
         let mut panel_edit: Option<serde_json::Value> = None;
         let mut panel_delete: Option<(i64, String)> = None;
         let mut member_nav: Option<NavRequest> = None;
@@ -558,8 +511,6 @@ impl OrganizationsPage {
                             .color(t.muted_foreground),
                     );
                 }
-                // AUD-P2-16 (C12): the panel carries the row actions too —
-                // edit here, delete with the shell's confirm.
                 ui.horizontal(|ui| {
                     if design::button(ui, "Edit", ButtonVariant::Outline)
                         .on_hover_text("edit this organization's name and domains")
@@ -597,9 +548,6 @@ impl OrganizationsPage {
                                 &initials(&name),
                                 BadgeTone::Neutral,
                             );
-                            // AUD-P2-16 (C12): the member row is a deep link
-                            // to the customer's profile (the audit's inert
-                            // labels — same idiom as the customers rows).
                             let response = ui
                                 .add(
                                     egui::Label::new(
@@ -636,8 +584,6 @@ impl OrganizationsPage {
             },
         );
         self.panel_open = panel_open;
-        // AUD-P2-16 (C12): apply the panel's requests (the body closure
-        // collects them; the page acts after it returns).
         if let Some(org) = panel_edit {
             self.start_edit(&org);
         }
@@ -742,15 +688,6 @@ mod tests {
         assert!(page.error.is_some());
     }
 
-    /// AUD-P2-16 (C12): the prefilled edit form round-trips through the
-    /// core update lane — and cancel returns the form to blank create mode.
-    ///
-    /// KNOWN CORE DEFECT (AUD-P2-16 follow-up): `update_organization`'s
-    /// UPDATE writes `updated_at`, a column the organizations table never
-    /// had (it carries remote_updated_at / local_updated_at), so the save
-    /// currently surfaces that sqlite error. The page reports the failure
-    /// honestly and keeps the edit open; once the core lane is corrected
-    /// this test runs the full round-trip assertions.
     #[test]
     fn edit_round_trip_updates_name_and_domains() {
         let db = fixture(Vec::new());
@@ -795,7 +732,6 @@ mod tests {
             );
         }
 
-        // cancel: the form returns to blank create mode either way
         page.close_form();
         page.start_edit(&page.orgs[0].clone());
         assert_eq!(
@@ -808,7 +744,6 @@ mod tests {
         assert!(page.new_name.is_empty());
         assert!(page.new_domains.is_empty());
 
-        // an unknown id is refused honestly (soft-deleted elsewhere)
         page.error = None;
         page.edit_id = Some(999_999);
         page.save_edit(&db);
@@ -816,8 +751,6 @@ mod tests {
         assert!(page.message.is_none());
     }
 
-    /// AUD-P2-16 (C12): the member-row click maps to the customer profile
-    /// deep link (the panel payload carries the local customer id).
     #[test]
     fn member_rows_navigate_to_the_customer_profile() {
         let db = fixture(Vec::new());
@@ -825,7 +758,6 @@ mod tests {
             let org =
                 spp_core::people_store::create_organization(conn, "Acme", &["acme.com".into()])
                     .expect("acme");
-            // the fixture's customer 9 (Kim Pearce, remote 909) joins Acme
             conn.execute(
                 "UPDATE customers SET organization_id = ?1 WHERE id = 9",
                 rusqlite::params![org],
@@ -851,8 +783,6 @@ mod tests {
         );
     }
 
-    /// AUD-P2-16 (C12): a delete click arms the shell's confirm dialog —
-    /// and the dialog's action executes the core soft-delete lane.
     #[test]
     fn delete_flows_through_the_confirm_request_and_the_soft_delete() {
         let db = fixture(Vec::new());
@@ -862,7 +792,6 @@ mod tests {
         let org = page.orgs[0].clone();
         let id = i64_field(&org, "id");
 
-        // the page's contribution: the armed confirm request
         let nav = OrganizationsPage::delete_request(id, "Acme");
         let NavRequest::Confirm(request) = nav else {
             panic!("a delete click must arm the confirm dialog");
@@ -875,7 +804,6 @@ mod tests {
         );
         assert!(request.message.contains("Acme"));
 
-        // the shell's execute_confirmed arm, then the page's invalidation
         let removed = db
             .with_write(|conn| spp_core::people_store::delete_organization(conn, id))
             .expect("soft delete");
@@ -885,7 +813,6 @@ mod tests {
         assert!(page.orgs.is_empty(), "the soft-deleted org leaves the list");
         assert!(page.detail.is_none(), "the invalidated detail goes with it");
 
-        // a second confirm on the same id refuses (already soft-deleted)
         let again = db
             .with_write(|conn| spp_core::people_store::delete_organization(conn, id))
             .expect("soft delete again");

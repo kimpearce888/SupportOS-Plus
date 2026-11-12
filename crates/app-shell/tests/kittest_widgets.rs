@@ -332,13 +332,6 @@ fn harness_identity(dark: bool) -> Harness<'static, InboxIdentity> {
 fn draw_identity(ui: &mut egui::Ui, s: &mut InboxIdentity) {
     use spp_shell::design::{self, ComposerMode, ComposerState, MessageRole};
 
-    // AU2-13a: the string-body `message_card` wrapper was deleted — the
-    // fixture now drives the same `message_card_with` form the inbox and
-    // live-chat pages use. The body closure replicates the old wrapper's
-    // rendering (LEAD-size foreground label) so only the removals of the
-    // dead quoted_history/file_chip/cop_similar surface change the frame.
-    // scale::text::LEAD is a crate token, deliberately not pub; the value is
-    // pinned here and the snapshot diff-lock flags any token drift.
     const LEAD: f32 = 14.0;
     fn body_label(ui: &mut egui::Ui, body: &str) {
         let t = design::tokens(ui);

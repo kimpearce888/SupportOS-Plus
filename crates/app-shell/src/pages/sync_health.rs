@@ -387,10 +387,6 @@ impl SyncHealthPage {
             _ => crate::design::BadgeTone::Warning,
         };
         let state_label = status.state.clone();
-        // UX-20: the hero line carried a developer note ("never shows
-        // relative time — forensic value"). Keep the exact timestamp (it is
-        // the forensic record) but say it in user language, with the
-        // relative age next to it so freshness is readable at a glance.
         let last_success = match status.last_success.as_deref() {
             Some(iso) => {
                 let rel = crate::pages::relative_time(iso);
@@ -411,8 +407,6 @@ impl SyncHealthPage {
             },
         );
         design::card_titled(ui, "Engine", None, |ui| {
-            // AUD-P2-20 (B7): the ignored bucket counts unknown event
-            // types — accepted and stored, but honestly not processed.
             design::hint_text(
                 ui,
                 &format!(
@@ -488,9 +482,6 @@ impl SyncHealthPage {
                     "The checkpoint table fills after the first successful sync.",
                 );
             } else {
-                // UXG-1-5: exact-column data_table (virtualized rows built
-                // in) — the checkpoint list spans the card at every width;
-                // the last column keeps its values beside its header.
                 let checkpoints = &status.checkpoints;
                 design::data_table(
                     ui,
@@ -543,8 +534,6 @@ impl SyncHealthPage {
                     "Runs appear here after the first sync.",
                 );
             } else {
-                // UXG-1-5: exact-column data_table (virtualized rows built
-                // in) — the runs list spans the card at every width.
                 let runs = &status.runs;
                 design::data_table(
                     ui,

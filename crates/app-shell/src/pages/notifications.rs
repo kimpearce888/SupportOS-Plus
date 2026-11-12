@@ -26,9 +26,6 @@ impl Tab {
     }
 }
 
-/// UX-13: one visual card per distinct (type, title, body) notification —
-/// identical repeats (e.g. the same job failing 18 times) collapse into a
-/// single row with a ×N count instead of 18 byte-identical cards.
 #[derive(Debug, Clone)]
 struct NotificationGroup {
     records: Vec<NotificationRecord>,
@@ -89,8 +86,6 @@ fn group_records(records: &[NotificationRecord]) -> Vec<NotificationGroup> {
     groups.into_iter().map(|(_, g)| g).collect()
 }
 
-/// UX-13: friendly label for the raw internal notification type — no more
-/// snake_case enums (`job_failure`) leaking into the UI.
 fn type_label(notification_type: &str) -> String {
     match notification_type {
         "job_failure" => "Job failure".to_string(),
@@ -110,11 +105,6 @@ fn type_label(notification_type: &str) -> String {
     }
 }
 
-/// AUD-P1-1 (C1): resolve a notification's deep-link fields to the page
-/// that shows the thing it is about. The records already carry
-/// `conversation_id`, `customer_local_id`, `issue_id`, `campaign_id` and
-/// `job_id` — this maps them onto the existing NavRequest deep links
-/// (conversation > customer > issue > campaign > job, first hit wins).
 fn deep_link(record: &NotificationRecord) -> Option<NavRequest> {
     if record.conversation_id.is_some() {
         return record.conversation_id.map(NavRequest::OpenConversation);
@@ -134,7 +124,6 @@ fn deep_link(record: &NotificationRecord) -> Option<NavRequest> {
     None
 }
 
-/// AUD-P1-1 (C1): where the Open button takes you, in hover text.
 fn deep_link_hover(record: &NotificationRecord) -> Option<String> {
     let nav = deep_link(record)?;
     Some(match nav {
@@ -292,8 +281,6 @@ impl NotificationsPage {
             return None;
         }
 
-        // UX-13: collapse identical notifications into one card per group so
-        // a repeated failure reads as "×18", not as 18 duplicate cards.
         let groups = group_records(&rows);
         let mut toggled: Option<(Vec<i64>, bool)> = None;
         let mut nav: Option<NavRequest> = None;
@@ -346,9 +333,6 @@ impl NotificationsPage {
                             {
                                 toggled = Some((group.ids(), !unread));
                             }
-                            // AUD-P1-1 (C1): the card's deep-link fields are
-                            // live — "mentioned you on #501" is one click
-                            // from the conversation now.
                             if nav.is_none()
                                 && let Some(hover) = deep_link_hover(sample)
                                 && design::button(ui, "Open", ButtonVariant::Outline)
@@ -366,11 +350,6 @@ impl NotificationsPage {
                             .color(design::tokens(ui).foreground),
                     );
                     if let Some(body) = &sample.body {
-                        // UX-13: bodies render as truncated small code with
-                        // the full text one hover away. UX-35: job-failure
-                        // bodies are now friendly summaries — their hover
-                        // reveals the verbatim technical error kept in the
-                        // structured payload.
                         let t = design::tokens(ui);
                         let galley = egui::WidgetText::from(
                             egui::RichText::new(body.as_str())
@@ -401,8 +380,6 @@ impl NotificationsPage {
         nav
     }
 
-    /// AUD-P1-1 (C1): the current unread count, for the shell chrome's
-    /// sidebar badge (synced after every reload).
     #[must_use]
     pub fn unread_badge(&self) -> u32 {
         self.unread.max(0) as u32
@@ -636,8 +613,6 @@ mod tests {
         let past = spp_core::business_hours::iso_days_ago(2);
         assert_eq!(relative_time(&past), "2d ago");
     }
-
-    // ---- AUD-P1-1 (C1): notification click-through + unread badge ----
 
     fn link_record(
         conversation_id: Option<i64>,

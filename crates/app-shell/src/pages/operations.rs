@@ -102,19 +102,12 @@ pub(crate) fn tile_severity(tile: OperationsTileKey) -> Severity {
     }
 }
 
-/// UX-34: where a tile drills to, parsed from core's drill payload — core
-/// owns the routing data, the frontend just renders it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TileDrill {
-    /// The filtered inbox (conversation tiles — the inbox applies the ops
-    /// filter named by the tile key).
     Inbox,
-    /// A named page (system-health tiles — where the underlying list lives).
     Page(PageKey),
 }
 
-/// UX-34: map a core drill page name to the page it opens. Unknown names
-/// degrade to a non-clickable tile rather than a dead button.
 fn page_key_from_drill(page: &str) -> Option<PageKey> {
     match page {
         "diagnostics" => Some(PageKey::Diagnostics),
@@ -126,9 +119,6 @@ fn page_key_from_drill(page: &str) -> Option<PageKey> {
     }
 }
 
-/// UX-34: parse core's drill payload (`{"type":"inbox","params":{…}}` or
-/// `{"type":"page","page":"…"}`) into a navigation target. `None` means the
-/// tile has no destination (rendered inert).
 fn tile_drill_from_payload(drill: &serde_json::Value) -> Option<TileDrill> {
     match drill.get("type").and_then(|v| v.as_str())? {
         "inbox" => Some(TileDrill::Inbox),
@@ -143,7 +133,6 @@ fn tile_drill_from_payload(drill: &serde_json::Value) -> Option<TileDrill> {
 pub(crate) struct TileView {
     pub key: OperationsTileKey,
     pub count: u32,
-    /// UX-34: the tile's destination, parsed from core's drill payload.
     pub drill: Option<TileDrill>,
 }
 
@@ -152,8 +141,6 @@ impl TileView {
         self.count.to_string()
     }
 
-    /// UX-14/UX-34: the navigation request for a tile click — derived from
-    /// core's drill payload, not a hardcoded per-key table.
     fn nav(&self) -> Option<NavRequest> {
         match self.drill? {
             TileDrill::Inbox => Some(NavRequest::InboxTile(self.key.as_str().to_string())),
@@ -161,8 +148,6 @@ impl TileView {
         }
     }
 
-    /// UX-14/UX-34: the drill hint names the destination so the affordance
-    /// is explicit — no more guessing which tiles are clickable.
     fn drill_line(&self) -> Option<String> {
         match self.drill? {
             TileDrill::Inbox => Some("open →".to_string()),
@@ -226,16 +211,12 @@ pub struct OperationsPage {
     suggestions: Vec<spp_core::workload::SuggestedAssignee>,
     suggestions_loaded: bool,
     error: Option<String>,
-    /// AUD-P2-17 (C13): the one-click assign's success note.
     assign_notice: Option<String>,
     library: Option<LibraryModel>,
     pending_confirm: Option<ConfirmRequest>,
-    /// AU2-9: when the snapshot query fails, back off instead of re-querying
-    /// every frame (the old loop hammered SQLite at refresh rate forever).
     failed_reload_at: Option<std::time::Instant>,
 }
 
-/// AU2-9: cooldown between retries after a failed operations snapshot.
 const RELOAD_BACKOFF: std::time::Duration = std::time::Duration::from_secs(10);
 
 impl OperationsPage {
@@ -292,8 +273,6 @@ impl OperationsPage {
         self.snapshot = snapshot;
         self.workload = workload;
         self.capacity = capacity;
-        // AU2-9: arm the backoff only when the read failed; a successful read
-        // re-arms nothing.
         self.failed_reload_at = self.snapshot.is_none().then(std::time::Instant::now);
     }
 
@@ -308,9 +287,6 @@ impl OperationsPage {
         }
     }
 
-    // AUD-P2-17 (C13): the suggested-assign write path — the same lane
-    // the Inbox's assign uses (local mirror write via ticket_ops, then
-    // the idempotency-keyed outbound "assign" job, then the bus event).
     fn assign_suggestion(
         &mut self,
         db: &DbHandle,
@@ -322,7 +298,6 @@ impl OperationsPage {
             return;
         };
         let outcome: std::result::Result<(), String> = db.with_write(|conn| {
-            // The same guards the Inbox's assign runs through.
             if spp_core::conversation_ops::eval_mode_on(conn) {
                 return Err("AI evaluation mode is ON: no assignments are sent.".into());
             }
@@ -387,7 +362,6 @@ impl OperationsPage {
                 self.error = None;
                 self.assign_notice =
                     Some("assignment written locally — sending to Help Scout.".into());
-                // Suggestions + workload refresh with the new load.
                 self.suggestions = db.with_read(|conn| {
                     spp_core::workload::suggested_assignees(conn, 10).unwrap_or_default()
                 });
@@ -414,8 +388,6 @@ impl OperationsPage {
         db: &DbHandle,
         bus: &spp_core::event_bus::EventBus,
     ) -> Option<NavRequest> {
-        // AUD-P2-17 (C13): the bus rides along for the one-click assign
-        // (the same emit_updated contract the inbox write path uses).
         self.ensure_loaded(db);
 
         let mut nav = None;
@@ -492,9 +464,6 @@ impl OperationsPage {
                             Severity::Warning => BadgeTone::Warning,
                             Severity::Info => BadgeTone::Info,
                         };
-                        // UX-14/UX-34: drill-ability and the destination
-                        // both come from core's drill payload — every tile
-                        // that can go somewhere shows where it goes.
                         let drill_line = tile.drill_line();
                         let resp = design::metric_tile(
                             ui,
@@ -525,7 +494,6 @@ impl OperationsPage {
         db: &DbHandle,
         bus: &spp_core::event_bus::EventBus,
     ) {
-        // AUD-P2-17 (C13): the one-click assign's outcome surfaces here.
         if let Some(note) = self.assign_notice.take() {
             design::hint_text(ui, &note);
         }
@@ -541,9 +509,6 @@ impl OperationsPage {
 
         let suggestions = self.suggestions.clone();
         let agents = workload.agents.clone();
-        // UXG-1-4: exact-column data_table in a full-width titled card
-        // (virtualized rows built in) — the workload list spans the card
-        // at every width.
         design::card_titled_wide(
             ui,
             "Team Workload",
@@ -656,9 +621,6 @@ impl OperationsPage {
                                     .size(13.0)
                                     .color(t.foreground),
                                 );
-                                // AUD-P2-17 (C13): the one-click assign the
-                                // audit asked for — the suggestion is now
-                                // actionable, not display-only text.
                                 if s.suggested_user_local_id.is_some()
                                     && design::button(ui, "Assign", ButtonVariant::Secondary)
                                         .on_hover_text("assign the suggested agent — local write + Help Scout job")
@@ -940,10 +902,6 @@ impl OperationsPage {
         }
 
         design::section_title(ui, "Workflows");
-        // AUD-P2-17 (C13): the honest scope note the audit asked for —
-        // workflows are mirrored Help Scout objects (the platform
-        // exposes run-only through the API), so creating or editing
-        // them belongs in Help Scout; the runner here executes them.
         design::hint_text(
             ui,
             "workflows are mirrored from Help Scout — create or edit them there; \
@@ -1207,8 +1165,6 @@ mod tests {
 
     #[test]
     fn drill_navigation_comes_from_the_core_payload() {
-        // UX-34: navigation derives from core's drill payload — the shapes
-        // core actually emits, verified against real snapshots.
         let db = fixture(vec![("conv", 1, "Help export", "active", "email", 1, 5, 9)]);
         let snapshot = db
             .with_read(|conn| spp_core::operations::snapshot(conn, None))
@@ -1221,8 +1177,6 @@ mod tests {
                 .unwrap_or_else(|| panic!("{key:?} present"))
         };
 
-        // Conversation tiles (all nine, including the three the hardcoded
-        // UX-14 map left inert) drill into the filtered inbox.
         for key in [
             OperationsTileKey::Unassigned,
             OperationsTileKey::NeedsFirstResponse,
@@ -1246,7 +1200,6 @@ mod tests {
             );
         }
 
-        // System-health tiles open the page that holds the underlying list.
         assert_eq!(
             tile(OperationsTileKey::FailedJobs).nav(),
             Some(NavRequest::Page(PageKey::Diagnostics)),
@@ -1270,7 +1223,6 @@ mod tests {
             tile(OperationsTileKey::AutomationApprovals).nav(),
             Some(NavRequest::Page(PageKey::Automation))
         );
-        // SLA and spike tiles open Issue Radar.
         assert_eq!(
             tile(OperationsTileKey::SlaBreached).nav(),
             Some(NavRequest::Page(PageKey::IssueRadar))
@@ -1279,7 +1231,6 @@ mod tests {
             tile(OperationsTileKey::IssueSpike).nav(),
             Some(NavRequest::Page(PageKey::IssueRadar))
         );
-        // Campaign activity opens Outreach.
         assert_eq!(
             tile(OperationsTileKey::CampaignActivity).nav(),
             Some(NavRequest::Page(PageKey::Outreach))
@@ -1288,8 +1239,6 @@ mod tests {
 
     #[test]
     fn unknown_drill_payload_degrades_to_an_inert_tile() {
-        // A payload core never emits today must not crash or fake a
-        // destination — the tile simply loses its affordance.
         let unknown_page = serde_json::json!({ "type": "page", "page": "mars-base" });
         assert_eq!(tile_drill_from_payload(&unknown_page), None);
         let unknown_type = serde_json::json!({ "type": "teleport" });
@@ -1430,7 +1379,6 @@ mod tests {
     }
 }
 
-// AUD-P2-17 (C13): the one-click suggested assign.
 #[cfg(test)]
 mod audp2_tests {
     use super::*;
@@ -1439,7 +1387,6 @@ mod audp2_tests {
 
     #[test]
     fn audp2_assign_suggestion_writes_locally_and_queues_the_assign_job() {
-        // Conversation 1 is unassigned in the fixture; agent 5 exists.
         let db = fixture(vec![(
             "conv",
             1,
@@ -1454,8 +1401,6 @@ mod audp2_tests {
         let mut page = OperationsPage::new();
         page.reload(&db);
 
-        // The suggestion engine proposes an agent for the unassigned
-        // conversation before the click.
         let before = db.with_read(|conn| {
             spp_core::workload::suggested_assignees(conn, 10).expect("suggestions")
         });
@@ -1496,7 +1441,6 @@ mod audp2_tests {
             page.error
         );
 
-        // An unknown conversation is refused honestly.
         page.assign_suggestion(&db, &bus, 999, Some(5));
         assert!(page.error.is_some(), "unknown conversations refuse");
     }

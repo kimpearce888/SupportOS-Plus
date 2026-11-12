@@ -117,11 +117,6 @@ fn numeric_arg(line: &str, marker: &str) -> Vec<i64> {
     out
 }
 
-/// AUD-V2 (register V2): the pages-level margin token gate — inside
-/// `src/pages/`, widget margins must reference the spacing scale (the
-/// token expressions carry no digits); a numeric margin literal is a
-/// violation unless the line carries `style-lint:allow`. The design
-/// factory (`src/design/`) defines the tokens and stays exempt.
 fn lint_page_margins(file: &Path, rel: &str, lines: &[&str], violations: &mut Vec<Finding>) {
     if !rel.replace('\\', "/").starts_with("src/pages/") {
         return;
@@ -134,8 +129,6 @@ fn lint_page_margins(file: &Path, rel: &str, lines: &[&str], violations: &mut Ve
         if !line.contains("Margin") {
             continue;
         }
-        // Token references (design::scale::space::*) carry no digits; a
-        // numeric literal anywhere in a Margin line is the tell.
         if line.chars().any(|c| c.is_ascii_digit() && c != '0') && !line.contains("scale::space") {
             violations.push(Finding(
                 rel.to_string(),

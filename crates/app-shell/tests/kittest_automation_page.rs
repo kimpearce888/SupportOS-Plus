@@ -23,10 +23,6 @@ fn seeded_page() -> (AutomationPage, DbHandle) {
     )
     .expect("users");
     conn.execute(
-        // AUD-P1-5 (C6) seed fix: the action field is `new_priority` — the
-        // old `priority` typo failed the whole rules load, so the base
-        // goldens locked an accidental "0 rules + error banner" state
-        // instead of the rules list this seed was written to show.
         "INSERT INTO automation_rules (name, trigger_json, action_json, enabled)
          VALUES ('Close stale solved', '{\"kind\":\"sla_risk\"}',
                  '{\"kind\":\"add_tag\",\"tag\":\"stale\"}', 1),
@@ -60,8 +56,6 @@ fn render_automation_page(dark: bool, width: f32, name: &str) {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                // VF-4 (V1 completion): render through the shared
-                // production host — the exact funnel app/mod.rs uses.
                 design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db));
             },
             AutomationPageState {
@@ -116,8 +110,6 @@ fn r3_automation_new_rule_light() {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                // VF-4 (V1 completion): render through the shared
-                // production host — the exact funnel app/mod.rs uses.
                 design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db));
             },
             AutomationPageState {
@@ -140,10 +132,6 @@ fn r3_automation_new_rule_light() {
     h.snapshot("r3_automation_new_rule_light");
 }
 
-/// AUD-P1-5 (C6): the edit state — a seeded Assign rule (live trigger,
-/// editable action) opens the form in edit mode with the assignee picker
-/// prefilled from the rule's action. The raw numeric-id text field is
-/// gone; the picker is the same assignable-users list the Inbox uses.
 #[test]
 fn audp1_automation_edit_assign_rule_light() {
     let (page, db) = seeded_page();
@@ -167,8 +155,6 @@ fn audp1_automation_edit_assign_rule_light() {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                // VF-4 (V1 completion): render through the shared
-                // production host — the exact funnel app/mod.rs uses.
                 design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db));
             },
             AutomationPageState {
@@ -178,7 +164,6 @@ fn audp1_automation_edit_assign_rule_light() {
             },
         );
     h.run_ok();
-    // the third rule row's Edit act (the rules list renders in id order)
     h.get_all_by_label("Edit")
         .nth(2)
         .expect("the third rule's Edit act")

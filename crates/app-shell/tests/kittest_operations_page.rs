@@ -25,10 +25,6 @@ fn stamp(days_ago: i64, time: &str) -> String {
 fn seeded_page() -> (OperationsPage, DbHandle) {
     let mut conn = rusqlite::Connection::open_in_memory().expect("in-memory db");
     spp_core::bootstrap::apply_all(&mut conn).expect("bootstrap");
-    // UXB-T1: pin the shot clock so `kittest_freeze_generated_at`'s fixed
-    // 2026-10-27 stamp renders the same "generated Nd ago" on every
-    // calendar day (the freeze alone pinned the seed, not the clock — the
-    // goldens still ticked at each UTC midnight).
     assert!(
         spp_core::business_hours::pin_now_for_kittest(
             spp_core::business_hours::KITTEST_PINNED_NOW_ISO
@@ -198,10 +194,7 @@ fn render_operations_page(dark: bool, width: f32, name: &str) {
                     s.installed = true;
                 }
                 s.page.kittest_freeze_generated_at();
-                // AUD-P2-17 (C13): the bus rides along for one-click assign.
                 let bus = spp_core::event_bus::EventBus::new(8);
-                // VF-4 (V1 completion): render through the shared
-                // production host — the exact funnel app/mod.rs uses.
                 design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db, &bus));
             },
             OperationsPageState {
@@ -258,10 +251,7 @@ fn r3_operations_workload_tab_light() {
                     s.installed = true;
                 }
                 s.page.kittest_freeze_generated_at();
-                // AUD-P2-17 (C13): the bus rides along for one-click assign.
                 let bus = spp_core::event_bus::EventBus::new(8);
-                // VF-4 (V1 completion): render through the shared
-                // production host — the exact funnel app/mod.rs uses.
                 design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db, &bus));
             },
             OperationsPageState {

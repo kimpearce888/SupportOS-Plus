@@ -59,10 +59,6 @@ fn seeded_page() -> (OutreachPage, DbHandle) {
         .expect("conversation");
     }
 
-    // AUD-P2-13 (C9): the campaign form's pickers read exactly these
-    // seeds — mailbox 1 "Support" is the only option, and the two saved
-    // segments are the segment picker's options — so the picker states
-    // are deterministic in every golden below.
     let ticket_segment = spp_core::outreach::save_segment_v2(
         &conn,
         None,
@@ -147,8 +143,6 @@ fn render_outreach_page(dark: bool, width: f32, name: &str) {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                // VF-4 (V1 completion): render through the shared
-                // production host — the exact funnel app/mod.rs uses.
                 design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db));
             },
             OutreachPageState {
@@ -208,8 +202,6 @@ fn r3_outreach_segments_tab_light() {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                // VF-4 (V1 completion): render through the shared
-                // production host — the exact funnel app/mod.rs uses.
                 design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db));
             },
             OutreachPageState {
@@ -244,8 +236,6 @@ fn r3_outreach_new_campaign_light() {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                // VF-4 (V1 completion): render through the shared
-                // production host — the exact funnel app/mod.rs uses.
                 design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db));
             },
             OutreachPageState {
@@ -265,10 +255,6 @@ fn r3_outreach_new_campaign_light() {
         h.get_all_by_label("Create Campaign").next().is_some(),
         "the New Campaign form must show the create act"
     );
-    // AUD-P2-13 (C9): the pickers replaced the raw "Mailbox id"/"Segment
-    // id" text fields — the old labels and the "saved segments: …" hint
-    // line are gone, and the form's two combo boxes open on the seeded
-    // options (mailbox 1 "Support" is the only mailbox).
     assert!(
         h.query_all_by_label("Mailbox id").next().is_none(),
         "the raw mailbox id field is gone"
@@ -290,7 +276,6 @@ fn r3_outreach_new_campaign_light() {
         picker_count, 2,
         "the mailbox and segment pickers are the form's two combo boxes"
     );
-    // open the mailbox picker — the seeded mailbox is its only option
     h.query_all(egui_kittest::kittest::By::new().role(egui::Role::ComboBox))
         .next()
         .expect("the mailbox picker")
@@ -318,8 +303,6 @@ fn r3_outreach_new_campaign_light() {
 
 #[test]
 fn audp2_outreach_segment_preview_light() {
-    // AUD-P2-13 (C9): the saved segment's Preview act — the recipient
-    // count guard that used to be missing before save/target.
     let (page, db) = seeded_page();
     let mut h = Harness::builder()
         .with_size(egui::vec2(1440.0, 900.0))
@@ -330,8 +313,6 @@ fn audp2_outreach_segment_preview_light() {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                // VF-4 (V1 completion): render through the shared
-                // production host — the exact funnel app/mod.rs uses.
                 design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db));
             },
             OutreachPageState {

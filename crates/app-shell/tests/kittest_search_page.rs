@@ -90,8 +90,6 @@ fn render_search_page(dark: bool, width: f32, name: &str) {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                // VF-4 (V1 completion): render through the shared
-                // production host — the exact funnel app/mod.rs uses.
                 design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db));
             },
             SearchPageState {
@@ -146,8 +144,6 @@ fn r3_search_export_hits_light() {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                // VF-4 (V1 completion): render through the shared
-                // production host — the exact funnel app/mod.rs uses.
                 design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db));
             },
             SearchPageState {
@@ -157,8 +153,6 @@ fn r3_search_export_hits_light() {
             },
         );
     h.run_ok();
-    // UX-15: the empty state offers one-click example queries; clicking one
-    // runs the search the way typing + Enter always did.
     h.get_all_by_label("refund")
         .next()
         .expect("an example-query chip")

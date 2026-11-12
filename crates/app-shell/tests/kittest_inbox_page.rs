@@ -270,13 +270,6 @@ fn render_inbox_page(dark: bool, width: f32, name: &str) {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                // AUD-V1 (register V1): the golden renders through the
-                // PRODUCTION host wrapper — CentralPanel + fill + the
-                // SP5/14 inset app/mod.rs applies — so the drift gate
-                // finally gates the look the user sees. Bare-ui renders
-                // certified a synthetic composition.
-                // VF-4 (V1 completion): the shared inbox production host —
-                // one definition, no inline copies left to drift.
                 design::host_inbox_page(ui, |ui| {
                     s.page.ui(ui, &s.db, &s.bus, None);
                 });
@@ -292,20 +285,8 @@ fn render_inbox_page(dark: bool, width: f32, name: &str) {
     h.snapshot(name);
 }
 
-// UXE-2-3: the r3 fixtures' 4-entry thread never overflows the reader,
-// so the scroll-active state (thread clipped at the fold, cards that
-// must NOT reflow when the bar rides the edge — egui 0.37's default
-// floating bar allocates zero width) is pinned by no golden. This
-// fixture seeds a 16-entry thread (2026-02-15 block + the standard
-// 2026-02-16 block, one day divider) so the fold falls inside the
-// 02-15 block: the lock proves the reader cards keep the composer
-// card's exact width at the fold instead of shrinking by a scrollbar
-// gutter.
 fn seeded_page_overflow() -> (InboxPage, DbHandle, EventBus) {
     let (page, db, bus) = seeded_page();
-    // 12 entries across 2026-02-15 (each round = 4 kinds, 3 rounds) so the
-    // thread overflows the 900px viewport with the fold inside this block;
-    // the 02-16 block (incl. the note card) follows below the fold.
     let mut entries: Vec<(&str, &str, String)> = Vec::new();
     for round in 0..3 {
         for (kind, from) in [
@@ -358,13 +339,6 @@ fn render_inbox_page_overflow(dark: bool, width: f32, name: &str) {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                // AUD-V1 (register V1): the golden renders through the
-                // PRODUCTION host wrapper — CentralPanel + fill + the
-                // SP5/14 inset app/mod.rs applies — so the drift gate
-                // finally gates the look the user sees. Bare-ui renders
-                // certified a synthetic composition.
-                // VF-4 (V1 completion): the shared inbox production host —
-                // one definition, no inline copies left to drift.
                 design::host_inbox_page(ui, |ui| {
                     s.page.ui(ui, &s.db, &s.bus, None);
                 });
@@ -415,26 +389,6 @@ fn r3_inbox_page_800_dark() {
     render_inbox_page(true, 800.0, "r3_inbox_page_800_dark");
 }
 
-// ---------------------------------------------------------------------------
-// AUD-L1/V3: composition geometry invariants — the owner's complaint,
-// turned into hard assertions on the LIVE panel rects at every monitor
-// class. These are the tests the old battery never had: the goldens
-// compared pixels, nothing asserted that panels respect each other's
-// bounds. The rects come from InboxPage::panel_geometry (recorded each
-// frame inside the panel closures).
-//
-// Contracts (register L1/V3):
-//   G1  no sibling column overlaps (rail | list | reader | copilot)
-//   G2  when the copilot is docked and a conversation is selected, the
-//       copilot column ENDS at the composer's top edge — the sidebar
-//       never runs beneath the reply strip
-//   G3  the composer spans the reader+copilot zone (shared right edge
-//       with the copilot, left edge with the reader)
-//   G4  the reader never renders below READER_FLOOR while the copilot
-//       is docked
-//   G5  the composer height stays within its declared bounds
-// ---------------------------------------------------------------------------
-
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -453,7 +407,6 @@ fn rects_disjoint(a: egui::Rect, b: egui::Rect) -> bool {
 }
 
 fn assert_composition(w: f32, g: &InboxPanelGeometry) {
-    // G1: the columns never overlap each other.
     if let (Some(rail), Some(list)) = (g.rail, g.list) {
         assert!(rects_disjoint(rail, list), "{w}px: rail overlaps list");
     }
@@ -477,7 +430,6 @@ fn assert_composition(w: f32, g: &InboxPanelGeometry) {
             "{w}px: composer intrudes into the list column"
         );
     }
-    // The reader always sits fully above the composer.
     if let (Some(reader), Some(composer)) = (g.reader, g.composer) {
         assert!(
             reader.max.y <= composer.min.y + EPS,
@@ -487,13 +439,8 @@ fn assert_composition(w: f32, g: &InboxPanelGeometry) {
         );
     }
     if let (Some(copilot), Some(composer), Some(reader)) = (g.copilot, g.composer, g.reader) {
-        // The recorded rects are the panels' INNER uis (post-inset); the
-        // composition contracts compare the true PANEL edges, restoring
-        // the insets first (SP3 copilot / SP2 composer / SP5 composer-x).
         let cop_bottom_edge = copilot.max.y + inbox_geo::COPILOT_INSET;
         let comp_top_edge = composer.min.y - inbox_geo::COMPOSER_TOP_INSET;
-        // G2: the copilot column ENDS at the composer's top edge — the
-        // exact register L1 demands (no sidebar beneath the reply).
         assert!(
             (cop_bottom_edge - comp_top_edge).abs() <= 1.5,
             "{w}px: L1 REGRESSION — the sidebar does not end at the reply's \
@@ -501,8 +448,6 @@ fn assert_composition(w: f32, g: &InboxPanelGeometry) {
             cop_bottom_edge,
             comp_top_edge
         );
-        // G3: the composer spans the reader+copilot zone — both columns
-        // share the SAME right panel edge.
         let comp_right_edge = composer.max.x + inbox_geo::COMPOSER_X_INSET;
         let cop_right_edge = copilot.max.x + inbox_geo::COPILOT_INSET;
         assert!(
@@ -512,14 +457,12 @@ fn assert_composition(w: f32, g: &InboxPanelGeometry) {
             comp_right_edge,
             cop_right_edge
         );
-        // G4: the reader keeps its floor while the copilot is docked.
         assert!(
             reader.width() >= inbox_geo::READER_FLOOR - EPS,
             "{w}px: reader collapsed below the floor ({}px)",
             reader.width()
         );
     }
-    // G5: composer height bounds.
     if let Some(composer) = g.composer {
         assert!(
             composer.height() >= inbox_geo::COMPOSER_MIN_H - EPS,
@@ -527,8 +470,6 @@ fn assert_composition(w: f32, g: &InboxPanelGeometry) {
             composer.height()
         );
     }
-    // When the copilot is docked, its PANEL width (inner + insets, the
-    // separator stroke may eat a pixel) is the declared panel width.
     if let Some(copilot) = g.copilot {
         assert!(
             (copilot.width() + 2.0 * inbox_geo::COPILOT_INSET - inbox_geo::COPILOT_W).abs() <= 2.0,
@@ -552,9 +493,6 @@ fn run_geometry(width: f32, open_copilot: bool) -> InboxPanelGeometry {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                // The production host wrapper (AUD-V1).
-                // VF-4 (V1 completion): the shared inbox production host —
-                // one definition, no inline copies left to drift.
                 design::host_inbox_page(ui, |ui| {
                     s.page.ui(ui, &s.db, &s.bus, None);
                 });
@@ -570,8 +508,6 @@ fn run_geometry(width: f32, open_copilot: bool) -> InboxPanelGeometry {
     h.run_ok();
     if open_copilot {
         h.get_by_label("Copilot").click();
-        // settle: the composer measurement + panel re-allocation need a
-        // couple of frames after the copilot docks.
         h.run_ok();
         h.run_ok();
         h.run_ok();
@@ -607,8 +543,6 @@ fn aud_geo_composition_copilot_docked_wide_monitors() {
 fn aud_geo_composition_copilot_narrow_small_monitors() {
     for width in [800.0, 1024.0] {
         let g = run_geometry(width, true);
-        // Narrow mode: the copilot swaps in over the reader — no docked
-        // copilot column, and the composer steps aside with the reader.
         assert!(g.copilot.is_none(), "{width}px: copilot must not dock");
         assert!(g.composer.is_none(), "{width}px: composer must step aside");
         assert!(g.reader.is_some(), "{width}px: no reader rect");

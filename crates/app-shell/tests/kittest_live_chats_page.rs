@@ -71,9 +71,6 @@ fn seeded_page() -> (LiveChatsPage, DbHandle) {
         }),
     );
 
-    // AUD-P2-18 (C14): chat-3 links to conversation remote 499 — seed the
-    // mirror row so the detail card's "became conversation #…" link
-    // resolves to a real Inbox deep link.
     seed_conversation(
         &conn,
         7,
@@ -93,8 +90,6 @@ fn ingest(conn: &rusqlite::Connection, event: &str, payload: serde_json::Value) 
     spp_core::chats::ingest_event(conn, event, &payload).expect("ingest chat event");
 }
 
-/// AUD-P2-18 (C14): the mirror conversation a beacon chat became —
-/// minimal row; the link resolver reads id/number off it.
 fn seed_conversation(
     conn: &rusqlite::Connection,
     id: i64,
@@ -137,8 +132,6 @@ fn render_live_chats_page(dark: bool, width: f32, name: &str) {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                // VF-4 (V1 completion): render through the shared
-                // production host — the exact funnel app/mod.rs uses.
                 design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db));
             },
             LiveChatsPageState {
@@ -193,8 +186,6 @@ fn r3_live_chats_tab_switch_light() {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                // VF-4 (V1 completion): render through the shared
-                // production host — the exact funnel app/mod.rs uses.
                 design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db));
             },
             LiveChatsPageState {
@@ -214,10 +205,6 @@ fn r3_live_chats_tab_switch_light() {
     h.snapshot("r3_live_chats_tab_switch_light");
 }
 
-/// AUD-P2-18 (C14): the ended chat's detail card carries the conversation
-/// link — the seeded mirror row (remote 499) resolves it, the click routes
-/// to the Inbox reader, and the still-unsynced customer renders the honest
-/// fallback instead of a dead link.
 struct LiveChatsNavState {
     installed: bool,
     page: LiveChatsPage,
@@ -237,8 +224,6 @@ fn audp2_live_chats_conversation_link_light() {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                // Sticky capture: a later no-nav frame must not erase a
-                // nav the click frame produced.
                 if let Some(nav) = design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db)).inner {
                     s.nav = Some(nav);
                 }
@@ -258,26 +243,20 @@ fn audp2_live_chats_conversation_link_light() {
         h.query_by_label("chat with Grace N — ended").is_some(),
         "the ended view lists the ended chat"
     );
-    // AUD-P2-18 (C14): the list's scroll viewport only shows the first
-    // rows (the list column rides a horizontal split) — scroll the ended
-    // chat's row into view before clicking it, exactly like a user would.
     h.get_by_label("chat with Grace N — ended").scroll_to_me();
     h.run_ok();
     h.run_steps(2);
     h.get_by_label("chat with Grace N — ended").click();
     h.run_ok();
-    // the chat→conversation link resolved through the seeded mirror row
     assert!(
         h.query_by_label("became conversation #51234").is_some(),
         "the conversation link renders when the mirror row exists"
     );
-    // the honest fallback: the webhook knows customer 8, the mirror doesn't
     assert!(
         h.query_by_label("customer 8 not in the mirror yet")
             .is_some(),
         "an unsynced customer renders the honest fallback"
     );
-    // the link's click routes to the Inbox reader
     h.get_by_label("became conversation #51234").click();
     h.run_ok();
     h.run_steps(2);

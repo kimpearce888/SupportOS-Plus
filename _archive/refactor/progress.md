@@ -7,19 +7,19 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 
 ## CURRENT POINTER
 
-- Next task: **R1.9 — app-shell/pages B strip** (remaining 16 pages +
-  `mod.rs` `queries.rs` + `crates/app-shell/tests/` — 26 kittest suites +
-  style_lint; see `plan.md` §7 R1.9).
+- Next task: **R1.10 — comment closeout** (delete the redundant
+  `warn(missing_docs)` + `allow(missing_docs)` pairs in catalog/core;
+  the whole-tree `strip-comments --check crates` is ALREADY green —
+  205/205 this session; run the full battery + CI, record the exact
+  removed-comment count; see `plan.md` §7 R1.10).
 - Pre-flight: confirm CI green on the session-3 final head (run id in
   session log). If the session ended mid-CI, the run may still be
   in flight — next session must wait for it.
-- Session counter: 3 completed (R1.0-R1.8 executed — session 3 ran three
-  batches; see log). core + app-shell infra + the 7 big pages + catalog +
-  xtask are comment-free; the remaining R1.x comments are 18 app-shell
-  src files + the tests tree.
-- Environment: toolchain installed this session (cold target/); disk hit
-  G-05 twice (ld Bus error during app-shell test link — `rm -rf
-  target/debug/incremental` + retry fixed both). Per-crate test lanes
+- Session counter: 3 completed (R1.0-R1.9 executed — session 3 ran four
+  batches; see log). THE ENTIRE crates TREE IS COMMENT-FREE (205/205).
+- Environment: toolchain installed this session (cold target/); G-05 hit
+  three times (ld Bus error during app-shell test link — `rm -rf
+  target/debug/incremental` + retry fixed each). Per-crate test lanes
   mandatory, ONE lane per tool call (the 10-min window killed a two-lane
   chain mid-run once; rerun was green).
 
@@ -36,8 +36,8 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 | R1.5 core/storage+config strip | done (session 2) | 54 lines removed from 6 of 23 files; audit.rs invariant-7 duty verified (allowlist lines untouched, gate clean); cumulative subset check clean (73/73); battery green; CI run#307 green |
 | R1.6 core/domain strip | done (session 3) | 479 whole lines + 1 inline comment removed from 26 of 122 files — core crate now 100% comment-free (135/135 cumulative); `core/tests/` in the plan is vacuous (tests are inline `#[cfg(test)]`); battery green (app-shell lane needed one G-05 disk retry); CI run#308 green |
 | R1.7 app-shell/infra strip | done (session 3) | 429 whole lines + 2 inline comments removed from 11 of 19 files; G-07 hit twice (comments had masked let_and_return in design/mod.rs + collapsible_if in workers_host.rs — fixed by behavior-identical restructure); cumulative subset check clean (154/154); battery green; CI run#309 green |
-| R1.8 app-shell/pages-A strip | done (session 3) | 864 whole lines + 1 inline comment removed from 7 of 7 pages (inbox 226, knowledge 150, outreach 157, custom_objects 132, settings 114, ai_center 55, reports 51); G-07 hit twice more (collapsible_if in custom_objects.rs + outreach.rs empty-state CTAs — same restructure fix); cumulative check 161/161 clean over stripped scopes; battery green; CI pending |
-| R1.9 app-shell/pages-B strip | pending | + 26 kittest suites |
+| R1.8 app-shell/pages-A strip | done (session 3) | 864 whole lines + 1 inline comment removed from 7 of 7 pages (inbox 226, knowledge 150, outreach 157, custom_objects 132, settings 114, ai_center 55, reports 51); G-07 hit twice more (collapsible_if in custom_objects.rs + outreach.rs empty-state CTAs — same restructure fix); cumulative check 161/161 clean over stripped scopes; battery green; CI run#310 green |
+| R1.9 app-shell/pages-B strip | done (session 3) | 1011 whole lines + 1 inline comment removed from 44 of 51 scanned (16 pages + mod.rs + queries.rs + json_fields.rs + all 26 tests files); NO G-07 hits; whole-tree check crates 205/205 clean — the entire Rust source tree is comment-free; battery green (app-shell lane re-linked all 26 stripped kittest binaries); CI pending |
 | R1.10 comment closeout | pending | lint-attr cleanup + zero-check |
 | R2.1–R2.5 unnecessary code | pending | see plan §7 R2 |
 | R3.1–R3.6 DRY | pending | see plan §7 R3 |
@@ -130,6 +130,25 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
   (the core lane itself had already passed — log confirmed 520/520;
   clean rerun also green). Lesson recorded in the pointer: ONE test lane
   per tool call.
+- R1.9 executed (same session, after run#310 went green on the R1.8 head):
+  scope = pages B (16 pages + pages/mod.rs + queries.rs) + the whole
+  `crates/app-shell/tests/` tree (25 kittest suites + style_lint.rs).
+  Strip removed 1011 whole comment lines + 1 inline from 44 of 51
+  scanned (1 fmt reflow: issue_radar's `#[allow(unused_mut)]` trailing
+  comment trimmed). NO G-07 hits — the tests-tree comments masked no
+  lints. Kittest suite file names + test fn names untouched (D-06
+  intact); the app-shell lane re-linked every stripped kittest binary.
+- MILESTONE: `strip-comments --check crates` — the WHOLE-TREE zero
+  check that R1.10 was to enforce — is already green (205/205 scanned).
+  The entire Rust source tree (4 crates, 205 .rs files) is comment-free.
+- Battery: gate clean, fmt --check clean, clippy workspace (5.9s) +
+  sandbox lane clean, app-shell 293+2 (293s), core 520 (501s),
+  core-sandbox 528 (464s), catalog+xtask 56, verify-icons verified.
+- Session-3 tally: four batches (R1.6-R1.9), 2,783 whole comment lines
+  + 5 inline comments removed, 5 G-07 masked-lint fixes (2 x
+  let_and_return/collapsible_if in infra, 2 x collapsible_if empty-state
+  CTAs in pages A, 0 in pages B), 3 G-05 disk retries, all four CI runs
+  green so far (308, 309, 310; R1.9's run kicked off at push).
 
 ### Session 2 — 2026-11-12
 - Pre-flight: sandbox reset AGAIN (clone + toolchain gone) — re-provisioned

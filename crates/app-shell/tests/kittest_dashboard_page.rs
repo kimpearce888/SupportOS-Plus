@@ -253,8 +253,6 @@ fn render_dashboard_page(dark: bool, width: f32, name: &str) {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                // VF-4 (V1 completion): render through the shared
-                // production host — the exact funnel app/mod.rs uses.
                 design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db, None));
             },
             DashboardPageState {
@@ -267,12 +265,6 @@ fn render_dashboard_page(dark: bool, width: f32, name: &str) {
     h.snapshot(name);
 }
 
-/// UXG-1-9: the all-display tiers — 2K (2560) and 4K (3840) logical
-/// widths through the same funnel the shell renders every standard page
-/// in: the full-width CentralPanel background, then `content_column`,
-/// then the margin frame. The KPI grid keeps its 6-column tier inside a
-/// centered 1800px column instead of stretching cards to the window
-/// edge (the owner's 2K bug report class).
 fn render_dashboard_page_capped(dark: bool, width: f32, name: &str) {
     let (page, db) = seeded_page();
     let mut h = Harness::builder()
@@ -288,9 +280,6 @@ fn render_dashboard_page_capped(dark: bool, width: f32, name: &str) {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                // VF-4 (V1 completion): the capped golden renders through
-                // the shared production host (scroll + column + SP5/14) —
-                // the old inline copy drifted with a literal 22 margin.
                 design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db, None));
             },
             DashboardPageState {
@@ -328,9 +317,6 @@ fn r3_dashboard_page_1440_dark() {
     render_dashboard_page(true, 1440.0, "r3_dashboard_page_1440_dark");
 }
 
-/// UXD-1-3: wide-desktop lock — the owner's bug report was a wide window
-/// (cards enlarging until they left a ~2300px viewport), so the dashboard
-/// now carries a 1920 tier next to the 800/1024/1440 locks.
 #[test]
 fn r3_dashboard_page_1920_light() {
     render_dashboard_page(false, 1920.0, "r3_dashboard_page_1920_light");
@@ -373,8 +359,6 @@ fn r3_dashboard_scope_chip_light() {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                // VF-4 (V1 completion): render through the shared
-                // production host — the exact funnel app/mod.rs uses.
                 design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db, None));
             },
             DashboardPageState {

@@ -16,10 +16,6 @@ struct SyncHealthPageState {
 fn seeded_page() -> (SyncHealthPage, DbHandle) {
     let mut conn = rusqlite::Connection::open_in_memory().expect("in-memory db");
     spp_core::bootstrap::apply_all(&mut conn).expect("bootstrap");
-    // UXB-T1: pin the shot clock so the fixed 2026-10-27 seeds render the
-    // same "Nd ago" hero line on every calendar day — without the pin the
-    // goldens tick one day further at each UTC midnight and fail the drift
-    // gate on any later CI day.
     assert!(
         spp_core::business_hours::pin_now_for_kittest(
             spp_core::business_hours::KITTEST_PINNED_NOW_ISO
@@ -93,8 +89,6 @@ fn render_sync_health_page(dark: bool, width: f32, name: &str) {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                // VF-4 (V1 completion): render through the shared
-                // production host — the exact funnel app/mod.rs uses.
                 design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db, None));
             },
             SyncHealthPageState {
@@ -149,8 +143,6 @@ fn r3_sync_health_run_action_light() {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                // VF-4 (V1 completion): render through the shared
-                // production host — the exact funnel app/mod.rs uses.
                 design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db, None));
             },
             SyncHealthPageState {
