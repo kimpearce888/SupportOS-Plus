@@ -7,24 +7,12 @@ use crate::error::{Error, Result};
 
 type HmacSha1 = Hmac<Sha1>;
 
-/// UX-26B: Help Scout imposes no secret-length cap (the UX audit live-probed
-/// the platform: it stores 48+ characters), so verification uses the FULL
-/// stored secret. `LEGACY_SECRET_CAP` records the cap that pre-UX-26B builds
-/// applied both at verification and when (re-)registering the webhook; hooks
-/// registered by those builds have the first 40 characters as their
-/// platform-side secret, and `verify_delivery` still accepts signatures over
-/// that prefix. The prefix is derived from the full secret and was the ONLY
-/// accepted key before the fix, so the fallback is never weaker than the
-/// pre-fix state.
 pub const LEGACY_SECRET_CAP: usize = 40;
 
 fn legacy_capped(secret: &str) -> String {
     secret.chars().take(LEGACY_SECRET_CAP).collect()
 }
 
-/// Verify a Help Scout webhook delivery against the stored secret: the full
-/// secret first, then — when the stored secret is longer than the legacy
-/// cap — the capped prefix (what cap-era builds registered on the platform).
 pub(crate) fn verify_delivery(secret: &[u8], body: &[u8], provided_signature: &str) -> Result<()> {
     if verify_signature(secret, body, provided_signature).is_ok() {
         return Ok(());
@@ -109,11 +97,6 @@ pub(crate) fn insert_webhook_event(
         )
         .optional()?;
     if let Some((id, state, attempts)) = existing {
-        // AU2-14: a Help Scout redelivery of an event whose retry budget is
-        // exhausted must not be swallowed as a duplicate — it is the
-        // platform's explicit "try again". Reset the budget and requeue it.
-        // Genuinely processed / in-flight / still-retryable events stay
-        // deduplicated.
         if state == "failed" && attempts >= 5 {
             conn.execute(
                 "UPDATE webhook_events SET processing_state = 'pending',
@@ -264,9 +247,6 @@ mod tests {
 
     #[test]
     fn full_length_secret_verifies_end_to_end() {
-        // UX-26B: the audit's live probe showed Help Scout storing 48+
-        // characters while the app truncated to 40 — those deliveries
-        // 401'd. The full stored secret must now verify as-is.
         for len in [41usize, 48, 60, 120] {
             let secret = "s".repeat(len);
             let body = br#"{"objectID":1}"#;
@@ -280,8 +260,6 @@ mod tests {
 
     #[test]
     fn legacy_capped_hook_signature_still_accepted() {
-        // Hooks registered by cap-era builds sign with the first 40
-        // characters; those deployments must not regress on the fix.
         let long: String = "y".repeat(60);
         let body = br#"{"objectID":1}"#;
         let legacy_sig = compute_signature(legacy_capped(&long).as_bytes(), body);
@@ -289,7 +267,6 @@ mod tests {
             verify_delivery(long.as_bytes(), body, &legacy_sig).is_ok(),
             "a signature over the capped prefix is the pre-fix contract — accepted"
         );
-        // Exactly-at-the-cap secrets take the full-verification branch.
         let exactly_40: String = "x".repeat(40);
         let sig40 = compute_signature(exactly_40.as_bytes(), body);
         assert!(verify_delivery(exactly_40.as_bytes(), body, &sig40).is_ok());

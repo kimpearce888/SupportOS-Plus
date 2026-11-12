@@ -250,10 +250,6 @@ fn anomaly_facts(conn: &Connection, start: &str, end: &str) -> Value {
 fn topic_facts(conn: &Connection) -> Value {
     let clusters: Vec<Value> = conn
         .prepare(
-            // AUD-P0-1 (A1): the issue_clusters column is `name` (M016,
-            // intelligence_features.rs) — the old `label` select never
-            // prepared, and unwrap_or_default shipped an empty
-            // top_issue_clusters block in every digest.
             "SELECT name, conversation_count FROM issue_clusters
               ORDER BY conversation_count DESC, id DESC LIMIT 5",
         )
@@ -770,10 +766,6 @@ mod audp0_tests {
         conn
     }
 
-    // AUD-P0-1 (A1): top_issue_clusters must surface the seeded clusters —
-    // the pre-fix query selected a non-existent `label` column and
-    // unwrap_or_default swallowed the prepare failure, so every digest
-    // shipped an empty topic block.
     #[test]
     fn topic_facts_lists_the_top_issue_clusters() {
         let conn = db();

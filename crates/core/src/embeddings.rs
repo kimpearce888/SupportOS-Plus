@@ -186,13 +186,6 @@ pub(crate) fn chunk_conversation(conn: &Connection, conversation_id: i64) -> Res
         chunks.push(excerpt);
     }
 
-    // AUD-P2-3 (D3): this used to DELETE + re-INSERT every chunk on
-    // every sync touch, resetting embedding_state to 'not_indexed' —
-    // so a mere status-change sync re-embedded the whole conversation
-    // through LM Studio. Diff the desired chunk set against the stored
-    // rows instead: unchanged (index, content, kind) rows survive
-    // verbatim with their embedding, state and attempts; only new or
-    // changed indexes are rewritten fresh.
     let thread_count = chunks.len().saturating_sub(usize::from(has_resolution));
     let desired: Vec<(i64, &String, &str)> = chunks
         .iter()
@@ -237,12 +230,8 @@ pub(crate) fn chunk_conversation(conn: &Connection, conversation_id: i64) -> Res
             for (i, content, kind) in &desired {
                 let at_index = existing.iter().find(|(ei, _, _)| ei == i);
                 match at_index {
-                    Some((_, ec, ek)) if ec == content.as_str() && ek == kind => {
-                        // unchanged — keep the row (and its embedding)
-                    }
+                    Some((_, ec, ek)) if ec == content.as_str() && ek == kind => {}
                     Some(_) => {
-                        // content or kind changed at this index — the
-                        // stored embedding is stale; rewrite fresh.
                         conn.execute(
                             "DELETE FROM conversation_chunks
                               WHERE conversation_id = ?1 AND chunk_index = ?2",
@@ -255,7 +244,6 @@ pub(crate) fn chunk_conversation(conn: &Connection, conversation_id: i64) -> Res
                     }
                 }
             }
-            // surplus indexes (the new set is shorter than the old) go away
             conn.execute(
                 "DELETE FROM conversation_chunks
                   WHERE conversation_id = ?1 AND chunk_index >= ?2",
@@ -870,19 +858,10 @@ pub(crate) fn embed_pending_conversation_chunks(
     embed_pending_chunks(conn, "conversation_chunks", qdrant)
 }
 
-/// AUD-P1-8 (D2): did a pass hit its chunk cap? A full pass means more
-/// chunks may be waiting — the caller requeues the same job kind so a
-/// large first sync no longer starves semantic indexing after 60 chunks.
 pub fn pass_hit_cap(embedded: usize) -> bool {
     embedded >= EMBED_PASS_LIMIT as usize
 }
 
-/// AUD-P1-8 (D2): the user-facing semantic re-index. Five failed attempts
-/// used to exclude a chunk permanently, and no surface anywhere offered a
-/// reset — one transient LM Studio outage at the wrong moment degraded
-/// semantic search indefinitely and invisibly. This resets every chunk's
-/// embedding state (attempts included), drops the local vector collection,
-/// and requeues the three embedding passes.
 pub fn reindex_all(
     conn: &Connection,
     qdrant: Option<&crate::vectorstore_sqlitevec::VectorIndex>,
@@ -1187,9 +1166,6 @@ mod batch13_a4_tests {
 
     #[test]
     fn audp23_unchanged_rechunk_preserves_embeddings() {
-        // AUD-P2-3 (D3): a sync touch with unchanged content must not
-        // reset embedding state — the old DELETE+re-INSERT re-embedded
-        // the whole conversation through LM Studio on every touch.
         let (conn, conv) = db_with_conversation("active", None);
         chunk_conversation(&conn, conv).expect("first chunk");
         conn.execute(
@@ -1239,7 +1215,6 @@ mod batch13_a4_tests {
         )
         .expect("mark indexed");
 
-        // New content: a long reply re-splits the chunk set.
         let long_body = "A detailed resolution steps follow. ".repeat(120);
         conn.execute(
             "INSERT INTO conversation_threads
@@ -1274,7 +1249,6 @@ mod batch13_a4_tests {
             "no stale embedding survives on rewritten rows"
         );
 
-        // Shrink: delete the long reply — the surplus chunk index must go.
         conn.execute(
             "DELETE FROM conversation_threads
               WHERE conversation_id = ?1 AND body_text = ?2",
@@ -1605,8 +1579,6 @@ mod audp18_tests {
     #[test]
     fn audp18_reindex_resets_states_and_requeues() {
         let conn = db();
-        // one permanently-failed conversation chunk (5 attempts = excluded
-        // from every future pass by the < 5 predicate)
         conn.execute(
             "INSERT INTO conversations (remote_id, number, subject, preview, status)
              VALUES (9701, 97, 'Reindex', 'preview', 'active')",
@@ -1620,7 +1592,6 @@ mod audp18_tests {
             [],
         )
         .expect("failed conversation chunk");
-        // one indexed knowledge chunk carrying an embedding blob
         conn.execute(
             "INSERT INTO knowledge_sources (name, kind) VALUES ('s', 'local_file')",
             [],
@@ -1639,7 +1610,6 @@ mod audp18_tests {
             [],
         )
         .expect("indexed knowledge chunk");
-        // one failed docs chunk
         conn.execute(
             "INSERT INTO docs_chunks
                  (article_id, chunk_index, content, embedding_state, embedding_attempts)
@@ -1703,12 +1673,10 @@ mod audp18_tests {
         crate::settings::set_string(&conn, "lmstudio_embedding_model", "test-embed")
             .expect("model");
 
-        // pass 1: capped at EMBED_PASS_LIMIT — the handler requeues on cap
         let n = embed_pending_conversation_chunks(&conn, Some(&index)).expect("pass 1");
         assert_eq!(n, EMBED_PASS_LIMIT as usize, "the cap holds per pass");
         assert!(pass_hit_cap(n), "the full pass signals the requeue");
 
-        // the requeued passes (what the handler's self-requeue drives)
         let n2 = embed_pending_conversation_chunks(&conn, Some(&index)).expect("pass 2");
         assert!(pass_hit_cap(n2), "still full — more waiting");
         let n3 = embed_pending_conversation_chunks(&conn, Some(&index)).expect("pass 3");

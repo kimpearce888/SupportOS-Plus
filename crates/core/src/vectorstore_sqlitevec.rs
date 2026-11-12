@@ -673,9 +673,6 @@ mod tests {
         (dir, store)
     }
 
-    /// AU2-13a: the per-entity count is asserted against the store file
-    /// itself (a plain read over vec_payload), not through a dedicated
-    /// count API — the program never counts vectors per entity.
     fn count_payload_rows(dir: &std::path::Path, entity_type: &str) -> usize {
         let conn = rusqlite::Connection::open_with_flags(
             dir.join("vectors").join("vectors.db"),
@@ -820,8 +817,6 @@ mod tests {
         assert!(index.upsert(&points));
 
         assert_eq!(index.try_point_count().expect("count"), Some(2));
-        // AU2-13a: counting went through the deleted count_by_entity wrapper;
-        // the same fact is asserted against the store file itself.
         assert_eq!(count_payload_rows(&dir, "knowledge_chunk"), 1);
         assert_eq!(count_payload_rows(&dir, "docs_chunk"), 1);
 

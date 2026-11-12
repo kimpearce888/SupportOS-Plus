@@ -101,12 +101,7 @@ pub struct ConversationDetail {
     pub closed_at: Option<String>,
     pub thread: Vec<ThreadEntry>,
     pub tags: Vec<String>,
-    /// AUD-P1-4 (C5): the snooze state — the local column the mirror has
-    /// kept since m030, surfaced to the reader.
     pub snoozed_until: Option<String>,
-    /// AUD-P2-19 (B4): the local workflow state (`supportos_state`),
-    /// previously written only by automation and never surfaced — the
-    /// reader needs it to render the State control.
     pub workflow_state: Option<String>,
 }
 
@@ -140,11 +135,6 @@ pub fn list_conversations(
         params_vec.push(customer_id.into());
     }
     if let Some(ref priority) = filters.priority {
-        // AUD-P0-9 (A3): the live priority column is supportos_priority —
-        // the mirror `priority` column is never populated on real accounts
-        // (the Help Scout API supplies no conversation priority), so the
-        // old filter could never match. Reports, workload and the
-        // operations tiles already read supportos_priority.
         where_parts.push("c.supportos_priority = ?".to_string());
         params_vec.push(priority.clone().into());
     }
@@ -302,9 +292,6 @@ pub fn get_conversation(
                 updated_at: row.get(18)?,
                 closed_at: row.get(19)?,
                 thread: Vec::new(),
-                // AUD-P1-4 (C5): the tags actually stored on the mirror —
-                // this field existed but was always empty, so no reader
-                // surface could show or edit them.
                 tags: crate::conversation_ops::read_conversation_tags(conn, row.get(0)?),
                 snoozed_until: row.get::<_, Option<String>>(20).ok().flatten(),
                 workflow_state: row.get::<_, Option<String>>(21).ok().flatten(),
@@ -471,10 +458,6 @@ mod batch27_audit83_tests {
 mod audp0_tests {
     use super::*;
 
-    // AUD-P0-9 (A3): the priority chain must read the live local column.
-    // A priority set through the real write path (ticket_ops SetPriority →
-    // supportos_priority) is returned by the detail query and matched by
-    // the inbox filter; the never-populated mirror column is not consulted.
     #[test]
     fn priority_filter_and_detail_read_the_local_priority() {
         let mut conn = rusqlite::Connection::open_in_memory().expect("db");

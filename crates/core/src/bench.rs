@@ -676,8 +676,6 @@ fn bench_db_operations_on_large_dataset() {
     assert_eq!(hits.len(), 20, "KNN must return the top-k");
     assert!(t_knn.as_millis() < 5_000, "vector KNN: {t_knn:?}");
 
-    // AU2-13a: the count_by_entity wrapper was deleted (the program never
-    // counts per entity) — the bench measures the raw vec_payload scan.
     let (t_count, count) = timeit("vector count (vec_payload scan)", || {
         let conn = rusqlite::Connection::open_with_flags(
             vec_dir.join("vectors").join("vectors.db"),

@@ -1596,9 +1596,6 @@ pub(crate) struct ResolutionCitation {
     pub number: i64,
     pub subject: Option<String>,
     pub closed_at: Option<String>,
-    /// AIE-1-2: the customer's own words — their first published message on
-    /// the conversation, the question the drafted article must actually
-    /// answer (not just the subject line the agent saw).
     pub customer_question: String,
     pub excerpt: String,
 }
@@ -1681,9 +1678,6 @@ fn resolution_excerpt_of(conn: &Connection, conversation_id: i64) -> String {
     excerpt_of(body.trim(), 900)
 }
 
-/// AIE-1-2: the customer's first published message on the conversation —
-/// their question in their own words. Falls back to empty when the mirror
-/// holds no customer message (the subject line still carries the topic).
 fn customer_question_of(conn: &Connection, conversation_id: i64) -> String {
     let raw: Option<(Option<String>, Option<String>)> = conn
         .query_row(
@@ -1803,8 +1797,6 @@ mod k2_tests {
             "the agent's published reply stays the resolution excerpt"
         );
 
-        // The gap-only fixture (no customer message) degrades to an empty
-        // question, never a panic or a fabricated one.
         let bare = seed_closed_with_reply(&conn, 202, 1);
         let bare_cites = best_resolutions(&conn, &[bare], 5);
         assert_eq!(bare_cites.len(), 1);

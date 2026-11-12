@@ -145,14 +145,6 @@ pub fn list_documents(conn: &Connection, source_id: Option<i64>) -> Vec<Value> {
         .unwrap_or_default()
 }
 
-// AUD-P2-15 (C11): the document reader / edit / re-ingest support the
-// Documents tab lacked — the full content fetch (list_documents only
-// exposes a 200-char preview), and the scoped re-embed that re-arms
-// one document's chunks (the Settings action resets ALL chunks; a
-// single stale doc should not re-embed the whole corpus).
-
-/// The full document record (content included) for the reader and the
-/// edit form. None when the id is unknown.
 pub fn get_document(conn: &Connection, document_id: i64) -> Option<Value> {
     conn.query_row(
         "SELECT d.id, d.source_id, d.title, d.visibility, d.version, d.content,
@@ -186,12 +178,6 @@ pub fn get_document(conn: &Connection, document_id: i64) -> Option<Value> {
     .ok()
 }
 
-/// Edit a local document IN PLACE — keyed by id (unlike
-/// `upsert_document`, which matches on (source, title) and would fork a
-/// renamed document into a second row). The checksum discipline is
-/// preserved: unchanged content is a no-op; changed content bumps the
-/// version, rewrites the chunks (FTS + re-embed through the normal
-/// pipeline). Returns (new_version, changed).
 pub fn update_document(
     conn: &Connection,
     document_id: i64,
@@ -227,15 +213,10 @@ pub fn update_document(
     let tx = conn.unchecked_transaction()?;
     if changed {
         let format = detect_format_for_content(content);
-        // The same re-chunk `upsert_document` performs: drop + recreate
-        // (fresh embedding state), stamp last_indexed_at, bump version.
         tx.execute(
             "DELETE FROM knowledge_chunks WHERE document_id = ?1",
             params![document_id],
         )?;
-        // The old FTS rows (their chunk_ids point at the dropped chunks)
-        // go before the rewrite — exactly the delete-then-recreate order
-        // `upsert_document` uses.
         tx.execute(
             "DELETE FROM fts_knowledge WHERE document_id = ?1",
             params![document_id],
@@ -248,8 +229,6 @@ pub fn update_document(
                 params![document_id, i64::try_from(idx).unwrap_or(0), chunk],
             )?;
             let chunk_id = tx.last_insert_rowid();
-            // The same per-chunk FTS shape `upsert_document` writes
-            // (visibility rides every row — the search lane filters on it).
             tx.execute(
                 "INSERT INTO fts_knowledge (title, content, chunk_id, document_id, visibility)
                  VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -272,11 +251,8 @@ pub fn update_document(
                 document_id
             ],
         )?;
-        // The new chunks need embedding — the normal post-import side
-        // effect rides along.
         let _ = crate::jobs::enqueue_on(&tx, "embeddings", "embed_knowledge_chunks", "{}", 4, 2);
     } else {
-        // Even an unchanged-content edit may fix title/visibility.
         tx.execute(
             "UPDATE knowledge_documents
                 SET title = ?1, visibility = ?2,
@@ -297,9 +273,6 @@ pub fn update_document(
     Ok((version, changed))
 }
 
-/// Re-arm ONE document's chunks: reset embedding state/attempts (the
-/// permanently-excluded 5-attempt rows too) and re-enqueue the
-/// knowledge-embedding pass. Returns the reset chunk count.
 pub fn reindex_document(conn: &Connection, document_id: i64) -> Result<usize> {
     let exists: bool = conn
         .query_row(
@@ -334,8 +307,6 @@ pub fn reindex_document(conn: &Connection, document_id: i64) -> Result<usize> {
     Ok(reset)
 }
 
-/// A pragmatic format guess for edited content: fenced code or heading
-/// markers → markdown; tag-heavy text → html; otherwise txt.
 fn detect_format_for_content(content: &str) -> String {
     let head: String = content.chars().take(4000).collect();
     if head.contains("```") || head.contains("# ") || head.contains("## ") {
@@ -540,12 +511,6 @@ pub fn freshness_report(conn: &Connection) -> Value {
         crate::settings::get_int(conn, "freshness_unreviewed_days", 90).unwrap_or(90);
     let low_usage_days =
         crate::settings::get_int(conn, "freshness_low_usage_days", 60).unwrap_or(60);
-    // AUD-P0-2 (A2): the usage metric used to query an `ai_evidence` table
-    // that is never created (guarded by an sqlite_master check that was
-    // always false), so usage_count was a literal 0. The real citations
-    // path is `ai_sources` (source_type 'knowledge_document', source_id =
-    // the document id) joined to `ai_runs` for the distinct conversations
-    // that cited the document.
     let usage_subquery = "(SELECT COUNT(DISTINCT r.conversation_id) \
          FROM ai_sources s JOIN ai_runs r ON r.id = s.run_id \
          WHERE s.source_type = 'knowledge_document' AND s.source_id = d.id)";
@@ -1589,11 +1554,6 @@ mod audp0_tests {
         conn
     }
 
-    // AUD-P0-2 (A2): usage_count must count the distinct conversations whose
-    // AI runs cited the document through the real ai_sources citations table.
-    // Pre-fix the metric queried an ai_evidence table that never exists, so
-    // usage_count was always 0, "low usage" fired on age alone and
-    // "recurring questions" (usage_count > 5) could never fire.
     #[test]
     fn freshness_usage_counts_real_ai_source_citations() {
         let conn = fresh_conn();
@@ -1610,7 +1570,6 @@ mod audp0_tests {
         )
         .expect("documents");
 
-        // Six conversations, each with one analysis run citing document 1.
         for n in 0..6 {
             conn.execute(
                 "INSERT INTO conversations (remote_id, number, subject, status)
@@ -1665,7 +1624,6 @@ mod audp0_tests {
     }
 }
 
-// AUD-P2-15 (C11): the document reader/edit/re-ingest support.
 #[cfg(test)]
 mod audp2_tests {
     use super::*;
@@ -1714,7 +1672,6 @@ mod audp2_tests {
             )
             .expect("v");
 
-        // Unchanged content: no version bump, still Ok.
         let (_, changed) = update_document(
             &c,
             id,
@@ -1725,7 +1682,6 @@ mod audp2_tests {
         .expect("no-op");
         assert!(!changed);
 
-        // Changed content: version bumps, FTS follows.
         let (v1, changed) = update_document(
             &c,
             id,
@@ -1747,7 +1703,6 @@ mod audp2_tests {
         assert_eq!(content, "Entirely new body.");
         assert_eq!(visibility, "customer_safe");
 
-        // Guards: blank title + unknown visibility.
         let err = update_document(&c, id, "  ", "x", "internal_only").expect_err("title");
         assert!(err.to_string().contains("required"), "{err}");
         let err = update_document(&c, id, "t", "x", "secret").expect_err("visibility");
@@ -1760,14 +1715,12 @@ mod audp2_tests {
     fn audp2_reindex_document_rearms_only_that_documents_chunks() {
         let c = conn();
         let id = seed_doc(&c);
-        // A second doc whose chunks must NOT be touched.
         let source =
             get_or_create_source(&c, "local docs", "manual", "internal_only").expect("src");
         let (other, _) =
             upsert_document(&c, source, "Other", "other content", "internal_only", "txt")
                 .expect("other");
 
-        // Exhaust one of the target's chunks the way 5 failed attempts do.
         c.execute(
             "UPDATE knowledge_chunks SET embedding_state = 'failed', embedding_attempts = 5 WHERE document_id = ?1",
             rusqlite::params![id],
@@ -1786,8 +1739,6 @@ mod audp2_tests {
         assert_eq!(state, "not_indexed");
         assert_eq!(attempts, 0, "the permanent-exclusion counter resets");
 
-        // The other document's chunks are untouched (still indexed-or-
-        // pending with their attempts).
         let other_attempts: i64 = c
             .query_row(
                 "SELECT COALESCE(MAX(embedding_attempts), -1) FROM knowledge_chunks WHERE document_id = ?1",
@@ -1797,7 +1748,6 @@ mod audp2_tests {
             .expect("other");
         assert_eq!(other_attempts, 0, "a fresh doc carries no exhausted rows");
 
-        // Unknown document refuses.
         let err = reindex_document(&c, 999).expect_err("missing");
         assert!(err.to_string().contains("not found"), "{err}");
     }

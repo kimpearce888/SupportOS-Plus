@@ -1173,10 +1173,6 @@ pub fn create_outreach_campaign(
     Ok(campaign_id)
 }
 
-// AUD-P2-13 (C9): the campaign edit lane — content edits (name/subject/
-// body/mailbox/tags) are safe only while the campaign is still a draft
-// (recipients are snapshotted at queue time; a queued campaign's sends
-// must not change under it). Non-draft edits are refused honestly.
 pub fn update_outreach_campaign(
     conn: &Connection,
     campaign_id: i64,
@@ -2089,7 +2085,6 @@ mod batch31_tests {
     }
 }
 
-// AUD-P2-13 (C9): the draft-guarded campaign edit lane.
 #[cfg(test)]
 mod audp2_tests {
     use super::*;
@@ -2137,7 +2132,6 @@ mod audp2_tests {
         assert_eq!(subject, "Hello");
         assert!(tags.contains("tag"), "{tags}");
 
-        // Status guard: a queued campaign refuses with the honest message.
         c.execute(
             "UPDATE outreach_campaigns SET status = 'queued' WHERE id = ?1",
             params![campaign],
@@ -2149,7 +2143,6 @@ mod audp2_tests {
             "the refusal explains the rule: {err}"
         );
 
-        // Blank content is refused.
         c.execute(
             "UPDATE outreach_campaigns SET status = 'draft' WHERE id = ?1",
             params![campaign],
@@ -2158,12 +2151,10 @@ mod audp2_tests {
         let err = update_outreach_campaign(&c, campaign, "", "Y", "Z", 1, &[]).expect_err("blank");
         assert!(err.to_string().contains("required"), "{err}");
 
-        // Unknown mailbox is refused.
         let err =
             update_outreach_campaign(&c, campaign, "N", "S", "B", 999, &[]).expect_err("mailbox");
         assert!(err.to_string().contains("does not exist"), "{err}");
 
-        // Unknown campaign id refuses.
         let err = update_outreach_campaign(&c, 999, "N", "S", "B", 1, &[]).expect_err("missing");
         assert!(err.to_string().contains("not found"), "{err}");
     }

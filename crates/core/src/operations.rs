@@ -369,8 +369,6 @@ pub fn snapshot(conn: &Connection, mailbox_ids: Option<&[i64]>) -> Result<Operat
         "Failed jobs (7d)".into(),
         count_failed_jobs(conn)?,
         "warning",
-        // UX-34: failed jobs are listed on Diagnostics (the recent-failures
-        // table) — the drill must name that destination, not Automation.
         page_drill("diagnostics"),
         Some("Background jobs that exhausted their retries in the last 7 days.".to_string()),
     ));
@@ -495,9 +493,6 @@ mod tests {
         conn
     }
 
-    /// UX-34: the drill payload is routing data the frontend consumes, so
-    /// it must name destinations that exist and match where the underlying
-    /// lists actually live.
     #[test]
     fn drill_payloads_name_real_destinations() {
         let conn = snapshot_db();
@@ -554,8 +549,6 @@ mod tests {
             }
         }
 
-        // Every conversation tile drills into the filtered inbox — the
-        // frontend turns these into inbox ops filters.
         for key in [
             "unassigned",
             "needs_first_response",

@@ -59,11 +59,6 @@ pub(crate) fn apply_m005(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-/// UX-35: structured technical payload for notifications whose body is a
-/// friendly summary (job failures today): a JSON object such as
-/// `{"code":"unreachable","raw":"…","queue":"ai","job_type":"ai"}`.
-/// `code` is a stable machine-readable class, `raw` preserves the verbatim
-/// error for the hover/Diagnostics surfaces.
 #[derive(Debug, Clone)]
 pub struct NotificationInput<'a> {
     pub notification_type: NotificationType,
@@ -124,14 +119,10 @@ pub struct NotificationRecord {
     pub side_thread_id: Option<i64>,
     pub created_at: String,
     pub read_at: Option<String>,
-    /// UX-35: structured technical payload (see `NotificationInput::payload`).
     pub payload: Option<String>,
 }
 
 impl NotificationRecord {
-    /// UX-35: the verbatim technical error behind a friendly notification
-    /// body, when the record carries a structured payload. Powers the
-    /// hover on the notifications page.
     #[must_use]
     pub fn technical_detail(&self) -> Option<String> {
         let payload = self.payload.as_deref()?;
@@ -175,14 +166,6 @@ pub fn me_user_local_id(conn: &Connection) -> Result<Option<i64>> {
             }
         }
     }
-    // AUD-P2-4 (D5): the fallback used to grab the first user by id —
-    // on a multi-user mirror with an unresolved `me_remote_id`, every
-    // me-scoped view (unread badge, notification list, mark-read scope)
-    // silently became the wrong agent's. The fallback is only safe
-    // where "the only user is me" is actually true: a single-user
-    // mirror. With several users and no resolved me_remote_id, stay
-    // unresolved (None) — broadcast notifications still count, and
-    // targeted ones wait until Settings resolves who "me" is.
     let live_users: i64 = conn.query_row(
         "SELECT COUNT(*) FROM users WHERE deleted_at IS NULL",
         [],
@@ -359,9 +342,6 @@ pub fn mentions_for_me(conn: &Connection, me: i64, limit: i64) -> Result<Vec<Not
     Ok(rows)
 }
 
-/// AUD-P1-1 (C1): public so the shell chrome can seed the sidebar unread
-/// badge at startup (the event bus only carries the count once the first
-/// notification lands after launch).
 pub fn unread_count(conn: &Connection, me: Option<i64>) -> Result<i64> {
     let n: i64 = conn.query_row(
         "SELECT COUNT(*) FROM notifications
@@ -477,7 +457,6 @@ mod audp2_tests {
              silently becoming the first agent (D5)"
         );
 
-        // Resolving me_remote_id restores a concrete me.
         crate::settings::set_string(&conn, "me_remote_id", "602").expect("set me");
         let grace: i64 = conn
             .query_row("SELECT id FROM users WHERE remote_id = 602", [], |r| {

@@ -78,6 +78,13 @@ session ends by adding what the next session must not have to rediscover.
   528 (core sandbox feature); kittest suites only run under
   `--features kittest-ui` (CI snapshots lane). Full local battery on a cold
   cache: ~25 min; incremental ~5-10 min.
+- **F-10 (session 3).** The default `cargo test -p supportos-plus-app-shell`
+  lane still BUILDS AND LINKS all 26 kittest test binaries (they report 0
+  test fns locally — the fns are kittest-ui-gated). Consequences: (a) that
+  lane is the local link-exercise for `crates/app-shell/tests/` edits
+  (R1.9), (b) it is the lane that trips G-05 disk exhaustion first — keep
+  ≥2G free before it. After R1.6 the whole `core` crate is comment-free;
+  every remaining R1.x comment lives in `app-shell`.
 
 ## Gotchas (G-xx)
 

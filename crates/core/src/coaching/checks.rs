@@ -511,8 +511,6 @@ pub(super) fn check_internal_leakage(
         }
     }
     {
-        // AIE-1-1: draft/internal help center articles are AI evidence now —
-        // the leakage auditor must see them alongside internal local docs.
         let articles: Vec<(String, String)> = match conn.prepare(
             "SELECT DISTINCT da.name, COALESCE(da.text, '') FROM ai_sources s
                 JOIN ai_runs r ON r.id = s.run_id

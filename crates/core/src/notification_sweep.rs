@@ -376,9 +376,6 @@ fn sweep_automation_approvals(
     Ok(created)
 }
 
-/// UX-35: friendly, user-facing label for an internal job type — no more
-/// snake_case identifiers (`ai`, `embed_conversation_chunks`) in
-/// notification titles. Unknown types degrade to a cleaned-up phrase.
 fn friendly_job_type(job_type: &str) -> String {
     match job_type {
         "ai" | "analyze_ticket" | "generate_draft" | "create_ai_note" | "review_draft"
@@ -408,8 +405,6 @@ fn friendly_job_type(job_type: &str) -> String {
     }
 }
 
-/// UX-35: pull the `host:port` out of a reqwest-style error like
-/// `… error sending request for url (http://localhost:1234/v1/chat/completions)`.
 fn extract_host(text: &str) -> Option<String> {
     let start = text.find("url (").map(|i| i + "url (".len())?;
     let rest = &text[start..];
@@ -424,9 +419,6 @@ fn extract_host(text: &str) -> Option<String> {
     }
 }
 
-/// UX-35: classify a raw job error into a stable machine-readable `code`
-/// plus a friendly sentence for the notification body. The raw string is
-/// preserved verbatim in the structured payload (hover / Diagnostics).
 fn classify_job_error(raw: &str) -> (&'static str, String) {
     let lower = raw.to_ascii_lowercase();
     if lower.contains("connection refused")
@@ -531,10 +523,6 @@ fn sweep_failed_jobs(
             continue;
         };
         let _ = completed;
-        // UX-35: the notification is a user-facing surface — the title names
-        // the job in plain language, the body is a friendly classification,
-        // and the verbatim error moves into the structured payload (shown on
-        // hover, kept for Diagnostics) instead of the body.
         let raw = error.unwrap_or_default();
         let (code, friendly) = classify_job_error(&raw);
         let r = record_notification(
@@ -1242,8 +1230,6 @@ mod ux35_tests {
 
     #[test]
     fn classifier_maps_the_audit_seen_error_shapes() {
-        // The exact shape the audit flagged: LM Studio's localhost URL
-        // arriving verbatim in a notification body.
         let (code, friendly) = classify_job_error(
             "LM Studio chat failed: error sending request for url \
              (http://localhost:1234/v1/chat/completions)",

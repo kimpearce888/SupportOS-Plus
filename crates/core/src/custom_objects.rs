@@ -497,15 +497,6 @@ pub fn delete_object(conn: &Connection, object_id: i64) -> Result<bool> {
     Ok(changed > 0)
 }
 
-// AUD-P2-11 (C3): the edit/link lifecycle the page advertised but never
-// had — links were hard-wired to `Vec::new()` at creation, types and
-// objects were create-only. All writes live here so the page, the tests
-// and any future automation lane share one validation path.
-
-/// Edit a type's name, description and field set. The slug is identity
-/// and stays; a field key that existing objects still use cannot be
-/// dropped (data would go orphaned silently) — the edit is refused with
-/// the count instead.
 pub fn update_type(
     conn: &Connection,
     type_id: i64,
@@ -529,7 +520,6 @@ pub fn update_type(
             )));
         }
     }
-    // Refuse to drop a key that live objects still carry.
     for old in &existing.fields {
         if !keys.contains(&old.key) {
             let users: i64 = conn.query_row(
@@ -565,8 +555,6 @@ pub fn update_type(
     Ok(())
 }
 
-/// Edit an object's title and properties (validated against the type's
-/// current field set). Links are untouched — they have their own lane.
 pub fn update_object(
     conn: &Connection,
     object_id: i64,
@@ -615,8 +603,6 @@ pub fn update_object(
     Ok(())
 }
 
-/// The link vocabulary every caller shares — exactly the kinds
-/// `link_target_exists` validates.
 pub const LINK_TARGET_KINDS: [&str; 6] = [
     "customer",
     "organization",
@@ -626,9 +612,6 @@ pub const LINK_TARGET_KINDS: [&str; 6] = [
     "campaign",
 ];
 
-/// Attach a link to an existing object (the post-creation lane that was
-/// missing — `create_object`'s `links` param was the only writer and the
-/// UI always passed `&[]`). Returns true when a new link landed.
 pub fn add_link(conn: &Connection, object_id: i64, link: &LinkInput) -> Result<bool> {
     let exists: bool = conn
         .query_row(
@@ -654,7 +637,6 @@ pub fn add_link(conn: &Connection, object_id: i64, link: &LinkInput) -> Result<b
     Ok(after > before)
 }
 
-/// Remove a link. Returns true when a row was removed.
 pub fn remove_link(
     conn: &Connection,
     object_id: i64,
@@ -669,8 +651,6 @@ pub fn remove_link(
     Ok(changed > 0)
 }
 
-/// The links attached to an object, resolved with a display label for
-/// each target (customer name, organization name, conversation number…).
 pub fn list_object_links(conn: &Connection, object_id: i64) -> Result<Vec<Value>> {
     let mut stmt = conn.prepare(
         "SELECT target_kind, target_local_id, note, linked_by, linked_at
@@ -950,8 +930,6 @@ mod batch31_tests {
     }
 }
 
-// AUD-P2-11 (C3): the edit/link lifecycle — update_type/update_object,
-// add_link/remove_link/list_object_links.
 #[cfg(test)]
 mod audp2_tests {
     use super::*;
@@ -992,8 +970,6 @@ mod audp2_tests {
         let c = conn();
         let (_, object_id, customer_local) = seed(&c);
 
-        // The post-creation lane that never existed — the UI hard-wired
-        // `links: Vec::new()` at create.
         let added = add_link(
             &c,
             object_id,
@@ -1006,7 +982,6 @@ mod audp2_tests {
         .expect("add link");
         assert!(added, "the first link lands");
 
-        // A duplicate is a no-op, not an error.
         let again = add_link(
             &c,
             object_id,
@@ -1024,7 +999,6 @@ mod audp2_tests {
         assert_eq!(links[0]["target_kind"], "customer");
         assert_eq!(links[0]["label"], "Kim One", "the label resolves");
 
-        // A link to a missing target is refused with the honest message.
         let err = add_link(
             &c,
             object_id,
@@ -1066,7 +1040,6 @@ mod audp2_tests {
             .expect("row");
         assert_eq!(title, "Broken hinge (re-filed)");
         assert!(data.contains("WB-999"));
-        // FTS follows the edit.
         let fts: i64 = c
             .query_row(
                 "SELECT COUNT(*) FROM fts_custom_objects WHERE object_id = ?1",
@@ -1076,13 +1049,11 @@ mod audp2_tests {
             .expect("fts");
         assert_eq!(fts, 1);
 
-        // Wrong-typed properties are refused (the type's validation).
         let mut bad = Map::new();
         bad.insert("sku".into(), Value::Bool(true));
         let err = update_object(&c, object_id, "x", &bad).expect_err("type check");
         assert!(err.to_string().contains("sku"), "{err}");
 
-        // An empty title is refused.
         let err = update_object(&c, object_id, "   ", &props).expect_err("title check");
         assert!(err.to_string().contains("title"), "{err}");
         let _ = type_id;
@@ -1093,7 +1064,6 @@ mod audp2_tests {
         let c = conn();
         let (type_id, object_id, _) = seed(&c);
 
-        // Adding a field + renaming works.
         update_type(
             &c,
             type_id,
@@ -1105,10 +1075,8 @@ mod audp2_tests {
         let detail = get_type(&c, type_id).expect("detail").expect("exists");
         assert_eq!(detail.name, "Warranty claims");
         assert_eq!(detail.fields.len(), 2);
-        // The slug (identity) is untouched by a rename.
         assert_eq!(detail.slug, "warranty");
 
-        // Dropping the field a live object uses is refused with the count.
         let err = update_type(
             &c,
             type_id,
@@ -1122,7 +1090,6 @@ mod audp2_tests {
             "the refusal names the count: {err}"
         );
 
-        // Once the object no longer carries the field, the drop is allowed.
         let mut props = Map::new();
         props.insert("qty".into(), Value::from(2));
         update_object(&c, object_id, "Broken hinge", &props).expect("clear sku by replace");

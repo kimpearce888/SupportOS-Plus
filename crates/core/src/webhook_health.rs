@@ -76,14 +76,6 @@ pub fn not_configured_outcome(detail: &str) -> WebhookHealthOutcome {
     WebhookHealthOutcome::new("not_configured", detail.to_string())
 }
 
-/// AUD-P2-3-2 (D7): the honest no-relay verdict. The listener is
-/// loopback-only by design; real-time delivery needs a user-run relay
-/// this health system cannot create. Without one the product is
-/// polling-only — and polling is not a partial fallback for chats and
-/// ratings, because Help Scout has no list endpoint for them: the
-/// webhook IS the data path. This reality is stated wherever the stored
-/// outcome renders (Settings "Last check" row, Sync Health engine card)
-/// instead of only naming the listener state.
 pub(crate) const NO_RELAY_DETAIL: &str = "no relay URL configured — polling-only: \
  conversations and customers still arrive on the polling cadence, but beacon live \
  chats and satisfaction ratings cannot arrive at all (Help Scout has no list \
@@ -233,8 +225,6 @@ async fn register_hook(
     events: &[String],
     secret: &str,
 ) -> Result<(i64, Vec<String>, Vec<String>)> {
-    // UX-26B: register with the FULL secret — the platform imposes no cap
-    // and signs deliveries with whatever is registered here.
     match provider
         .create_webhook(our_url, events, secret, HOOK_LABEL)
         .await
@@ -459,10 +449,6 @@ mod tests {
         assert!(!cadence_due(&conn).expect("cadence"), "just ran -> not due");
     }
 
-    /// AUD-P2-3-2 (D7): the no-relay verdict the worker stores must state
-    /// the polling-only reality — the polling fallback for conversations,
-    /// the NO data path for beacon chats and ratings, and the action that
-    /// closes the gap. Any of the three dropped is a regression.
     #[test]
     fn audp2_3_d7_no_relay_verdict_states_the_full_reality() {
         assert_eq!(
@@ -659,10 +645,6 @@ mod tests {
             deleted: std::sync::Mutex::new(Vec::new()),
             reject: Vec::new(),
         };
-        // UX-26B: the secret is longer than the legacy 40-char cap — the
-        // platform stores it in full, so the hook must be registered in full
-        // (cap-era builds registered the truncated prefix, which is exactly
-        // the mismatch that broke verification).
         let secret = "a-secret-longer-than-the-old-forty-character-cap!!!!!!!!";
         let outcome = rt()
             .block_on(async { run_check(&fake, "https://relay.example.com/hook", secret).await })

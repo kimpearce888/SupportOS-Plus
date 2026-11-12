@@ -393,18 +393,11 @@ pub struct SendBlock {
     pub hint: String,
 }
 
-// AUD-P2-18 (C14): the agent's end-chat action — a local lane only
-// (Help Scout exposes no end-chat endpoint in the provider surface),
-// writing the same terminal state the webhook's ended event writes.
-// The sticky upsert keeps a late webhook from resurrecting it, and
-// send_block then honestly blocks further replies.
 pub fn end_chat(
     conn: &Connection,
     chat_id: &str,
     me_remote_id: Option<i64>,
 ) -> Result<EndChatOutcome> {
-    // The state check comes FIRST — send_block reports an ended chat as
-    // `chat_open: false`, which would misroute AlreadyEnded to Missing.
     let state: Option<String> = conn
         .query_row(
             "SELECT state FROM beacon_chats WHERE chat_id = ?1",
@@ -730,7 +723,6 @@ mod tests {
     }
 }
 
-// AUD-P2-18 (C14): the agent end-chat lane.
 #[cfg(test)]
 mod audp2_tests {
     use super::*;
@@ -738,7 +730,6 @@ mod audp2_tests {
     #[test]
     fn audp2_end_chat_closes_open_chats_and_guards_assignment() {
         let conn = super::tests::fresh_conn();
-        // chat-1 open, assigned to agent 5 (the fixture's me).
         ingest_event(
             &conn,
             "beacon.chat.created",
@@ -750,7 +741,6 @@ mod audp2_tests {
             "assignee": {"id": 5, "first": "Ada", "last": "Lovelace"},
         });
         ingest_event(&conn, "beacon.chat.assigned", &assigned_5).expect("assign 5");
-        // chat-2 open, held by agent 9.
         ingest_event(
             &conn,
             "beacon.chat.created",
@@ -763,7 +753,6 @@ mod audp2_tests {
         });
         ingest_event(&conn, "beacon.chat.assigned", &assigned_9).expect("assign 9");
 
-        // Ending a chat you hold succeeds.
         assert_eq!(
             end_chat(&conn, "chat-1", Some(5)).expect("end"),
             EndChatOutcome::Ended
@@ -778,13 +767,11 @@ mod audp2_tests {
         assert_eq!(state, "ended");
         assert!(ended_at.is_some(), "the ended timestamp lands");
 
-        // Already ended is a clean no-op.
         assert_eq!(
             end_chat(&conn, "chat-1", Some(5)).expect("already"),
             EndChatOutcome::AlreadyEnded
         );
 
-        // Held by another agent refuses with the honest hint.
         match end_chat(&conn, "chat-2", Some(5)).expect("held") {
             EndChatOutcome::HeldByOther(hint) => {
                 assert!(hint.contains("only the assigned agent"), "{hint}");
@@ -792,12 +779,9 @@ mod audp2_tests {
             other => panic!("expected HeldByOther, got {other:?}"),
         }
 
-        // The send guard then blocks replies on the ended chat with the
-        // conversation link hint.
         let block = send_block(&conn, "chat-1", Some(5)).expect("block");
         assert!(!block.can_send);
 
-        // Unknown chat reports Missing.
         assert_eq!(
             end_chat(&conn, "chat-404", Some(5)).expect("missing"),
             EndChatOutcome::Missing

@@ -87,9 +87,6 @@ pub mod sync_engine;
 pub(crate) mod sync_schema;
 pub(crate) mod textutil;
 pub mod ticket_ops;
-// AUD-P0-10 (A3): pub so the inbox priority control can parse and execute
-// the local priority write (TicketPriority::parse + ticket_ops
-// SetPriority). Only TicketPriority and set_priority are `pub` inside.
 pub mod ticket_states;
 pub mod translation;
 pub(crate) mod vectorstore;

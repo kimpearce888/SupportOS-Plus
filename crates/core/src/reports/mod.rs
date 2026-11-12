@@ -1418,9 +1418,6 @@ pub fn get_graph_neighbors(
     Ok(out)
 }
 
-/// AUD-P2-14 (C10): delete a manually-added graph node. Human-authored
-/// edges that touch the node's (kind, entity) pair are removed too —
-/// they were about this node. Returns false when the id is unknown.
 pub fn delete_graph_node(conn: &Connection, node_id: i64) -> Result<bool> {
     let Some(node) = get_graph_node(conn, node_id)? else {
         return Ok(false);
@@ -1539,8 +1536,6 @@ pub fn happiness_overview(conn: &Connection, days: i64) -> serde_json::Value {
                     "created_at": r.get::<_, Option<String>>(2)?,
                     "conversation_number": r.get::<_, Option<i64>>(3)?,
                     "customer": r.get::<_, Option<String>>(4)?.filter(|s| !s.is_empty()),
-                    // AUD-P2-14 (C10): the local conversation id — the
-                    // clickable happiness row's deep-link target.
                     "conversation_id": r.get::<_, Option<i64>>(5)?,
                 }))
             })
@@ -1851,8 +1846,6 @@ mod item56_tests {
     }
 }
 
-// AUD-P2-14 (C10): the clickable happiness row (conversation_id now rides
-// the query) + the graph-node delete lane.
 #[cfg(test)]
 mod audp2_tests {
     use super::*;
@@ -1894,7 +1887,6 @@ mod audp2_tests {
     #[test]
     fn audp2_delete_graph_node_removes_the_node_and_touching_edges() {
         let c = conn();
-        // A node with a human edge to another node.
         let a = add_graph_node(&c, "customer", Some(9), Some("Kim"), None).expect("node a");
         let b = add_graph_node(&c, "organization", Some(3), Some("Globex"), None).expect("node b");
         c.execute(
@@ -1914,8 +1906,6 @@ mod audp2_tests {
             .expect("edges");
         assert_eq!(edges, 0, "the touching human edge is removed with it");
 
-        // The untouched node survives; a second delete of the gone node
-        // is a clean false.
         assert!(get_graph_node(&c, b).expect("get").is_some());
         assert!(!delete_graph_node(&c, a).expect("delete again"));
     }

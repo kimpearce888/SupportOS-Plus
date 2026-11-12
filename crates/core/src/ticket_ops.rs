@@ -275,11 +275,6 @@ fn execute_add_note(
 
     tx.commit()?;
 
-    // AUD-P0-8 (B3): the note body used to be discarded (`_body`) — the
-    // operation recorded a bodiless activity event and the text was lost.
-    // The real note path is the outbound create_note lane (the same one the
-    // composer and automation send_note use): the body rides the job
-    // payload, is delivered to Help Scout, and mirrors back as a thread.
     if !body.trim().is_empty() {
         crate::conversation_ops::create_outbound_job_keyed(
             conn,
@@ -455,9 +450,6 @@ mod batch19_tests {
         );
     }
 
-    // AUD-P0-8 (B3): AddNote used to discard its body — a bodiless activity
-    // event while the text vanished. The body must ride the real note path
-    // (the outbound create_note lane), same as the composer and automation.
     #[test]
     fn add_note_stores_its_body_on_the_outbound_note_lane() {
         let db = db();

@@ -113,9 +113,6 @@ pub(crate) fn set_ticket_state(
     actor_type: &str,
     actor_id: Option<i64>,
 ) -> Result<()> {
-    // AUD-P2-19 (B4): a closed vocabulary — a typo must not encode a
-    // bogus state silently (the same honesty `TicketPriority::parse`
-    // gives the priority lane).
     if !workflow_state_is_valid(new_state) {
         return Err(crate::error::Error::Validation(format!(
             "unknown workflow state {new_state:?} — expected one of {}",
@@ -133,10 +130,6 @@ pub(crate) fn set_ticket_state(
         .ok()
         .flatten();
 
-    // AUD-P2-19 (B4): also resolve and stamp `supportos_state_id` — the
-    // reports `CustomState` dimension and the AI `get_supportos_metadata`
-    // tool read the id column, which nothing ever populated; writing it
-    // here connects the whole chain the way AUD-P0-9 did for priority.
     let state_row_id: Option<i64> = tx
         .query_row(
             "SELECT id FROM ticket_states WHERE key = ?1",
@@ -168,11 +161,6 @@ pub(crate) fn set_ticket_state(
     Ok(())
 }
 
-/// AUD-P2-19 (B4): the six built-in local workflow states, as a closed
-/// vocabulary beside `TicketPriority` (the same ALL/as_str/parse shape).
-/// Pre-fix the keys existed only as SQL rows in the `ticket_states`
-/// lookup table while `set_ticket_state` accepted ANY string — a typo
-/// encoded a bogus state silently. Every caller now validates.
 pub const TICKET_WORKFLOW_STATES: [&str; 6] = [
     "new",
     "investigating",
@@ -187,10 +175,6 @@ pub fn workflow_state_is_valid(key: &str) -> bool {
     TICKET_WORKFLOW_STATES.contains(&key)
 }
 
-/// AUD-P2-19 (B4): the transition history for a conversation — the
-/// `ticket_state_transitions` audit rows (both state and priority
-/// transitions) surfaced for the reader's history card. Pre-fix no
-/// query fn existed; the table was only read by report metrics.
 #[derive(Debug, Clone, Serialize)]
 pub struct StateTransitionRow {
     pub from_state: Option<String>,
@@ -290,9 +274,6 @@ pub(crate) fn apply_m032(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-// AUD-P2-19 (B4): the workflow-state lane — vocabulary validation, the
-// supportos_state_id linkage (reports/AI read it), and the surfaced
-// transition history.
 #[cfg(test)]
 mod audp2_tests {
     use super::*;
@@ -328,8 +309,6 @@ mod audp2_tests {
             )
             .expect("row");
         assert_eq!(state.as_deref(), Some("investigating"));
-        // The id linkage the reports CustomState dimension and the AI
-        // metadata tool read — previously never populated by any writer.
         let resolved_id: i64 = c
             .query_row(
                 "SELECT id FROM ticket_states WHERE key = 'investigating'",
@@ -400,16 +379,12 @@ mod audp2_tests {
 
         let rows = list_state_transitions(&c, remote, 20);
         assert_eq!(rows.len(), 3);
-        // Newest first.
         assert_eq!(rows[0].to_state.as_deref(), Some("investigating"));
         assert_eq!(rows[0].actor_type, "automation");
-        // The priority row renders through the priority columns.
         assert_eq!(rows[1].to_priority.as_deref(), Some("high"));
         assert!(rows[1].to_state.is_none());
-        // The oldest row is the initial state set.
         assert_eq!(rows[2].to_state.as_deref(), Some("new"));
         assert_eq!(rows[2].from_state, None);
-        // The limit clamps.
         assert_eq!(list_state_transitions(&c, remote, 1).len(), 1);
     }
 }

@@ -30,8 +30,6 @@ pub(crate) fn process_webhook(
         return WebhookProcessResult::SecretNotConfigured;
     }
     let valid = match provided_signature {
-        // UX-26B: verify with the full stored secret (legacy capped-prefix
-        // hooks are accepted inside verify_delivery's fallback).
         Some(sig) => webhook::verify_delivery(secret, body, sig).is_ok(),
         None => false,
     };
@@ -171,14 +169,6 @@ pub(crate) fn process_event(conn: &Connection, row_id: i64, event_type: &str, ra
                 }
             }
         }
-        // AUD-P2-20 (B7): unknown event types used to fall through
-        // `_ => {}` and land in the generic "processed" state below —
-        // accepted, deduped, persisted, then indistinguishable from a
-        // handled event. Mark them honestly instead: the row keeps the
-        // payload (raw storage), the state names what happened, and the
-        // note says why. `get_pending_webhook_events` drains only
-        // pending/failed, so an ignored row never retries; the dedupe
-        // keeps repeat deliveries as one honest row.
         _ => {
             let note = format!("unknown event type {event_type:?} — stored, not processed");
             tracing::info!(event_type, "webhook event type is unknown; marking ignored");
@@ -410,9 +400,6 @@ mod tests {
             .expect("mirror readable");
         assert_eq!(mirrored, 0);
     }
-    // AUD-P2-20 (B7): unknown event types must be marked "ignored" with
-    // an honest note — not silently "processed". Pre-fix, `_ => {}` let
-    // a brand-new Help Scout event type vanish beyond raw storage.
     #[test]
     fn unknown_event_type_is_marked_ignored_with_a_note() {
         let conn = fresh_conn();
@@ -446,7 +433,6 @@ mod tests {
             "the note must name the type: {note:?}"
         );
 
-        // The payload is still stored (raw storage promise).
         let payload: String = conn
             .query_row(
                 "SELECT payload FROM webhook_events WHERE id = ?1",
@@ -456,14 +442,11 @@ mod tests {
             .expect("payload row");
         assert!(payload.contains("777"));
 
-        // No jobs were spawned for an unknown type.
         let jobs: i64 = conn
             .query_row("SELECT COUNT(*) FROM jobs", [], |r| r.get(0))
             .expect("jobs count");
         assert_eq!(jobs, 0, "an unknown type must not enqueue work");
 
-        // A duplicate delivery of the same unknown type dedupes to the
-        // one honest row (state stays ignored).
         let dup = process_webhook(&conn, secret, body, Some(&sig), "convo.pinned");
         assert!(
             matches!(dup, WebhookProcessResult::Duplicate { .. }),

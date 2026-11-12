@@ -43,9 +43,7 @@ pub enum Trigger {
         tag: String,
     },
     SlaRisk,
-    /// AU2-1/D10: a conversation appears that the customer started.
     NewConversation,
-    /// AU2-1/D10: the customer replies on an existing conversation.
     CustomerReply,
 }
 
@@ -149,9 +147,6 @@ pub fn set_rule_enabled(conn: &Connection, rule_id: i64, enabled: bool) -> Resul
     Ok(rows > 0)
 }
 
-/// AUD-P1-5 (C6): edit an existing rule — name, trigger and action. The
-/// enabled flag and the engine's bookkeeping (run_count, last_run_at) are
-/// intentionally untouched by an edit.
 pub fn update_rule(conn: &Connection, rule_id: i64, rule: &AutomationRule) -> Result<bool> {
     let trigger_json = serde_json::to_string(&rule.trigger)
         .map_err(|e| crate::error::Error::Config(format!("trigger serialization failed: {e}")))?;
@@ -184,10 +179,6 @@ pub fn approve(conn: &Connection, approval_id: i64, decided_by_user_id: i64) -> 
     if rows == 0 {
         return Ok(false);
     }
-    // AU2-1c: an approval must DO something — requeue the parked job with
-    // approved:true; the worker branch then executes the action and records
-    // the approved run. (Previously approve() only flipped a status while the
-    // parked job stayed parked forever.)
     let job_id: Option<i64> = conn.query_row(
         "SELECT job_id FROM automation_approvals WHERE id = ?1",
         params![approval_id],
@@ -199,9 +190,6 @@ pub fn approve(conn: &Connection, approval_id: i64, decided_by_user_id: i64) -> 
     Ok(true)
 }
 
-/// Requeue a parked `automation_action_awaiting_approval` job with
-/// `approved:true`. Returns Ok(None) when the job is not parked (already
-/// handled, deleted, or unknown) — the approval status flip still stands.
 fn requeue_awaiting_job(conn: &Connection, job_id: i64) -> Result<Option<()>> {
     let payload: Option<String> = conn
         .query_row(
@@ -238,7 +226,6 @@ pub fn reject(conn: &Connection, approval_id: i64, decided_by_user_id: i64) -> R
     if rows == 0 {
         return Ok(false);
     }
-    // AU2-1c: a rejected action's parked job must not linger forever.
     let job_id: Option<i64> = conn.query_row(
         "SELECT job_id FROM automation_approvals WHERE id = ?1",
         params![approval_id],
@@ -257,19 +244,12 @@ pub fn reject(conn: &Connection, approval_id: i64, decided_by_user_id: i64) -> R
 pub(crate) fn risk_tier(kind: &str) -> Option<&'static str> {
     match kind {
         "analyze_ticket" => Some("read"),
-        // AUD-P0-6 (A6): set_priority is real now — a SupportOS-local write
-        // (supportos_priority + a ticket_state_transitions record), no
-        // external push, so it sits with the non-destructive tier.
         "create_ai_note"
         | "create_ai_draft"
         | "add_tag"
         | "manual_review_queue"
         | "set_priority" => Some("non_destructive"),
-        // AU2-1/D10: posting a note to Help Scout is an external write.
         "set_status" | "assign" | "send_note" => Some("higher_risk"),
-        // AUD-P0-7 (B2): search_similar / check_known_issues deliberately
-        // have NO tier — they fall to the honest "no engine handler"
-        // skip instead of fake-completing as read actions.
         _ => None,
     }
 }
@@ -292,7 +272,6 @@ pub(crate) fn ensure_main_rule_columns(conn: &Connection) -> Result<()> {
     add_column_if_missing(conn, "automation_rules", "run_count", "INTEGER DEFAULT 0")?;
     crate::intelligence_features::apply_m035(conn)?;
     add_column_if_missing(conn, "automation_runs", "detail", "TEXT")?;
-    // AU2-1c: the approvals row remembers which parked job to requeue.
     add_column_if_missing(conn, "automation_approvals", "job_id", "INTEGER")
 }
 
@@ -402,8 +381,6 @@ pub(crate) fn list_rule_records(conn: &Connection) -> Result<Vec<RuleRecord>> {
         .collect())
 }
 
-// AUD-P0-6 (A6): pub(crate) so the approval worker can record the honest
-// skipped run when an approved action does not execute.
 pub(crate) fn record_run(
     conn: &Connection,
     rule_id: i64,
@@ -438,9 +415,6 @@ fn enqueue_awaiting_approval(
         2,
         1,
     )?;
-    // AU2-1c: surface the parked action in the approvals queue — the approvals
-    // card reads `automation_approvals`, which nothing inserted into before
-    // (the two historical INSERT sites were #[test]-gated only).
     conn.execute(
         "INSERT INTO automation_approvals
             (rule_id, conversation_id, proposed_action_json, status, job_id)
@@ -450,14 +424,6 @@ fn enqueue_awaiting_approval(
     Ok(())
 }
 
-/// Canonicalize a rule's stored actions into the engine-native shape
-/// `{"kind": <str>, "params": <object>}`.
-///
-/// AU2-1b: two storage generations exist — `create_rule` stores a single M007
-/// enum object with top-level fields (`{"kind":"assign","assignee_remote_id":N}`),
-/// while the engine only executed the array shape (`[{"kind":"...","params":{...}}]`),
-/// so UI-created rules never ran. Both shapes are accepted here; kinds the
-/// engine cannot execute are dropped (the caller records them as skipped).
 #[must_use]
 pub(crate) fn canonical_actions(actions: &serde_json::Value) -> Vec<serde_json::Value> {
     let items: Vec<serde_json::Value> = match actions {
@@ -469,7 +435,6 @@ pub(crate) fn canonical_actions(actions: &serde_json::Value) -> Vec<serde_json::
         .into_iter()
         .filter_map(|item| {
             let kind = item.get("kind").and_then(|k| k.as_str())?;
-            // Normalize the M007 kind names to the engine vocabulary.
             let kind = match kind {
                 "change_status" => "set_status",
                 other => other,
@@ -477,7 +442,6 @@ pub(crate) fn canonical_actions(actions: &serde_json::Value) -> Vec<serde_json::
             let params = if item.get("params").is_some_and(|p| p.is_object()) {
                 item.get("params").cloned().unwrap_or_default()
             } else {
-                // M007 shape: lift the variant's top-level fields into params.
                 match kind {
                     "assign" => serde_json::json!({
                         "userId": item.get("assignee_remote_id")
@@ -491,8 +455,6 @@ pub(crate) fn canonical_actions(actions: &serde_json::Value) -> Vec<serde_json::
                     "send_note" => serde_json::json!({
                         "text": item.get("body").or_else(|| item.get("text"))?
                     }),
-                    // AUD-P0-6 (A6): the M007 SetPriority variant stores
-                    // `new_priority`; older stored shapes used `priority`.
                     "set_priority" => serde_json::json!({
                         "priority": item.get("new_priority")
                             .or_else(|| item.get("priority"))?
@@ -505,8 +467,6 @@ pub(crate) fn canonical_actions(actions: &serde_json::Value) -> Vec<serde_json::
         .collect()
 }
 
-/// Human-readable description of a stored action in either shape — used by the
-/// approvals card, whose rows hold canonical engine actions.
 #[must_use]
 pub fn describe_action_json(raw: &str) -> String {
     let parsed: serde_json::Value = match serde_json::from_str(raw) {
@@ -533,8 +493,6 @@ pub fn describe_action_json(raw: &str) -> String {
         "add_tag" => format!("add tag '{}'", detail("tag")),
         "set_status" => format!("change status to {}", detail("status")),
         "send_note" => format!("post note '{}'", detail("text")),
-        // AUD-P0-6 (A6): the stored vocabulary includes set_priority —
-        // describe it like the M007 UI did.
         "set_priority" => format!("set priority to {}", detail("priority")),
         "create_ai_note" => "queue an AI note".to_string(),
         "create_ai_draft" => "queue an AI draft".to_string(),
@@ -583,8 +541,6 @@ fn execute_non_destructive(
             Ok(true)
         }
         "add_tag" => {
-            // AUD-P0-6 (A6): an action with no tag parameter executed
-            // nothing — it must not report success.
             let Some(tag) = params.get("tag").and_then(|t| t.as_str()) else {
                 return Ok(false);
             };
@@ -612,11 +568,7 @@ fn execute_non_destructive(
             )?;
             Ok(true)
         }
-        // AU2-1/D10: a static internal note via the outbound create_note lane
-        // (Help Scout notes are internal — not visible to customers).
         "send_note" => {
-            // AUD-P0-6 (A6): an empty or missing note body executed nothing —
-            // it must not report success.
             let Some(text) = params.get("text").and_then(|t| t.as_str()) else {
                 return Ok(false);
             };
@@ -639,10 +591,6 @@ fn execute_non_destructive(
             )?;
             Ok(true)
         }
-        // AUD-P0-6 (A6): the local priority write — the chain the M007 UI
-        // promised. Routing through the existing TicketOperation writes
-        // supportos_priority and records a ticket_state_transitions row; no
-        // outbound push (priority is a SupportOS-local concept).
         "set_priority" => {
             let Some(priority) = params.get("priority").and_then(|p| p.as_str()) else {
                 return Ok(false);
@@ -675,10 +623,6 @@ fn execute_non_destructive(
                 Err(_) => Ok(false),
             }
         }
-        // AUD-P0-6 (A6): the catch-all used to return Ok(true), so an
-        // approved action with no engine handler (e.g. a legacy set_priority
-        // before this batch) recorded a successful run that did nothing.
-        // Nothing executed → report exactly that.
         _ => Ok(false),
     }
 }
@@ -1094,8 +1038,6 @@ pub(crate) fn fire_trigger_for_conversation(
             )?;
             continue;
         }
-        // AU2-1b: canonicalize both stored action shapes (M007 single object
-        // and engine-native array) before dispatching.
         for action in canonical_actions(&rule.actions) {
             let kind = action
                 .get("kind")
@@ -1119,12 +1061,6 @@ pub(crate) fn fire_trigger_for_conversation(
             let kind = kind.as_str();
             match tier {
                 "read" => {
-                    // AUD-P0-7 (B2): the read tier executes analyze_ticket
-                    // only — the old else branch recorded
-                    // "completed / Executed read action" for search_similar
-                    // and check_known_issues without executing anything.
-                    // Those kinds carry no tier now and hit the honest
-                    // no-handler skip above.
                     if ai_enabled {
                         let _ = crate::jobs::enqueue_on(
                             conn,
@@ -1170,9 +1106,6 @@ pub(crate) fn fire_trigger_for_conversation(
                             ai_enabled,
                         )?;
                         if !executed {
-                            // AUD-P0-6 (A6): Ok(false) covers both "AI is
-                            // disabled" (the AI actions) and "missing action
-                            // parameters" — record which one it was.
                             let detail = if matches!(kind, "create_ai_note" | "create_ai_draft") {
                                 format!("AI action {kind} skipped: AI is disabled")
                             } else {
@@ -1572,9 +1505,6 @@ mod audp0_tests {
         rows.filter_map(|x| x.ok()).collect()
     }
 
-    // AUD-P0-6 (A6): set_priority executes for real on the fire path — the
-    // local priority column changes and a transition is recorded — instead
-    // of being skipped as "no engine handler".
     #[test]
     fn set_priority_fires_for_real_through_the_local_write_path() {
         let db = db();
@@ -1617,9 +1547,6 @@ mod audp0_tests {
         );
     }
 
-    // AUD-P0-6 (A6): the approved path executes set_priority too — and the
-    // pre-fix lying catch-all (Ok(true) for unknown kinds) now reports
-    // false so the worker records an honest skip.
     #[test]
     fn approved_set_priority_executes_and_unknown_kinds_do_not_fake_complete() {
         let db = db();
@@ -1664,9 +1591,6 @@ mod audp0_tests {
         );
     }
 
-    // AUD-P0-6 (A6): an approved set_priority with a bad priority value is
-    // honestly not-executed, and a valid one through the M007 stored shape
-    // ("priority" lifted from the top level) parses.
     #[test]
     fn set_priority_rejects_unknown_values_instead_of_inventing_them() {
         let db = db();
@@ -1698,8 +1622,6 @@ mod audp0_tests {
         );
     }
 
-    // AUD-P0-7 (B2): search_similar / check_known_issues record an honest
-    // skip ("no engine handler") — never a fabricated completion.
     #[test]
     fn read_actions_without_handlers_skip_instead_of_fake_completing() {
         let db = db();
@@ -1730,9 +1652,6 @@ mod audp0_tests {
         }
     }
 
-    // AUD-P0-6 (A6): actions with missing parameters skip honestly — add_tag
-    // without a tag executed nothing pre-reject; an approved send_note with
-    // blank text must not record a completion either.
     #[test]
     fn missing_action_parameters_skip_instead_of_completing() {
         let db = db();
@@ -1759,8 +1678,6 @@ mod audp0_tests {
             "add_tag with no tag parameter skips honestly: {runs:?}"
         );
 
-        // send_note is higher-risk: its empty-text guard matters on the
-        // approved path, where the pre-fix catch-all faked a completion.
         let approved = db
             .with_write(|c| {
                 execute_approved_action(
@@ -1807,7 +1724,6 @@ mod audp0_tests {
             },
         )
         .expect("create");
-        // disable it explicitly so the edit-preservation can be asserted
         assert!(set_rule_enabled(&conn, id, false).expect("disable"));
 
         let updated = AutomationRule {
@@ -1817,7 +1733,7 @@ mod audp0_tests {
             action: Action::ChangeStatus {
                 new_status: "pending".into(),
             },
-            enabled: true, // ignored by update_rule on purpose
+            enabled: true,
             created_at: None,
         };
         assert!(update_rule(&conn, id, &updated).expect("update"));
@@ -1835,7 +1751,6 @@ mod audp0_tests {
             "the edit must not silently re-enable a disabled rule"
         );
 
-        // unknown id is a clean false
         assert!(!update_rule(&conn, 999, &updated).expect("no-op"));
     }
 }

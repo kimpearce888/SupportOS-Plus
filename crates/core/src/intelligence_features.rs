@@ -106,18 +106,9 @@ pub fn create_known_issue(conn: &Connection, name: &str, description: Option<&st
     Ok(conn.last_insert_rowid())
 }
 
-// AUD-P2-12 (C8): the known-issue lifecycle — the page's Known tab was
-// create-only (no edit, no status change, no delete), mirroring the
-// incident lifecycle fns above (validated vocabulary, updated_at bump,
-// honest not-found). Link management rides along: link/unlink for
-// conversation evidence, the same INSERT the create path uses.
-
-/// The status vocabulary the Known tab's create form already offered.
 pub const KNOWN_ISSUE_STATUSES: [&str; 4] =
     ["investigating", "identified", "fix_in_progress", "resolved"];
 
-/// Set a known issue's status (validated vocabulary). Returns false
-/// when the id is unknown.
 pub fn set_known_issue_status(
     conn: &Connection,
     known_issue_id: i64,
@@ -137,9 +128,6 @@ pub fn set_known_issue_status(
     Ok(rows > 0)
 }
 
-/// Edit a known issue's name / symptoms / workaround (empty text clears
-/// symptoms/workaround; the name must stay non-empty). Returns false
-/// when the id is unknown.
 pub fn set_known_issue_text(
     conn: &Connection,
     known_issue_id: i64,
@@ -174,8 +162,6 @@ pub fn set_known_issue_text(
     Ok(rows > 0)
 }
 
-/// Link a conversation as evidence for a known issue. Returns false
-/// when either side is missing or the link already exists.
 pub fn link_known_issue_conversation(
     conn: &Connection,
     known_issue_id: i64,
@@ -209,7 +195,6 @@ pub fn link_known_issue_conversation(
     Ok(changed > 0)
 }
 
-/// Unlink a conversation. Returns false when no such link existed.
 pub fn unlink_known_issue_conversation(
     conn: &Connection,
     known_issue_id: i64,
@@ -226,8 +211,6 @@ pub fn unlink_known_issue_conversation(
     Ok(changed > 0)
 }
 
-/// Delete a known issue (links cascade in the schema). Returns false
-/// when the id is unknown.
 pub fn delete_known_issue(conn: &Connection, known_issue_id: i64) -> Result<bool> {
     let rows = conn.execute(
         "DELETE FROM known_issues WHERE id = ?1",
@@ -709,19 +692,10 @@ pub fn add_incident_note(
     Ok(note_id)
 }
 
-// ---- AUD-P1-3 (C4): the incident lifecycle --------------------------------
-//
-// Until this batch the only incident mutations were create / link / note —
-// status, severity, owner, resolution and workaround were permanently what
-// the create form set (the UI always `None`), with no delete and no unlink.
-
 fn incident_event_stamp() -> i128 {
     chrono::Utc::now().timestamp_millis() as i128
 }
 
-/// AUD-P1-3 (C4): set the status. `resolved_at` follows the create-time
-/// rule (set iff status == "resolved"), so reopening clears the stamp and
-/// the list's "resolved last" ordering stays honest.
 pub fn set_incident_status(conn: &Connection, incident_id: i64, status: &str) -> Result<bool> {
     if !crate::incident_workspace::INCIDENT_STATUSES.contains(&status) {
         return Err(crate::error::Error::Config(format!(
@@ -759,7 +733,6 @@ pub fn set_incident_status(conn: &Connection, incident_id: i64, status: &str) ->
     Ok(true)
 }
 
-/// AUD-P1-3 (C4): set the severity (sev1..sev4).
 pub fn set_incident_severity(conn: &Connection, incident_id: i64, severity: &str) -> Result<bool> {
     if !crate::incident_workspace::INCIDENT_SEVERITIES.contains(&severity) {
         return Err(crate::error::Error::Config(format!(
@@ -789,7 +762,6 @@ pub fn set_incident_severity(conn: &Connection, incident_id: i64, severity: &str
     Ok(true)
 }
 
-/// AUD-P1-3 (C4): set (or clear, with `None`) the owner.
 pub fn set_incident_owner(
     conn: &Connection,
     incident_id: i64,
@@ -818,8 +790,6 @@ pub fn set_incident_owner(
     Ok(true)
 }
 
-/// AUD-P1-3 (C4): the editable long-text lifecycle fields. Only the four
-/// allow-listed columns are writable — no caller-supplied SQL identifiers.
 pub fn set_incident_text(
     conn: &Connection,
     incident_id: i64,
@@ -862,8 +832,6 @@ pub fn set_incident_text(
     Ok(true)
 }
 
-/// AUD-P1-3 (C4): unlink a conversation from an incident (reversible —
-/// the link form can bring it back).
 pub fn unlink_incident_conversation(
     conn: &Connection,
     incident_id: i64,
@@ -894,8 +862,6 @@ pub fn unlink_incident_conversation(
     Ok(removed)
 }
 
-/// AUD-P1-3 (C4): delete an incident. The child tables (links, notes,
-/// events, related, refs, releases) cascade.
 pub fn delete_incident(conn: &Connection, incident_id: i64) -> Result<bool> {
     Ok(conn.execute("DELETE FROM incidents WHERE id = ?1", params![incident_id])? > 0)
 }
@@ -1302,7 +1268,6 @@ mod audp13_tests {
             .expect("row");
         assert!(resolved_at.is_none(), "reopening clears the stamp");
 
-        // unknown id is a no-op false, not an error
         assert!(!set_incident_status(&conn, 999, "resolved").expect("no-op"));
     }
 
