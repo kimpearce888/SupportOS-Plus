@@ -30,9 +30,10 @@ Thumbs.db
 # spp_xtask hygiene tests.
 secrets.key
 
-# UX audit artifacts (evidence, screenshots, notes) — not part of the product
-/ux-audit/before
-/ux-audit/after
-/ux-audit/diffs
-/ux-audit/scripts
+# UX audit artifacts (evidence, screenshots, notes) — not part of the product;
+# the evidence tree moved to _archive/ux-audit with the repo cleanup
+/_archive/ux-audit/before
+/_archive/ux-audit/after
+/_archive/ux-audit/diffs
+/_archive/ux-audit/scripts
 
