@@ -77,16 +77,10 @@ pub(crate) struct ShellApp {
     toasts: Toasts,
     dialog: Option<ConfirmDialog>,
     pending_confirm: Option<DestructiveAction>,
-    /// AUD-P1-1 (C1): unread notification count driving the sidebar badge.
-    /// Seeded from the DB at launch, live-updated from
-    /// `NotificationReceived` events, and synced from the Notifications
-    /// page whenever it reloads (mark-read / mark-all-read).
     unread_notifications: u32,
 }
 
 impl ShellApp {
-    /// AUD-P1-1 (C1): seed the sidebar unread badge from the mirror at
-    /// launch (events only carry the count once one arrives).
     fn unread_seed(db: &DbHandle) -> u32 {
         db.with_read(|conn| {
             let me = spp_core::notifications::me_user_local_id(conn)
@@ -126,16 +120,12 @@ impl ShellApp {
         }
         settings.set_sync_engine(sync.clone());
         settings.set_bus(options.bus.clone());
-        // AUD-P1-8 (D2): the Settings re-index action needs the vector
-        // index handle.
         settings.set_vector_index(options.vector_index.clone());
         let mut connectors = ConnectorsPage::new();
         connectors.set_data_dir(options.data_dir.clone());
         let mut knowledge = KnowledgePage::new();
         knowledge.set_data_dir(options.data_dir);
         let vector_index = options.vector_index.clone();
-        // AUD-P1-1 (C1): seed the sidebar unread badge before `options.db`
-        // moves into the struct.
         let unread_notifications = Self::unread_seed(&options.db);
         let mut inbox = InboxPage::new();
         inbox.set_vector_index(vector_index.clone());
@@ -259,9 +249,6 @@ impl ShellApp {
                 self.issue_radar.open_known_tab();
             }
             NavRequest::Confirm(request) => {
-                // AU2-12: a second confirm request while one is armed must
-                // not silently overwrite the pending destructive action —
-                // the first dialog stays live until it is answered.
                 if self.pending_confirm.is_some() {
                     tracing::warn!(
                         dialog = %request.dialog().title,
@@ -269,8 +256,6 @@ impl ShellApp {
                     );
                 } else {
                     let dialog = request.dialog();
-                    // The armed confirm takes over the input: an open palette
-                    // must not linger over (or under) it.
                     self.palette.close();
                     self.pending_confirm = Some(request.action);
                     self.dialog = Some(dialog);
@@ -308,8 +293,6 @@ impl ShellApp {
                 ("connector", "deleted", self.connectors.delete(&self.db, id))
             }
             DestructiveAction::DeleteIncident { id } => {
-                // AUD-P1-3 (C4): incident deletion — the child tables
-                // (links, notes, events, related, refs, releases) cascade.
                 let outcome = self
                     .db
                     .with_write(|conn| spp_core::intelligence_features::delete_incident(conn, id))
@@ -336,7 +319,6 @@ impl ShellApp {
                 self.reports.delete_saved_report(&self.db, id),
             ),
             DestructiveAction::DeleteOrganization { id } => {
-                // AUD-P2-16 (C12): soft-delete via people_store.
                 let outcome = self
                     .db
                     .with_write(|conn| spp_core::people_store::delete_organization(conn, id))
@@ -348,7 +330,6 @@ impl ShellApp {
                 ("organization", "deleted", outcome)
             }
             DestructiveAction::DeleteGraphNode { id } => {
-                // AUD-P2-14 (C10): node + touching human edges.
                 let outcome = self
                     .db
                     .with_write(|conn| spp_core::reports::delete_graph_node(conn, id))
@@ -360,7 +341,6 @@ impl ShellApp {
                 ("graph node", "deleted", outcome)
             }
             DestructiveAction::DeleteKnownIssue { id } => {
-                // AUD-P2-12 (C8): known-issue deletion.
                 let outcome = self
                     .db
                     .with_write(|conn| {
@@ -408,9 +388,6 @@ impl ShellApp {
     }
 
     fn shell_ui(&mut self, ui: &mut egui::Ui) {
-        // UX-3: this surface is an internal runtime/diagnostics view, not a
-        // user checklist — presented as "About the app" with real actions.
-        // Middle-truncate a long path so the monospace value stays readable.
         fn shorten_path(path: &str, max: usize) -> String {
             if path.chars().count() <= max {
                 return path.to_string();
@@ -506,9 +483,6 @@ impl ShellApp {
 
     fn sidebar_ui(&mut self, ui: &mut egui::Ui) {
         let t = design::tokens(ui);
-        // UXE-1-2: brand row — logo, name, and the version pill on one
-        // line (the old two-line block crammed a tiny version label
-        // under the name with no air).
         ui.horizontal(|ui| {
             let (id, rect) = ui.allocate_space(egui::vec2(26.0, 26.0));
             ui.painter()
@@ -576,9 +550,6 @@ impl ShellApp {
                 bottom: 6,
             }))
             .show(ui, |ui| {
-                // UXE-1-2: the orphan hairline above the theme row read as
-                // a broken divider under the nav scroll — the row is its
-                // own affordance now.
                 let next = self.theme.toggle();
                 if theme_row(ui, next) {
                     self.theme = next;
@@ -603,9 +574,6 @@ impl ShellApp {
                             }
                         }
                         for (group, keys) in NAV_GROUPS {
-                            // UXE-1-2: one micro-label convention — 11px
-                            // muted, sentence case (matches the inbox
-                            // views rail) instead of strong small text.
                             ui.label(
                                 egui::RichText::new(*group)
                                     .size(design::scale::text::META)
@@ -613,8 +581,6 @@ impl ShellApp {
                             );
                             ui.add_space(design::scale::space::SP1);
                             for key in keys.iter() {
-                                // AUD-P1-1 (C1): the Notifications nav row
-                                // carries the live unread count as a pill.
                                 let badge = if *key == PageKey::Notifications
                                     && self.unread_notifications > 0
                                 {
@@ -635,12 +601,6 @@ impl ShellApp {
     fn header_ui(&mut self, ui: &mut egui::Ui) {
         let t = design::tokens(ui);
         ui.horizontal(|ui| {
-            // UXG-1-8 (UXF-1-4): the active page's label lands on the left
-            // of the top bar — window-level context, the modern helpdesk
-            // breadcrumb register. The 48px bar carried only right-aligned
-            // controls, which read unbalanced (and worse the wider the
-            // display); the same anatomy as page_header (left title +
-            // baseline-aligned right actions) balances it at every width.
             ui.label(
                 egui::RichText::new(self.page.label())
                     .size(design::scale::text::LEAD)
@@ -648,11 +608,6 @@ impl ShellApp {
                     .color(t.foreground),
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                // UX-33: the theme toggle was a 30×30 icon-only ghost button —
-                // auditors (and users) could not tell what it did without
-                // hovering, and the crescent glyph even read as a notification
-                // bell. It now carries its target state as a labelled Outline
-                // button, consistent with the Search button beside it.
                 let toggle = if self.theme == Theme::Dark {
                     (Icon::Sun, "Light", "switch to light theme")
                 } else {
@@ -689,8 +644,6 @@ impl ShellApp {
                         .small();
                 if ui
                     .add(freshness_btn)
-                    // UX-33: the pill now says what it measures (Help Scout
-                    // freshness) both on its face and in the hover.
                     .on_hover_text(
                         "how fresh the local Help Scout mirror is — opens Sync Health \
                      (last sync, checkpoints, runs)",
@@ -710,9 +663,6 @@ impl ShellApp {
     }
 
     fn freshness(&self) -> (design::BadgeTone, String) {
-        // UX-33: every label names what synced — the bare "synced Ns ago"
-        // left the pill without context (users read it as a generic, or
-        // even system, status instead of the Help Scout mirror's age).
         if self.sync.as_ref().is_some_and(|e| e.is_running()) {
             return (design::BadgeTone::Info, "Help Scout · syncing…".into());
         }
@@ -779,8 +729,6 @@ impl ShellApp {
                     if let Some((kind, title, detail)) = sync_completed_toast(e) {
                         self.toasts.push(kind, title, detail);
                     }
-                    // AU2-9: the "syncing…" note set at click time was never
-                    // updated on completion — replace it with the outcome.
                     let outcome = if e.errors > 0 {
                         format!(
                             "sync finished with {} error(s) — {} record(s) processed",
@@ -822,12 +770,8 @@ impl ShellApp {
                 }
                 spp_core::events::ServerEvent::ErrorOccurred(_) => {}
                 spp_core::events::ServerEvent::NotificationReceived(e) => {
-                    // AUD-P1-1 (C1): the event carries the fresh unread
-                    // count — feed the sidebar badge.
                     self.unread_notifications = e.unread_count;
                 }
-                // AUD-P1-2 (C2): the manual refresh answers "did it work?"
-                // with a toast (the page reloads via invalidated_pages).
                 spp_core::events::ServerEvent::ConnectorRefreshed(e) => {
                     if e.ok {
                         self.toasts.push(
@@ -901,18 +845,10 @@ impl ShellApp {
         let sync = self.sync.clone();
         let mut nav: Option<NavRequest> = None;
         if self.page == PageKey::Inbox {
-            // AUD-V2 + VF-4: the inbox host (CentralPanel + fill + SP5/14
-            // inset) is the shared `design::host_inbox_page` — the golden
-            // suites render through the SAME function, so the drift gate
-            // gates the real look.
             let _ = design::host_inbox_page(ui, |ui| {
                 self.inbox.ui(ui, &self.db, &bus, sync.as_ref());
             });
         } else {
-            // VF-4 (V1 completion): every standard page renders through the
-            // shared `design::host_standard_page` — CentralPanel + scroll +
-            // content_column(1800) + the SP5/14 inset — the exact funnel the
-            // golden suites use, from the one definition.
             nav = design::host_standard_page(ui, |ui| match self.page {
                 PageKey::Dashboard => {
                     self.dashboard.ui(ui, &self.db, sync.as_ref());
@@ -928,14 +864,9 @@ impl ShellApp {
                 PageKey::Connectors => self.connectors.ui(ui, &self.db, &bus),
                 PageKey::CustomObjects => self.custom_objects.ui(ui, &self.db),
                 PageKey::Incidents => self.incidents.ui(ui, &self.db),
-                // AUD-P2-12 (C8): the radar drill-downs
-                // surface as NavRequests now.
                 PageKey::IssueRadar => self.issue_radar.ui(ui, &self.db),
                 PageKey::Notifications => {
                     let nav = self.notifications.ui(ui, &self.db);
-                    // AUD-P1-1 (C1): the page just
-                    // (re)loaded — its unread count
-                    // is fresher than the last event.
                     self.unread_notifications = self.notifications.unread_badge();
                     nav
                 }
@@ -995,9 +926,6 @@ impl ShellApp {
                 }
             }
         }
-        // Settings tabs (Sync & AI, Help Scout, LM Studio, Vector index,
-        // Business hours, Backups & export) — the audit evidence needs the
-        // tab, not just the page. Ignored when SPP_SHOT_PAGE is not Settings.
         if let Ok(tab) = std::env::var("SPP_SHOT_TAB")
             && !tab.is_empty()
             && !self.settings.set_tab_by_label(&tab)
@@ -1010,11 +938,6 @@ impl ShellApp {
             tracing::warn!(error = %e, "screenshot seed failed");
         }
         if std::env::var("SPP_SHOT_PALETTE").as_deref() == Ok("1") {
-            // UXA-4 evidence: the audit shot that flagged UX-31 showed the
-            // palette mid-search (query typed, first hit selected, subtitles
-            // visible) — an empty palette would not evidence the row fix.
-            // SPP_SHOT_PALETTE_QUERY seeds the query and runs the search so
-            // the shot lands on the search state.
             if let Ok(query) = std::env::var("SPP_SHOT_PALETTE_QUERY")
                 && !query.is_empty()
             {
@@ -1216,11 +1139,6 @@ fn seed_fixture_for_screenshots(conn: &mut rusqlite::Connection) -> spp_core::er
             ..Default::default()
         },
     );
-    // UX-35: a job-failure notification in the new shape — the same fields
-    // `notification_sweep::sweep_failed_jobs` produces for the audit's exact
-    // scenario (LM Studio unreachable at localhost). The sweep path itself is
-    // unit-tested in core; this seed exists so the shot exercises the card
-    // rendering: friendly title/body, structured payload on hover.
     let _ = spp_core::notifications::record_notification(
         conn,
         None,

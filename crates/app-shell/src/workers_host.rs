@@ -16,11 +16,7 @@ pub struct WorkersHost {
     runtime_handle: tokio::runtime::Handle,
     shutdown: Option<tokio::sync::oneshot::Sender<()>>,
     thread: Option<std::thread::JoinHandle<()>>,
-    /// AU2-13g: the latest restart task is retained (not dropped) so a panic
-    /// in it is observable and it is aborted on shutdown instead of detaching.
     restart_task: std::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
-    /// AU2-13g: serializes overlapping restarts — manager.stop() followed by
-    /// manager.start() is only atomic when two restarts cannot interleave.
     restart_gate: Arc<tokio::sync::Mutex<()>>,
 }
 
@@ -100,16 +96,10 @@ impl WorkersHost {
         let mut slot = self.restart_task.lock().unwrap_or_else(|p| p.into_inner());
         if let Some(prev) = slot.take()
             && prev.is_finished()
+            && let Err(join_err) = self.runtime_handle.block_on(prev)
         {
-            // The previous restart already ended: surface a panic instead
-            // of letting it dissolve into a task nobody can observe.
-            if let Err(join_err) = self.runtime_handle.block_on(prev) {
-                tracing::error!(error = %join_err, "background worker restart task panicked");
-            }
+            tracing::error!(error = %join_err, "background worker restart task panicked");
         }
-        // An in-flight previous restart is left running: the restart gate
-        // below serializes it against this one, so the stop/start pair
-        // stays atomic.
         let gate = Arc::clone(&self.restart_gate);
         let manager = Arc::clone(&self.manager);
         let task = self.runtime_handle.spawn(async move {
@@ -120,9 +110,6 @@ impl WorkersHost {
         *slot = Some(task);
     }
 
-    /// AU2-11: stop all worker timers synchronously (workspace reset relies
-    /// on this so the auto-sync loop cannot re-pull the account right after
-    /// the wipe). The workers only come back on the next app start.
     pub(crate) fn pause(&self) {
         let mut slot = self.restart_task.lock().unwrap_or_else(|p| p.into_inner());
         if let Some(task) = slot.take() {
@@ -140,7 +127,7 @@ impl Drop for WorkersHost {
             .unwrap_or_else(|p| p.into_inner())
             .take()
         {
-            task.abort(); // shutdown: the manager is stopped below regardless
+            task.abort();
         }
         if let Some(shutdown) = self.shutdown.take() {
             let _ = shutdown.send(());

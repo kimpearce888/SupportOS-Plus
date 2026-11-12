@@ -46,12 +46,6 @@ impl Directory {
     }
 }
 
-/// Snap a byte offset down to the nearest `char_boundary` of `value`.
-///
-/// A caret captured from a previous draft state can point into the middle of a
-/// multi-byte char after an out-of-band body replacement (saved-reply insert,
-/// AI draft insert, AI transform); slicing at such an offset would panic.
-/// Snapping to the floor boundary keeps every downstream slice total.
 #[must_use]
 pub(crate) fn floor_char_boundary(value: &str, mut idx: usize) -> usize {
     if idx >= value.len() {
@@ -132,7 +126,6 @@ mod tests {
     use super::*;
 
     fn dir() -> Directory {
-        // inline of the deleted `Directory::from_rows` (test-only constructor)
         fn default_token(display: &str) -> String {
             display
                 .split(' ')

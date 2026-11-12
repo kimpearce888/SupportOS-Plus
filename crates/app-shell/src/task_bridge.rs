@@ -64,7 +64,6 @@ mod tests {
     use std::time::{Duration, Instant};
 
     fn pending(bridge: &TaskBridge) -> usize {
-        // inline of the deleted lib accessor (test-only observer)
         lock(&bridge.queue).len()
     }
 

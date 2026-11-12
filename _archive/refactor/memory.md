@@ -105,6 +105,16 @@ session ends by adding what the next session must not have to rediscover.
 - **G-06.** Huge test/link outputs exceed the tool frame — always redirect
   to a log file (`> /tmp/x.log 2>&1`) and rg the log; never tail a raw
   cargo test run.
+- **G-07 (session 3).** Comment removal can EXPOSE latent clippy lints:
+  `let_and_return` and `collapsible_if` are suppressed when a comment sits
+  between the `let`/outer-`if` and the tail expression / inner `if`; strip
+  the comment and `-D warnings` goes red. Hit twice in R1.7 (design/mod.rs,
+  workers_host.rs). Fix by minimal behavior-identical restructuring (inline
+  the tail expression / collapse the if-chain), never by re-adding comments
+  or `#[allow]` (allow-debt belongs to R1.10's cleanup). Expect more of
+  these in R1.8/R1.9 (app-shell pages carry the most comments); run the
+  clippy lane right after `cargo fmt`, before the test lanes, to catch them
+  early.
 
 ## Open questions / deferred owner decisions
 

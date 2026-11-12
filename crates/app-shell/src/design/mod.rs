@@ -22,7 +22,6 @@ pub struct Tokens {
     pub accent: egui::Color32,
     pub primary: egui::Color32,
     pub primary_foreground: egui::Color32,
-    /// Text on AI-solid fills (`#ffffff`, DC DS-C-11 `ai`).
     pub on_ai: egui::Color32,
     pub secondary: egui::Color32,
     pub secondary_foreground: egui::Color32,
@@ -57,7 +56,6 @@ pub struct Tokens {
     pub warning_border: egui::Color32,
     pub neutral_foreground: egui::Color32,
     pub shadow: egui::Color32,
-    /// DetailPanel/dialog scrim — black @ 0.28 (DC §3 DS-C-16).
     pub scrim: egui::Color32,
 }
 
@@ -116,18 +114,12 @@ pub(crate) const LIGHT: Tokens = Tokens {
 
 pub(crate) const DARK: Tokens = Tokens {
     background: rgb(9, 9, 11),
-    // UX-12: lifted off the background so the sidebar reads as its own
-    // surface instead of blending into the page behind it.
     sidebar: rgb(16, 16, 19),
     card: rgb(24, 24, 27),
-    // UX-12: stronger hairlines so cards/tables separate from the
-    // background instead of floating in near-identical grays.
     border: rgb(48, 48, 53),
     border_strong: rgb(66, 66, 72),
     foreground: rgb(250, 250, 250),
     muted: rgb(39, 39, 42),
-    // UX-12: secondary text (section labels, subtitles, timestamps) lifted
-    // from zinc-400 toward the foreground so 11–12px labels stay legible.
     muted_foreground: rgb(186, 186, 196),
     accent: rgb(39, 39, 42),
     primary: rgb(250, 250, 250),
@@ -188,23 +180,15 @@ pub(crate) fn tokens_for(ctx: &egui::Context) -> &'static Tokens {
 }
 
 pub mod scale {
-    /// AUD-V2: the spacing scale is public — the test harnesses and the
-    /// production host must reference the SAME tokens (V1 fidelity).
     pub mod space {
         pub const SP1: f32 = 4.0;
         pub const SP2: f32 = 8.0;
         pub const SP3: f32 = 12.0;
         pub const SP4: f32 = 16.0;
-        /// AUD-V2 (register V2): the page-level horizontal inset (the
-        /// production host and every full-bleed pane share it — one
-        /// inset value on every monitor class, no more hand-rolled 22s).
         pub const SP5: f32 = 24.0;
-        /// AUD-V2: the section-level break between major page blocks.
         pub const SP6: f32 = 32.0;
         pub(crate) const CLUSTER: f32 = 6.0;
-        /// Card horizontal pad (DC §3 DS-C-02).
         pub(crate) const PAD_CARD: f32 = 14.0;
-        /// Toolbar/table-cell horizontal pad (DC §3 DS-C-05/10, `8px 12px`).
         pub(crate) const PAD_TOOL: f32 = 10.0;
     }
     pub mod text {
@@ -219,33 +203,14 @@ pub mod scale {
         pub(crate) const SECTION_BIG: f32 = 16.0;
         pub(crate) const STAT: f32 = 20.0;
         pub(crate) const STAT_BIG: f32 = 26.0;
-        // UXE-1-1: 22px page titles read heavy against 13.5px body — the
-        // modern helpdesk register (Linear/Stripe/Zendesk) runs 16–18px
-        // semibold page titles. 18px keeps the hierarchy without shouting.
         pub(crate) const TITLE: f32 = 18.0;
     }
-    /// UXE-1-1: one radius scale — cards 10, controls (buttons/inputs/
-    /// selects/segments) 8, small elements (badges) 6, chips pill. Every
-    /// corner in the app comes from here (windows/menus keep 12/10).
     pub(crate) mod radius {
         pub(crate) const CARD: u8 = 10;
         pub(crate) const CONTROL: u8 = 8;
         pub(crate) const BADGE: u8 = 6;
     }
-    /// UXG-1-1: the one content-column width every standard page shares.
-    /// Below the cap the page fills the available width exactly as it
-    /// always has; above it (2K/4K/8K-class displays at 100% scale —
-    /// 2560/3840/7680 logical px) the column holds at 1800 and centers,
-    /// the Linear/Stripe/Zendesk wide-monitor register: cards, tables and
-    /// forms keep professional proportions instead of stretching to
-    /// multi-thousand-pixel lines. 1800 fits the dashboard's 6-column KPI
-    /// tier (~295px tiles) and 7–9 column data tables (~180–250px
-    /// columns) — the widest layouts the design system has.
     pub const CONTENT_MAX: f32 = 1800.0;
-    /// UXG-1-2: the reading-measure cap for reading surfaces (the inbox
-    /// reader thread and composer). 80–100 characters at body size is
-    /// ~700–860px — the Gmail/Help Scout wide-window register; past it a
-    /// thread reads as a wall of text stretched across the pane.
     pub const READER_MEASURE: f32 = 860.0;
 }
 
@@ -390,22 +355,15 @@ fn shadow(blur: u8, alpha: u8) -> egui::Shadow {
     }
 }
 
-/// Button variants (DC: DS-C-11 — primary / outline / ghost / danger / text / ai).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ButtonVariant {
-    /// Solid primary (DS-C-11 `primary`).
     #[default]
     Primary,
     Secondary,
-    /// Bordered, no fill (DS-C-11 `outline`).
     Outline,
-    /// No fill, no border; hover tints (DS-C-11 `ghost`).
     Ghost,
-    /// Solid destructive red (DS-C-11 `danger` — pairs with armed confirm).
     Destructive,
-    /// Muted label, no fill/border (DS-C-11 `text`).
     Text,
-    /// Solid AI violet (DS-C-11 `ai` — the AI identity action).
     Ai,
 }
 
@@ -477,7 +435,6 @@ fn button_impl(
 ) -> egui::Response {
     let t = tokens(ui);
     let (fill, fg, stroke) = variant_look(t, variant);
-    // DS-C-11 anatomy, drawn manually so the icon zone is exact: 32px
     let galley = egui::WidgetText::from(
         egui::RichText::new(text)
             .color(fg)
@@ -640,15 +597,7 @@ pub fn badge(ui: &mut egui::Ui, text: &str, tone: BadgeTone) -> egui::Response {
         galley,
         fg,
     );
-    let response = ui.interact(rect, id, egui::Sense::hover());
-    // UXF-1-1: no trailing `advance_cursor_after_rect` — `allocate_space`
-    // above already advanced the cursor once. The redundant second advance
-    // is a no-op in linear layouts (they set the cursor absolutely from the
-    // rect) but Grids advance INCREMENTALLY per allocation, so inside a
-    // `design::table`/`data_table` cell the badge consumed a phantom second
-    // column, shifting every following cell right (the Jobs table's
-    // `created` column clipped at the window edge). One widget, one cell.
-    response
+    ui.interact(rect, id, egui::Sense::hover())
 }
 
 pub(crate) fn status_tone(status: &str) -> (BadgeTone, &'static str) {
@@ -690,16 +639,6 @@ pub fn chip_with_icon(ui: &mut egui::Ui, selected: bool, icon: Icon, text: &str)
     chip_impl(ui, selected, text, Some(icon))
 }
 
-// ── UXE-1-3: modern control set ──────────────────────────────────────────
-// One control language for the whole app: `segmented` for 2–5 exclusive
-// choices, `switch` for booleans, `select` for dropdowns. Every control
-// sits on the 32px control height, the CONTROL radius, and the same
-// hover/focus feedback as `button`.
-
-/// Segmented control — one active option in a muted track. Replaces the
-/// black-pill-among-plain-text rows (report ranges, thread status,
-/// composer mode) with the register modern SaaS uses for small
-/// exclusive choices.
 pub fn segmented(
     ui: &mut egui::Ui,
     id_salt: &str,
@@ -767,10 +706,6 @@ pub fn segmented(
     clicked
 }
 
-/// Switch — the boolean control for settings rows. OS-style checkboxes
-/// read 2010s admin panel; the pill-and-knob switch is the modern
-/// register. Deterministic by construction (no animation): kittest
-/// goldens stay stable.
 pub fn switch(ui: &mut egui::Ui, on: bool) -> bool {
     let t = tokens(ui);
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(34.0, 20.0), egui::Sense::click());
@@ -802,9 +737,6 @@ pub fn switch(ui: &mut egui::Ui, on: bool) -> bool {
     if resp.clicked() { !on } else { on }
 }
 
-/// Select — styled dropdown on the control surface: flat 32px control
-/// with a hairline border and a muted chevron, opening a card-styled
-/// menu. The menu closure keeps the `ui.selectable_value` ergonomics.
 pub fn select<R>(
     ui: &mut egui::Ui,
     id_salt: &str,
@@ -851,9 +783,6 @@ pub fn select<R>(
     focus_feedback(ui, &resp);
     let selected_owned = selected.to_owned();
     resp.widget_info(|| {
-        // The accessible name comes from `label` — a bare
-        // `WidgetInfo::new(Role::ComboBox)` fails the harness
-        // accessibility check ("lacks accessible name").
         let mut info = egui::WidgetInfo::labeled(
             egui::Role::ComboBox,
             ui.is_enabled(),
@@ -908,17 +837,9 @@ pub fn page_header(
             actions(ui);
         });
     });
-    // UXE-1-1: one header rhythm on every page — SP3 before the content.
     ui.add_space(scale::space::SP3);
 }
 
-/// UXG-1-1: the shared centered-column primitive — the page (or pane)
-/// fills the available width up to `max_w`, and holds an exact-width
-/// centered column above it. Built on `scope_builder` with an exact
-/// `max_rect` child, so children read the column's width (never the
-/// unbounded pane width) and the parent cursor advances by the content
-/// actually used. Below the cap the rect IS the available rect — the
-/// layout is pixel-identical to an uncapped render.
 pub fn centered_column<R>(
     ui: &mut egui::Ui,
     max_w: f32,
@@ -940,11 +861,6 @@ pub fn centered_column<R>(
     ui.scope_builder(egui::UiBuilder::new().max_rect(rect), add_contents)
 }
 
-/// UXG-1-1: the one content-column discipline every standard page shares
-/// — `centered_column` at `scale::CONTENT_MAX` (1800). The shell's
-/// non-inbox page funnel wraps every page in this, so from a 980px
-/// window to an 8K display every page renders the same width anatomy:
-/// full width to the cap, one centered column above it.
 pub fn content_column<R>(
     ui: &mut egui::Ui,
     add_contents: impl FnOnce(&mut egui::Ui) -> R,
@@ -952,15 +868,6 @@ pub fn content_column<R>(
     centered_column(ui, scale::CONTENT_MAX, add_contents)
 }
 
-/// VF-4 (V1 completion): THE production host for standard pages — the one
-/// funnel `ShellApp::update` (app/mod.rs) pushes every non-inbox page
-/// through: `CentralPanel(background fill) → ScrollArea("spp-page-scroll",
-/// auto_shrink) → content_column(1800) → Frame(inner_margin
-/// symmetric(SP5, 14))`. The golden suites call this SAME function, so a
-/// golden can never again render outside the host the real app uses — the
-/// register's V1 acceptance ("goldens render through the exact production
-/// host wrapper") now holds for every page suite, not just three. Do not
-/// inline this composition elsewhere; a second copy is a drift vector.
 pub fn host_standard_page<R>(
     ui: &mut egui::Ui,
     add_contents: impl FnOnce(&mut egui::Ui) -> R,
@@ -990,11 +897,6 @@ pub fn host_standard_page<R>(
         })
 }
 
-/// VF-4 (V1 completion): THE production host for the Inbox page — the
-/// non-scrolling three-panel composition funnel from `ShellApp::update`:
-/// `CentralPanel(background fill + inner_margin symmetric(SP5, 14))`. Same
-/// rule as `host_standard_page`: the inbox goldens call this exact
-/// function, never a hand-rolled copy.
 pub fn host_inbox_page<R>(
     ui: &mut egui::Ui,
     add_contents: impl FnOnce(&mut egui::Ui) -> R,
@@ -1012,17 +914,10 @@ pub fn host_inbox_page<R>(
         .show(ui, add_contents)
 }
 
-/// DC: DS-C-03 StatTile — muted 12px label, 26px tabular value, 12px hint.
 pub fn metric_card(ui: &mut egui::Ui, label: &str, value: &str, hint: Option<&str>) {
     metric_card_w(ui, label, value, hint, 150.0);
 }
 
-/// UXD-1: metric card whose `outer_w` is the card's OUTER width — the
-/// frame padding is subtracted inside, so a grid that computes its column
-/// width from the page's available width and passes it here gets cards
-/// that land exactly on the column math (the old inner-width semantics
-/// made every card 28px wider than the caller's math, so a 4-column row
-/// overflowed by 82px and clipped its last column off-screen).
 pub fn metric_card_w(
     ui: &mut egui::Ui,
     label: &str,
@@ -1055,7 +950,6 @@ pub fn metric_card_w(
     });
 }
 
-/// DC: DS-C-24 console hero — the mono engine state (the lab's 17px),
 pub fn hero(ui: &mut egui::Ui, state: &str, sub: &str, right: impl FnOnce(&mut egui::Ui)) {
     card(ui, |ui| {
         ui.horizontal(|ui| {
@@ -1076,7 +970,6 @@ pub fn hero(ui: &mut egui::Ui, state: &str, sub: &str, right: impl FnOnce(&mut e
     });
 }
 
-/// DC: DS-C-01 PageHeader counter pill (`.ds-counter`) — counts live here,
 pub fn page_counter(ui: &mut egui::Ui, text: &str) {
     let t = tokens(ui);
     let galley = egui::WidgetText::from(
@@ -1104,7 +997,6 @@ pub fn page_counter(ui: &mut egui::Ui, text: &str) {
     let _ = id;
 }
 
-/// DC: DS-A-05 views-rail row — one inbox view: full-width label with the
 pub(crate) fn view_item(
     ui: &mut egui::Ui,
     label: &str,
@@ -1165,7 +1057,6 @@ pub(crate) fn tone_solid(t: &Tokens, tone: BadgeTone) -> egui::Color32 {
     }
 }
 
-/// DC: DS-C-06 StatusDot — the 8px (11px big) tone dot bound to DS.TONE;
 pub fn status_dot(ui: &mut egui::Ui, tone: BadgeTone, big: bool) {
     let t = tokens(ui);
     let d = if big { 11.0 } else { 8.0 };
@@ -1176,13 +1067,9 @@ pub fn status_dot(ui: &mut egui::Ui, tone: BadgeTone, big: bool) {
     let _ = id;
 }
 
-/// One underline tab row (DS-C-09 anatomy); returns a globally-indexed
 fn tabs_row(ui: &mut egui::Ui, items: &[&str], active: usize, base: usize) -> Option<usize> {
     let t = tokens(ui);
     let mut clicked = None;
-    // UXE-1-9: wrapped, not a single unbounded row — long tab sets (the
-    // reports page carries 11) wrap instead of clipping on narrow
-    // displays.
     ui.horizontal_wrapped(|ui| {
         for (i, item) in items.iter().enumerate() {
             let global = base + i;
@@ -1232,7 +1119,6 @@ fn tabs_row(ui: &mut egui::Ui, items: &[&str], active: usize, base: usize) -> Op
     clicked
 }
 
-/// DC: DS-C-09 Tabs (underline) — active = 500 text + 2px primary underline
 pub fn tabs(ui: &mut egui::Ui, items: &[&str], active: usize) -> Option<usize> {
     let clicked = tabs_row(ui, items, active, 0);
     divider(ui);
@@ -1240,7 +1126,6 @@ pub fn tabs(ui: &mut egui::Ui, items: &[&str], active: usize) -> Option<usize> {
     clicked
 }
 
-/// DC: DS-C-10 FilterBar — filters left (inputs/combos), context and
 pub fn filter_bar<R>(
     ui: &mut egui::Ui,
     filters: impl FnOnce(&mut egui::Ui) -> R,
@@ -1282,21 +1167,6 @@ pub fn td_num(ui: &mut egui::Ui, text: &str) {
     });
 }
 
-/// DC: DS-C-05 DataTable — bordered r-lg wrap, uppercase muted header on
-/// a sidebar-colored strip, scrollable Grid body.
-///
-/// UXD-1: columns are the INTEGER exact-fit width `col_w` on BOTH the
-/// header strip and the body grid (`min_col_width` + `max_col_width`),
-/// so (a) headers sit over their columns, (b) a long cell value wraps
-/// instead of widening its column, and (c) the per-column pixel rounding
-/// (each fractional cell rect rounds up ~0.5px; a 9-column table drifted
-/// +4px past its card, stretching the card and the page bounding box —
-/// the feed of the old scroll-runaway) can no longer accumulate: integer
-/// columns round losslessly. The grid is hosted in a Ui pinned to the
-/// card's inner width so the table frame stays flush with its card. The
-/// 90px readability floor applies only when `n` columns of it still fit
-/// the available width; on narrow panels the exact fit wins over the
-/// floor.
 pub fn data_table(
     ui: &mut egui::Ui,
     id: &str,
@@ -1306,19 +1176,9 @@ pub fn data_table(
     row: impl FnMut(&mut egui::Ui, usize),
 ) {
     let t = tokens(ui);
-    // UX-6: distribute the available width across columns so page-level
-    // lists span the content area instead of hugging fixed cell widths.
     let n = headers.len().max(1);
     let avail = ui.available_width();
-    // The table frame carries a 1px stroke on each side; only the remainder
-    // is column space.
     let inner = (avail - 2.0).max(60.0);
-    // UXF-1-1: the header labels and body cells inset from the table's
-    // stroke by CELL_PAD on each side — the grids used to start flush at
-    // the border (labels ~2px from the stroke, last column butting the
-    // right edge). One shared pad keeps the header grid and the body grid
-    // on the same column origin, so the exact integer columns still line
-    // up; the column math sizes against the padded cell area.
     const CELL_PAD: f32 = 10.0;
     let cell_area = (inner - 2.0 * CELL_PAD).max(40.0);
     let exact = (cell_area - 16.0 * (n.saturating_sub(1)) as f32) / n as f32;
@@ -1334,8 +1194,6 @@ pub fn data_table(
         .stroke(egui::Stroke::new(1.0, t.border))
         .corner_radius(egui::CornerRadius::same(10))
         .show(ui, |ui| {
-            // Pin the table to the full card width so the frame stays
-            // flush with its card however the integer columns fall.
             ui.set_min_width(inner);
             egui::Frame::new()
                 .fill(t.sidebar)
@@ -1365,9 +1223,6 @@ pub fn data_table(
                             ui.end_row();
                         });
                 });
-            // The body grid rides the SAME CELL_PAD margins so its columns
-            // land exactly under the header's (both grids start at the
-            // same inset and use the same integer col_w).
             egui::Frame::new()
                 .inner_margin(egui::Margin::symmetric(CELL_PAD as i8, 0))
                 .show(ui, |ui| {
@@ -1392,7 +1247,6 @@ pub fn data_table(
         });
 }
 
-/// DC: DS-C-04 MetricTile — horizontal count + label tile; `band` tints
 pub fn metric_tile(
     ui: &mut egui::Ui,
     count: &str,
@@ -1507,7 +1361,6 @@ pub fn metric_tile(
     resp
 }
 
-/// DC: DS-C-23 bar row (folded helper) — the lab's `.ds-bar-row`: a fixed
 pub(crate) fn bar_row(ui: &mut egui::Ui, label: &str, value: i64, max: i64, slim: bool) {
     let t = tokens(ui);
     let label_w = if slim { 120.0 } else { 140.0 };
@@ -1594,9 +1447,6 @@ pub(crate) fn divider(ui: &mut egui::Ui) {
     let _ = id;
 }
 
-// Components: feedback set (DC: DS-C-14/15/16/19 — R2b, RS-14)
-
-/// DC: DS-C-14 EmptyState (slim variant) — 120px centered column for inline
 pub fn empty_state_slim(ui: &mut egui::Ui, icon: Icon, title: &str, hint: &str) {
     let t = tokens(ui);
     ui.vertical_centered(|ui| {
@@ -1613,7 +1463,6 @@ pub fn empty_state_slim(ui: &mut egui::Ui, icon: Icon, title: &str, hint: &str) 
     });
 }
 
-/// DC: DS-C-14 EmptyState with the A-7 next-step CTA — every empty state
 pub fn empty_state_cta(
     ui: &mut egui::Ui,
     icon: Icon,
@@ -1624,9 +1473,6 @@ pub fn empty_state_cta(
     empty_state_cta_with(ui, icon, title, hint, Icon::Plus, cta_label)
 }
 
-/// UX-16: empty state with an explicit CTA whose icon matches the action —
-/// dead ends get a next step (open settings, connect a source, …) instead
-/// of copy that references an affordance that is not there.
 pub fn empty_state_cta_with(
     ui: &mut egui::Ui,
     icon: Icon,
@@ -1658,7 +1504,6 @@ pub fn empty_state_cta_with(
     clicked
 }
 
-/// DC: DS-C-15 Callout — in-card context note (register B-1 role: never a
 pub fn callout(ui: &mut egui::Ui, role: CalloutRole, text: &str) {
     let t = tokens(ui);
     let (bg, fg, border) = match role {
@@ -1687,7 +1532,6 @@ pub fn callout(ui: &mut egui::Ui, role: CalloutRole, text: &str) {
         });
 }
 
-/// DC: DS-C-15 callout roles (fixed by register B-1 — pick by role).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CalloutRole {
     Neutral,
@@ -1695,7 +1539,6 @@ pub enum CalloutRole {
     Err,
 }
 
-/// DC: DS-C-15 status-line — the action-result role (register B-1/A-8):
 pub fn status_line(ui: &mut egui::Ui, ok: bool, text: &str) {
     let t = tokens(ui);
     ui.label(
@@ -1709,7 +1552,6 @@ pub fn status_line(ui: &mut egui::Ui, ok: bool, text: &str) {
     );
 }
 
-/// DC: DS-C-15 quirk — the receipt-cited quirk footnote (dashed border,
 pub fn quirk(ui: &mut egui::Ui, text: &str) {
     let t = tokens(ui);
     egui::Frame::new()
@@ -1731,7 +1573,6 @@ pub fn quirk(ui: &mut egui::Ui, text: &str) {
         });
 }
 
-/// DC: DS-C-19 Avatar — initials in a role-tinted circle (lg 34 / md 28 /
 pub fn avatar(ui: &mut egui::Ui, size: AvatarSize, initials: &str, role: BadgeTone) {
     let t = tokens(ui);
     let d = match size {
@@ -1765,7 +1606,6 @@ pub fn avatar(ui: &mut egui::Ui, size: AvatarSize, initials: &str, role: BadgeTo
     ui.advance_cursor_after_rect(rect);
 }
 
-/// DC: DS-C-19 avatar sizes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AvatarSize {
     Lg,
@@ -1773,11 +1613,6 @@ pub enum AvatarSize {
     Sm,
 }
 
-/// DC: DS-C-19 Assignee — sm avatar + name, or quiet muted "Unassigned"
-/// text. UX-27: the unassigned state used to draw a dashed italic pill that
-/// read as a sibling of the filled status badge on the same row (two pill
-/// languages, one meaning each); it is now plain metadata text so the
-/// status badge stays the only chip-shaped state on the line.
 pub fn assignee(ui: &mut egui::Ui, name: Option<&str>) {
     match name {
         Some(n) => {
@@ -1809,7 +1644,6 @@ pub fn assignee(ui: &mut egui::Ui, name: Option<&str>) {
     }
 }
 
-/// DC: DS-C-16 armed ConfirmDialog rule (register A-5) — a destructive row
 pub fn armed_danger_button(ui: &mut egui::Ui, id: &str, label: &str, confirm_label: &str) -> bool {
     let armed_id = egui::Id::unique(("spp-armed", id));
     let armed_frame = ui.ctx().data(|d| d.get_temp::<u64>(armed_id)).unwrap_or(0);
@@ -1830,7 +1664,6 @@ pub fn armed_danger_button(ui: &mut egui::Ui, id: &str, label: &str, confirm_lab
     false
 }
 
-/// DC: DS-C-16 DetailPanel — the right sheet (420px, surface, left
 pub(crate) fn detail_panel(
     ctx: &egui::Context,
     id: &str,
@@ -1913,7 +1746,6 @@ pub(crate) fn detail_panel(
         });
 }
 
-/// DC: DS-C-13 form row — one label + control pair on the 220px grid
 pub fn form_row(ui: &mut egui::Ui, label: &str, control: impl FnOnce(&mut egui::Ui)) {
     ui.horizontal(|ui| {
         ui.set_min_width(ui.available_width());
@@ -1928,9 +1760,6 @@ pub fn form_row(ui: &mut egui::Ui, label: &str, control: impl FnOnce(&mut egui::
     });
 }
 
-// Components: inbox identity set (DC: DS-C-20/21/22 — R2c, RS-15)
-
-/// DC: DS-C-20 message authorship roles — the surface, hairline and avatar
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MessageRole {
     Customer,
@@ -1939,10 +1768,6 @@ pub enum MessageRole {
     Ai,
 }
 
-/// DC: DS-C-20 Message Card, role-typed rich-body form. `role_label`
-/// overrides the name for AI cards. AU2-13a: the string-body convenience
-/// wrapper (`message_card`) was deleted — every caller composes the body
-/// through this form, exactly like the inbox and live-chat pages do.
 pub fn message_card_with<B, A, R>(
     ui: &mut egui::Ui,
     role: MessageRole,
@@ -1956,11 +1781,6 @@ pub fn message_card_with<B, A, R>(
     A: FnOnce(&mut egui::Ui) -> R,
 {
     let t = tokens(ui);
-    // UXE-1-6: customer/agent cards sit on the standard card surface
-    // (hairline only in dark mode); note/AI cards keep their soft tint
-    // but swap the full colored border for a 3px accent bar on the left
-    // edge — the modern callout anatomy instead of the 2016 full-fill
-    // highlight box.
     let (bg, border, accent) = match role {
         MessageRole::Customer => (
             t.card,
@@ -1992,11 +1812,6 @@ pub fn message_card_with<B, A, R>(
                 let (av_bg, av_fg) = match role {
                     MessageRole::Customer => (t.muted, t.muted_foreground),
                     MessageRole::Agent => (t.primary, t.primary_foreground),
-                    // UXE-2-3: the soft-tint circle was INVISIBLE on the
-                    // note card (warning_soft on warning_soft — bare
-                    // floating initials). The card-surface chip keeps the
-                    // note avatar quiet like the Customer role's while
-                    // staying visible in both themes.
                     MessageRole::Note => (t.card, t.warning_foreground),
                     MessageRole::Ai => (t.ai, t.on_ai),
                 };
@@ -2064,14 +1879,6 @@ pub fn message_card_with<B, A, R>(
     }
 }
 
-/// DC: DS-C-20 day divider — hairlines meeting a centered label.
-/// VF-2 (H5): the old divider was a near-invisible hairline plus an 11.5px
-/// bare caption that competed with (and lost to) message content. The
-/// register's acceptance is a muted centered caption with adequate
-/// contrast/size: the label now rides a quiet muted pill (12px, strong,
-/// `muted_foreground` on `muted`), the hairlines upgrade to `border_strong`,
-/// and callers give it SP2 breathing room above and below — muted vs. the
-/// message cards, but clearly readable at every monitor class.
 pub fn day_divider(ui: &mut egui::Ui, label: &str) {
     let t = tokens(ui);
     ui.horizontal(|ui| {
@@ -2101,16 +1908,6 @@ pub fn day_divider(ui: &mut egui::Ui, label: &str) {
     });
 }
 
-/// VF-3 (C5): the short-content end-of-page marker. Seven register pages
-/// (automation, connectors, customers, incidents, organizations, live chats,
-/// onboarding hero) rendered their content strip and left the window's
-/// bottom half unmanaged — in production a background void with no
-/// empty-state. This bounds the page: a `border_strong` hairline over a
-/// quiet centered caption carrying the list's true count, so a tall window
-/// reads as "complete page, N items" instead of a void. Zero-row lists keep
-/// their existing `empty_state` (this marker is for non-empty short
-/// content); the count text must stay honest — it states what the local
-/// mirror holds, not what Help Scout holds.
 pub fn list_end_note(ui: &mut egui::Ui, text: &str) {
     let t = tokens(ui);
     ui.add_space(scale::space::SP3);
@@ -2130,7 +1927,6 @@ pub fn list_end_note(ui: &mut egui::Ui, text: &str) {
     ui.add_space(scale::space::SP2);
 }
 
-/// DC: DS-C-21 composer modes — Reply (primary surface) | Note (amber).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ComposerMode {
     #[default]
@@ -2138,7 +1934,6 @@ pub enum ComposerMode {
     Note,
 }
 
-/// DC: DS-C-21 composer actions the caller must apply.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ComposerAct {
     Send(ComposerMode, String),
@@ -2146,11 +1941,6 @@ pub enum ComposerAct {
     AiInsert,
 }
 
-/// DC: DS-C-21 Composer (UXE-1-7 redesign) — one card: Reply|Note
-/// segmented header with the tool buttons (Saved Replies dropdown, AI
-/// Draft), optional recipient rows (`before_body`), the bounded
-/// textarea, optional tool chips (`after_body`), and the footer (context
-/// hint left, primary Send right).
 #[allow(clippy::too_many_lines)]
 pub fn composer(
     ui: &mut egui::Ui,
@@ -2168,7 +1958,6 @@ pub fn composer(
     card(ui, |ui| {
         ui.set_width(ui.available_width());
 
-        // Header: Reply|Note segmented left, tools right.
         ui.horizontal(|ui| {
             let mode_idx = usize::from(note);
             if let Some(i) = segmented(
@@ -2242,7 +2031,6 @@ pub fn composer(
 
         before_body(ui);
 
-        // Textarea (note mode = amber surface, DS-C-21).
         let edit = egui::TextEdit::multiline(&mut state.draft)
             .id_salt(format!("spp-composer-{id_salt}"))
             .hint_text(if note {
@@ -2264,7 +2052,6 @@ pub fn composer(
 
         after_body(ui);
 
-        // Footer: context hint left, send right.
         ui.horizontal(|ui| {
             let context = if note {
                 "note — visible to teammates only · Ctrl+Enter sends"
@@ -2282,7 +2069,6 @@ pub fn composer(
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let send_label = if note { "Send Note" } else { "Send" };
                 let send = if note {
-                    // DS-C-21: note send = amber solid.
                     let g = egui::WidgetText::from(
                         R::new(send_label).color(t.on_ai).size(scale::text::CONTROL),
                     )
@@ -2326,12 +2112,10 @@ pub fn composer(
     act
 }
 
-/// DC: DS-C-21 composer state (mode + draft + draft-saved flag). The
 #[derive(Debug, Clone, Default)]
 pub struct ComposerState {
     pub mode: ComposerMode,
     pub draft: String,
-    /// Whether a draft has been saved (flag fades in per DS-C-21).
     pub draft_saved: bool,
     pub caret: Option<usize>,
     pub focused: bool,
@@ -2343,7 +2127,6 @@ impl ComposerState {
     }
 }
 
-/// DC: DS-C-22 copilot suggest card — AI-violet surface, AI-fg title,
 pub fn cop_suggest(
     ui: &mut egui::Ui,
     title: &str,
@@ -2352,8 +2135,6 @@ pub fn cop_suggest(
 ) -> Option<usize> {
     let t = tokens(ui);
     let mut clicked = None;
-    // UXE-1-8: same anatomy as the note/AI message cards — soft tint, no
-    // full colored border, 3px AI accent bar on the left edge.
     let resp = egui::Frame::new()
         .fill(t.ai_soft)
         .corner_radius(egui::CornerRadius::same(scale::radius::CARD))
@@ -2417,7 +2198,6 @@ pub fn cop_suggest(
     clicked
 }
 
-/// DC: DS-C-22 copilot chat bubble — assistant = AI-violet surface,
 pub fn cop_chat(ui: &mut egui::Ui, assistant: bool, text: &str) {
     let t = tokens(ui);
     let (bg, border) = if assistant {
@@ -2547,8 +2327,6 @@ mod tests {
         assert_eq!(LIGHT.card, rgb(255, 255, 255));
         assert_eq!(DARK.card, rgb(24, 24, 27));
         assert_eq!(LIGHT.sidebar, rgb(250, 250, 250));
-        // UX-12: lifted from rgb(12,12,14) so the dark sidebar separates
-        // from the page background (evidence: ux-audit dashboard__dark).
         assert_eq!(DARK.sidebar, rgb(16, 16, 19));
         assert_eq!(DARK.faint, rgb(12, 12, 14));
         assert_eq!(LIGHT.ai, rgb(124, 58, 237));
@@ -2588,8 +2366,6 @@ mod tests {
         assert_eq!(scale::space::SP1, 4.0);
         assert_eq!(scale::space::CLUSTER, 6.0);
         assert_eq!(scale::text::BODY, 13.5);
-        // UXE-1-1: TITLE 22 → 18 (modern helpdesk register) and
-        // SECTION_BIG 18 → 16 (detail headers sit under the page title).
         assert_eq!(scale::text::TITLE, 18.0);
         assert_eq!(scale::text::SECTION_BIG, 16.0);
         assert_eq!(scale::radius::CARD, 10);
@@ -2677,8 +2453,6 @@ mod tests {
                     assert!(!clicked);
                     badge(ui, "Active", BadgeTone::Info);
                     metric_card(ui, "New", "12", Some("last 30 days"));
-                    // UXG-1-5: the legacy natural-width table helpers are
-                    // gone — every list rides the exact-column data_table.
                     data_table(ui, "smoke", &["name", "count"], 1, 24.0, |ui, i| {
                         if i == 0 {
                             ui.label("row");

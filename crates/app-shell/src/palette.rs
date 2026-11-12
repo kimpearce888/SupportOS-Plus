@@ -5,18 +5,10 @@ use crate::pages::NavRequest;
 
 pub(crate) const MAX_HITS: usize = 12;
 
-/// UX-31: hit-row height. The old 40px row centered the title on the row
-/// midline while anchoring the snippet to the bottom — the two galleys
-/// overlapped by several pixels, which read as ghosted/bleeding text on the
-/// highlighted row. 46px gives every row two clean bands.
 pub(crate) const PALETTE_ROW_HEIGHT: f32 = 46.0;
 
-/// UX-31: vertical center of the badge+title band, measured from the row
-/// top (the badge is taller than the title galley, so the band bottom is
-/// governed by the badge).
 const TITLE_LINE_CENTER: f32 = 15.0;
 
-/// UX-31: breathing room between the snippet band and the row bottom.
 const SNIPPET_BOTTOM_PAD: f32 = 5.0;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,7 +54,6 @@ pub(crate) fn href_to_nav(href: &str) -> Option<NavRequest> {
         Some((p, q)) => (p, Some(q)),
         None => (rest, None),
     };
-    // Bare "/inbox" (core emits it for saved-reply hits) — land on the inbox page.
     if path == "inbox" {
         return Some(NavRequest::Page(crate::pages::PageKey::Inbox));
     }
@@ -143,10 +134,6 @@ impl CommandPalette {
         self.open = false;
     }
 
-    /// Screenshot-harness hook (ui-screenshot only): open the palette on a
-    /// pre-seeded query, so a shot can land on the mid-search state (hits
-    /// listed, first row selected) instead of the empty "Type to search"
-    /// state. Walks the same open+search path a typed query takes.
     #[cfg(feature = "ui-screenshot")]
     pub(crate) fn open_with_query(&mut self, query: &str, db: &DbHandle) {
         self.open();
@@ -200,10 +187,6 @@ impl CommandPalette {
         db: &DbHandle,
         input_locked: bool,
     ) -> Option<NavRequest> {
-        // AU2-12: a live confirm dialog owns the keyboard. The palette must
-        // not consume ⌘K or Escape while a destructive confirm is armed (one
-        // Esc press used to close the palette AND cancel the armed confirm),
-        // and it must never sit on top of the dialog.
         if input_locked {
             if self.open {
                 self.close();
@@ -369,10 +352,6 @@ fn palette_hit_row(ui: &mut egui::Ui, hit: &PaletteHit, selected: bool) -> egui:
         ui.painter()
             .rect_filled(rect, egui::CornerRadius::same(8), fill);
     }
-    // UX-31: two strictly separated bands — badge+title on the top line,
-    // snippet anchored at the bottom. The old layout centered the title on
-    // the row midline, so long titles crossed into the bottom-anchored
-    // snippet and read as ghosted/bleeding text.
     let title_line_center = rect.min.y + TITLE_LINE_CENTER;
     let title = egui::WidgetText::from(
         egui::RichText::new(hit.title.as_str())
@@ -403,8 +382,6 @@ fn palette_hit_row(ui: &mut egui::Ui, hit: &PaletteHit, selected: bool) -> egui:
         egui::TextStyle::Small,
     );
     let scope_w = scope_galley.size().x + 16.0;
-    // The badge is vertically centered on the title line (UX-31: it used to
-    // float on the row midline while the text block sat lower).
     let badge_rect = egui::Rect::from_min_max(
         egui::pos2(
             rect.min.x + 8.0,
@@ -438,9 +415,6 @@ fn palette_hit_row(ui: &mut egui::Ui, hit: &PaletteHit, selected: bool) -> egui:
         },
     );
     if !hit.snippet.is_empty() {
-        // UX-31: on the selected row the snippet shares the selection-
-        // foreground pair (the old muted gray fell to ~4.4:1 on the light
-        // selection fill, under the 4.5:1 small-text bar).
         let snippet_fg = if selected {
             t.selection_foreground
         } else {
@@ -515,16 +489,11 @@ mod tests {
 
     #[test]
     fn palette_row_bands_never_overlap() {
-        // UX-31: the old 40px row centered the title on the row midline
-        // (bottom edge ≈ y 28) while the snippet started at ≈ y 21 — a
-        // 7px overlap that read as ghosted text. This guard locks the
-        // two-band layout: with generously sized galleys (18px title,
-        // 20px badge, 14px snippet), every band stays clear of the next.
         let rect =
             egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(560.0, PALETTE_ROW_HEIGHT));
         let title_line_center = rect.min.y + TITLE_LINE_CENTER;
         let title_bottom = title_line_center + 18.0 / 2.0;
-        let badge_bottom = title_line_center + 20.0 / 2.0; // badge is the taller of the pair
+        let badge_bottom = title_line_center + 20.0 / 2.0;
         let snippet_top = rect.max.y - SNIPPET_BOTTOM_PAD - 14.0;
         assert!(
             snippet_top > badge_bottom,

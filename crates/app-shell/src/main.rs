@@ -65,8 +65,6 @@ fn main() {
             std::process::exit(1);
         }
     };
-    // AU2-13f: the log used to name a "webhook, embedding" timer set that
-    // does not exist; name the real WorkerManager timer set instead.
     tracing::info!(
         "background workers started (job loop, adaptive auto-sync, maintenance, \
          stale-job sweep, notification/customer-event/intelligence sweeps, \

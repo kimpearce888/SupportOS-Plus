@@ -6,9 +6,6 @@ pub(super) fn chip_impl(
     icon: Option<Icon>,
 ) -> egui::Response {
     let t = tokens(ui);
-    // UX-12/UX-15: a selected chip inverts (primary fill + strong label) so
-    // the active filter/scope is unmistakable in both themes — the old
-    // muted `selection` fill was near-identical to the resting chip.
     let fg = if selected {
         t.primary_foreground
     } else {
@@ -71,12 +68,6 @@ pub(super) fn chip_impl(
             text.to_owned(),
         )
     });
-    // UXF-1-1: no trailing `advance_cursor_after_rect` — `allocate_space`
-    // above already advanced the cursor. The redundant second advance is a
-    // no-op in linear layouts but Grids advance per allocation, so a chip
-    // in a `design::table` cell (the connectors list) consumed a phantom
-    // second column, shifting every following cell right. One widget, one
-    // cell.
     response
 }
 
@@ -86,10 +77,6 @@ pub fn card<R>(
 ) -> egui::InnerResponse<R> {
     let t = tokens(ui);
     let dark = ui.visuals().dark_mode;
-    // UXE-1-1: light mode goes borderless — white cards on the zinc-244
-    // canvas separated by a soft shadow (the Linear/Stripe register);
-    // dark mode keeps the hairline (shadows are invisible on near-black)
-    // and drops the shadow entirely.
     let (stroke, shadow) = if dark {
         (egui::Stroke::new(1.0, t.border), egui::Shadow::NONE)
     } else {
@@ -112,28 +99,10 @@ pub fn card<R>(
     frame.show(ui, add_contents)
 }
 
-/// UXD-1: horizontal padding a `card` frame adds around its contents —
-/// `inner_margin::same(14)` twice PLUS the 1px stroke on each side (egui
-/// frame sizing: `content + inner_margin + 2 * stroke.width`). Width math
-/// that must land a card on an exact OUTER width subtracts this.
 pub(crate) const CARD_PAD_X: f32 = 30.0;
 
-/// UXD-1: vertical padding a `card` frame adds around its contents
-/// (same margin + stroke accounting as `CARD_PAD_X`).
 pub(crate) const CARD_PAD_Y: f32 = 30.0;
 
-/// UXD-1: card with an exact OUTER width (and optional exact OUTER
-/// minimum height). Responsive grids compute the column width from the
-/// page's available width and hand it here; the frame padding is
-/// subtracted inside so the painted card lands exactly on the requested
-/// width. The inner Ui is also CAPPED at that width (`set_max_width`),
-/// so width-filling children (bar rows, charts) see the card's own
-/// width, never the unbounded remaining row/panel width that egui hands
-/// out inside `Grid` cells and `horizontal` rows — the old pattern
-/// (`set_min_width` only, on the caller-computed width) inflated such
-/// children frame over frame until cards left the viewport. The optional
-/// `min_h` lets a side panel stretch to a taller sibling's height (the
-/// dashboard's Issue-radar column next to the trend chart).
 pub(crate) fn card_exact_wh<R>(
     ui: &mut egui::Ui,
     outer_w: f32,
@@ -160,9 +129,6 @@ pub(crate) fn card_titled<R>(
     card_titled_sized(ui, title, hint, false, add_contents)
 }
 
-/// UX-7: full-width titled card for page-level form/list surfaces (Settings
-/// tabs) so content spans the available area instead of hugging its natural
-/// width and leaving the rest of the page dead.
 pub(crate) fn card_titled_wide<R>(
     ui: &mut egui::Ui,
     title: &str,
@@ -195,9 +161,6 @@ pub(crate) fn card_titled_sized<R>(
     })
 }
 
-/// UXD-1: titled card with an exact OUTER width (and optional exact OUTER
-/// minimum height) — the sized entry point responsive grids and hero rows
-/// use so every card in a row shares the computed column width.
 pub(crate) fn card_titled_exact<R>(
     ui: &mut egui::Ui,
     title: &str,
@@ -260,8 +223,6 @@ pub(crate) fn pager(ui: &mut egui::Ui, page: u32, pages: u32) -> i32 {
                 .color(t.muted_foreground),
         );
         if page + 1 < pages {
-            // UXE-1-3: Title Case button labels — "next ›" was the one
-            // lowercase control left in the shared set.
             if button(ui, "Next ›", ButtonVariant::Outline).clicked() {
                 delta = 1;
             }

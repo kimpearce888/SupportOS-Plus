@@ -7,16 +7,19 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 
 ## CURRENT POINTER
 
-- Next task: **R1.7 — app-shell/infra strip** (`app/`, `design/`,
-  `palette.rs`, `chart.rs`, `icons.rs`, …; see `plan.md` §7 R1.7).
+- Next task: **R1.8 — app-shell/pages A strip** (the seven 2K+ LOC
+  pages: inbox, settings, …; see `plan.md` §7 R1.8).
 - Pre-flight: confirm CI green on the session-3 final head (run id in
-  session log).
-- Session counter: 3 completed (R1.0-R1.6 executed; see log). core is
-  now fully comment-free; remaining R1.x work is app-shell only.
+  session log). If the session ended mid-CI, the run may still be
+  in flight — next session must wait for it.
+- Session counter: 3 completed (R1.0-R1.7 executed — session 3 ran two
+  batches; see log). core + app-shell infra + catalog + xtask are
+  comment-free; the remaining R1.x comments are the app-shell pages +
+  tests.
 - Environment: toolchain installed this session (cold target/); disk hit
-  G-05 once mid-battery (ld Bus error at 94% full during app-shell test
-  link — `rm -rf target/debug/incremental` freed 2.6G, retry green).
-  Per-crate test lanes mandatory (the 10-min tool window).
+  G-05 twice (ld Bus error during app-shell test link — `rm -rf
+  target/debug/incremental` + retry fixed both). Per-crate test lanes
+  mandatory (the 10-min tool window).
 
 ## Task states
 
@@ -29,8 +32,8 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 | R1.3 core/sync+workers strip | done (session 2) | 162 whole lines + 1 trailing comment removed from 8 of 13 files; cumulative subset check clean (41/41); battery green (per-crate lanes); CI run#305 green |
 | R1.4 core/helpscout strip | done (session 2) | 26 lines removed from 3 of 9 files; cumulative subset check clean (50/50); battery green (all 4 test lanes); CI run#306 green |
 | R1.5 core/storage+config strip | done (session 2) | 54 lines removed from 6 of 23 files; audit.rs invariant-7 duty verified (allowlist lines untouched, gate clean); cumulative subset check clean (73/73); battery green; CI run#307 green |
-| R1.6 core/domain strip | done (session 3) | 479 whole lines + 1 inline comment removed from 26 of 122 files — core crate now 100% comment-free (135/135 cumulative); `core/tests/` in the plan is vacuous (tests are inline `#[cfg(test)]`); battery green (app-shell lane needed one G-05 disk retry); CI pending |
-| R1.7 app-shell/infra strip | pending | |
+| R1.6 core/domain strip | done (session 3) | 479 whole lines + 1 inline comment removed from 26 of 122 files — core crate now 100% comment-free (135/135 cumulative); `core/tests/` in the plan is vacuous (tests are inline `#[cfg(test)]`); battery green (app-shell lane needed one G-05 disk retry); CI run#308 green |
+| R1.7 app-shell/infra strip | done (session 3) | 429 whole lines + 2 inline comments removed from 11 of 19 files; G-07 hit twice (comments had masked let_and_return in design/mod.rs + collapsible_if in workers_host.rs — fixed by behavior-identical restructure); cumulative subset check clean (154/154); battery green; CI pending |
 | R1.8 app-shell/pages-A strip | pending | 7 largest pages |
 | R1.9 app-shell/pages-B strip | pending | + 26 kittest suites |
 | R1.10 comment closeout | pending | lint-attr cleanup + zero-check |
@@ -80,6 +83,27 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
   kittest-ui-gated), so an R1.9 strip touching `crates/app-shell/tests/`
   is exercised by the default lane's link step. Disk headroom ≥2G required
   for that lane (G-05 budget).
+- R1.7 executed (same session, after run#308 went green on the R1.6 head):
+  --check over the plan's 17 infra paths listed 11 dirty of 19 scanned
+  (app/chrome 5, app/mod 82, chart 25, design/controls 39, design/mod 225,
+  lib 3, main 2, mention_popup 7, palette 33, task_bridge 1, workers_host
+  14-line region). Strip removed 429 whole lines + 2 inline comments.
+- G-07 discovered and hit twice: comments had been masking clippy lints.
+  design/mod.rs badge() — the UXF-1-1 comment sat between `let response =
+  ui.interact(..)` and the `response` tail → let_and_return once stripped
+  → fixed by returning `ui.interact(..)` directly. workers_host.rs
+  restart() — the AU2-13g comment sat between outer and inner if →
+  collapsible_if once stripped → fixed by folding `&& let Err(join_err)
+  = block_on(prev)` into the chain (same short-circuit semantics).
+  Recorded as G-07 in memory.md; clippy lane now runs immediately after
+  fmt, before the test lanes, to catch this class early in R1.8/R1.9.
+- Battery: gate clean, fmt --check clean, clippy workspace (6s after fix)
+  + sandbox lane clean, app-shell 293+2 (297s), core 520 (452s),
+  core-sandbox 528 (473s), catalog+xtask 56, verify-icons verified,
+  cumulative subset --check clean (154/154 across core+catalog+xtask+
+  app-shell-infra).
+- G-05 hit a second time mid-battery at the same spot (app-shell test
+  link, 77% full): `rm -rf target/debug/incremental` + retry green.
 
 ### Session 2 — 2026-11-12
 - Pre-flight: sandbox reset AGAIN (clone + toolchain gone) — re-provisioned

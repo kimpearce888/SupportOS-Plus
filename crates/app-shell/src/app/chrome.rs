@@ -94,9 +94,6 @@ pub(super) const NAV_GROUPS: &[(&str, &[PageKey])] = &[
     ),
 ];
 
-/// AUD-P1-1 (C1): nav rows can carry a small unread-count pill on the
-/// right edge — today only the Notifications row uses it (the version-pill
-/// idiom from the sidebar brand row, at nav scale).
 pub(super) fn nav_row(
     ui: &mut egui::Ui,
     current: PageKey,
@@ -110,8 +107,6 @@ pub(super) fn nav_row(
     } else {
         t.foreground
     };
-    // UXE-1-2: 30px rows, 13px labels, selected label strong — the nav
-    // grid keeps one rhythm top to bottom.
     let mut rich = egui::RichText::new(key.label()).size(13.0).color(fg);
     if selected {
         rich = rich.strong();

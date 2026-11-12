@@ -38,13 +38,6 @@ pub(crate) fn scale_points(points: &[Point], rect: egui::Rect) -> Option<Vec<egu
     )
 }
 
-/// UXG-1-9: the plot's inner area — the frame minus the label bands
-/// (the y-axis max label at the top-left, the First→Latest caption at
-/// the top-right, the x-axis endpoint labels along the bottom). The old
-/// uniform 6px inset let the line's endpoints land inside those bands
-/// whenever the series' max sat at its first or last day — the endpoint
-/// dots grazed the corner labels. The 8/20/18 reservation keeps every
-/// endpoint clear of every label at every data shape.
 fn plot_inner(rect: egui::Rect) -> egui::Rect {
     egui::Rect::from_min_max(
         egui::pos2(rect.min.x + 8.0, rect.min.y + 20.0),
@@ -52,9 +45,6 @@ fn plot_inner(rect: egui::Rect) -> egui::Rect {
     )
 }
 
-/// UX-9: `line_chart` with readable axes — y min/max value labels, x
-/// endpoint labels (e.g. the date range), horizontal gridlines, and a hover
-/// readout that names the nearest point.
 pub(crate) fn line_chart_axes(
     ui: &mut egui::Ui,
     points: &[Point],
@@ -86,7 +76,6 @@ pub(crate) fn line_chart_axes(
         let first = points.first().map(|p| p[1]).unwrap_or_default();
         let last = points.last().map(|p| p[1]).unwrap_or_default();
 
-        // y-axis: min/max value labels anchored to the plot edges
         let max_y = points
             .iter()
             .map(|p| p[1])
@@ -108,7 +97,6 @@ pub(crate) fn line_chart_axes(
             t.muted_foreground,
         );
 
-        // x-axis: endpoint labels (dates/range) inside the frame bottom
         if let Some((xa, xb)) = x_endpoints {
             ui.painter().text(
                 rect.left_bottom() + egui::vec2(8.0, -5.0),
@@ -126,10 +114,6 @@ pub(crate) fn line_chart_axes(
             );
         }
 
-        // UX-28: the summary caption lives inside the frame's top-right
-        // corner and names what the numbers are — the old caption floated
-        // below the chart as "new conversations · 16 → 2", detached from
-        // the card and ambiguous about which days the numbers described.
         let caption = if points.len() > 1 {
             format!("First {first} → Latest {last}")
         } else {
@@ -143,7 +127,6 @@ pub(crate) fn line_chart_axes(
             t.muted_foreground,
         );
 
-        // hover readout: nearest point gets a guide line + value bubble
         if let Some(pos) = response.hover_pos()
             && let Some((idx, nearest)) = scaled.iter().enumerate().min_by(|a, b| {
                 (a.1.x - pos.x)
@@ -218,7 +201,6 @@ fn interpolate_x_note(xa: &str, xb: &str, idx: usize, len: usize) -> String {
     if idx == len - 1 {
         return xb.to_string();
     }
-    // Interior point: show the fractional position between the endpoints.
     format!("{:.0}%", (idx as f64 / (len - 1) as f64) * 100.0)
 }
 
@@ -255,8 +237,6 @@ pub(crate) fn area_fill_mesh(
 }
 
 fn paint_grid(ui: &mut egui::Ui, rect: egui::Rect, t: &Tokens) {
-    // UXG-1-9: gridlines live inside the plot area only — the old full-rect
-    // lines crossed the corner label bands.
     let inner = plot_inner(rect);
     for i in 1..=3u16 {
         let y = inner.min.y + inner.height() * f32::from(i) / 4.0;
@@ -279,8 +259,6 @@ mod tests {
     #[test]
     fn scale_maps_data_space_to_pixels_bottom_left_origin() {
         let scaled = scale_points(&[[0.0, 0.0], [10.0, 10.0]], rect()).expect("scaled");
-        // UXG-1-9: the plot area is the frame minus the label bands
-        // (plot_inner: x 8..192, y 20..82 for this rect).
         assert!((scaled[0].x - 8.0).abs() < 0.01, "first x at left inset");
         assert!((scaled[0].y - 82.0).abs() < 0.01, "min y at plot bottom");
         assert!((scaled[1].x - 192.0).abs() < 0.01, "max x at right inset");
@@ -292,9 +270,6 @@ mod tests {
 
     #[test]
     fn plot_inner_reserves_the_label_bands() {
-        // UXG-1-9: the corner labels live in the reserved bands — the
-        // y-axis max label (top-left, y 5..17) and the caption (top-right)
-        // never collide with the line, whatever the data shape.
         let inner = plot_inner(rect());
         assert!(
             (inner.min.y - 20.0).abs() < 0.01,
