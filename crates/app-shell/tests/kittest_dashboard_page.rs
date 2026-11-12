@@ -253,7 +253,9 @@ fn render_dashboard_page(dark: bool, width: f32, name: &str) {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                s.page.ui(ui, &s.db, None);
+                // VF-4 (V1 completion): render through the shared
+                // production host — the exact funnel app/mod.rs uses.
+                design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db, None));
             },
             DashboardPageState {
                 installed: false,
@@ -286,17 +288,10 @@ fn render_dashboard_page_capped(dark: bool, width: f32, name: &str) {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                let bg = design::tokens(ui).background;
-                egui::CentralPanel::default()
-                    .frame(egui::Frame::new().fill(bg))
-                    .show(ui, |ui| {
-                        design::content_column(ui, |ui| {
-                            egui::Frame::new()
-                                .fill(egui::Color32::TRANSPARENT)
-                                .inner_margin(egui::Margin::symmetric(22, 14))
-                                .show(ui, |ui| s.page.ui(ui, &s.db, None));
-                        });
-                    });
+                // VF-4 (V1 completion): the capped golden renders through
+                // the shared production host (scroll + column + SP5/14) —
+                // the old inline copy drifted with a literal 22 margin.
+                design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db, None));
             },
             DashboardPageState {
                 installed: false,
@@ -378,7 +373,9 @@ fn r3_dashboard_scope_chip_light() {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                s.page.ui(ui, &s.db, None);
+                // VF-4 (V1 completion): render through the shared
+                // production host — the exact funnel app/mod.rs uses.
+                design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db, None));
             },
             DashboardPageState {
                 installed: false,

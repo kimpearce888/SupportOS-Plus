@@ -749,7 +749,10 @@ impl IssueRadarPage {
                                 *nav = Some(NavRequest::OpenConversation(conv_id));
                             }
                         });
-                        ui.add_space(design::scale::space::SP1);
+                        // VF-1 (L11): one SP2 row rhythm across both radar
+                        // cards — the old SP1 cadence read uneven next to the
+                        // SLA card's.
+                        ui.add_space(design::scale::space::SP2);
                     }
                 }
             },
@@ -776,12 +779,20 @@ impl IssueRadarPage {
                         "No conversations are breaching or at risk right now.",
                     );
                 } else {
-                    egui::ScrollArea::vertical().show_rows(
-                        ui,
-                        26.0,
-                        sla.alerts.len(),
-                        |ui, range| {
-                            for alert in &sla.alerts[range] {
+                    // VF-1 (L11): the old `ScrollArea::show_rows(_, 26.0, …)`
+                    // LIED about the row height — each painted row (callout +
+                    // drill link + spacing) is ~3× taller, so the scroll math
+                    // pushed the last row's "open →" link past the layout
+                    // height and clipped it against the card boundary (the
+                    // register's flagship L11 image). Rows now paint at
+                    // their true height in a plain scroll area: the callout,
+                    // SP1 gap, the link, SP2 inter-row rhythm; the last row's
+                    // trailing SP2 plus the card's own inner margin keeps the
+                    // bottom inset ≥ SP2 from the card bounds.
+                    egui::ScrollArea::vertical()
+                        .id_salt("issue-radar-sla-scroll")
+                        .show(ui, |ui| {
+                            for alert in &sla.alerts {
                                 let state = alert.state.as_str();
                                 let line = format!(
                                     "#{} {} · {} · {}",
@@ -795,6 +806,7 @@ impl IssueRadarPage {
                                 } else {
                                     design::callout(ui, CalloutRole::Warn, &line);
                                 }
+                                ui.add_space(design::scale::space::SP1);
                                 // AUD-P2-12 (C8): the SLA drill-through —
                                 // open the breached conversation in the Inbox.
                                 if nav.is_none() {
@@ -815,10 +827,9 @@ impl IssueRadarPage {
                                         ));
                                     }
                                 }
-                                ui.add_space(design::scale::space::SP1);
+                                ui.add_space(design::scale::space::SP2);
                             }
-                        },
-                    );
+                        });
                 }
             },
         );

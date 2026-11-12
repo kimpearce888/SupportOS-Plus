@@ -97,7 +97,7 @@ Phase 1 (owner gate): the one-page layout spec — spacing scale + panel inset r
 
 | IDs | Status |
 |-----|--------|
-| V1 | FIXED (host-wrapper goldens for inbox/copilot/list_pages; pattern established for the rest) |
+| V1 | FIXED — COMPLETE (VF-4: `design::host_standard_page` / `host_inbox_page` extracted from app/mod.rs into ONE shared definition; every one of the 26 kittest suites — all 19 previously-bare page suites, the capped wide-display renderers, and the 8K geometry check — now renders through it; the inline host copies and the stale literal-22 capped copy are gone; all 203 goldens rebaselined through the shared host, diff-locked twice) |
 | V2 | FIXED (SP5/SP6 tokens; 0 literal margins left in pages/; style-lint gate added) |
 | V3 | FIXED (`inbox_geo` constants + invariant tests) |
 | L1 | FIXED (T-composition; 3 geometry suites, 12 monitor-class×state combos, live-rect assertions) |
@@ -108,15 +108,15 @@ Phase 1 (owner gate): the one-page layout spec — spacing scale + panel inset r
 | L7 | FIXED (td_num register) |
 | L8, L9 | RECLASSIFIED → AF-family (fixed-height golden fold; production scrolls) |
 | L10, S7 | VERIFIED ALREADY SATISFIED (UXF-1-1 CELL_PAD; no churn) |
-| L11 | OPEN (next batch) |
+| L11 | FIXED (VF-1: the SLA card's `ScrollArea::show_rows(_, 26.0, …)` row-height lie — each painted row is ~3× the claimed height, so the scroll math pushed the last "open →" past the layout height and clipped it at the card boundary. Replaced with a plain scroll area painting rows at true height: callout → SP1 → drill link → SP2 rhythm; last row's trailing SP2 + the card's 14px inner margin keeps the bottom inset ≥ SP2 (26px measured). One SP2 rhythm across both radar cards. Re-audit: the "clipped by the card/window boundary" HIGH claim is gone) |
 | S1, S2, S3, S4, S5, S6, S8 | FIXED |
 | H1, H2, H3, H4 | FIXED (H4: debug line → tracing) |
-| H5 | OPEN (minor, next batch) |
+| H5 | FIXED (VF-2: `day_divider` rebuilt — the label rides a quiet muted pill (12px, strong, muted_foreground on muted, BADGE radius) instead of a bare 11.5px caption, hairlines upgraded border → border_strong, and the thread gives it SP2 breathing above and below. Re-audit: the near-invisibility/size complaints are gone — the divider is now readable enough that the hostile pass moved on to composition nitpicks) |
 | H6 | FIXED |
 | C1 | ADDRESSED (empty-transcript placeholder existed; rhythm fixes landed; reader whitespace is mail-normal) |
 | C2, C3 | VERIFIED (empty-state exists for zero rows; rail bg is sidebar-tinted) |
 | C4, C7 | ADDRESSED (header cluster grouping via S3/S6 work) |
-| C5 | PARTIAL (empty-states exist; full short-table polish next batch) |
+| C5 | FIXED (VF-3: every one of the seven pages — automation, connectors, customers, incidents, organizations, live chats, onboarding hero — now carries `design::list_end_note`, the short-content end-of-page marker: a border_strong hairline over a quiet centered caption with the list's TRUE count, so a tall window reads "complete page, N items" instead of a void. Zero-row lists keep their existing empty states. Re-audit: the VLM now cites the marker's text verbatim on every page ("2 chats in the local mirror", "setup 1/3 steps complete", "3 incidents · select a row…") — the class has a defined state everywhere) |
 | C6 | VERIFIED (placeholder in code since prior batch) |
 
 **Battery on the final tree:** fmt PASS · clippy x2 lanes (incl. NEW kittest-ui lane) PASS · gates PASS · style-lint (new pages-margins rule) PASS · kittest 26 suites green on rebaselined goldens · geometry invariants 10/10 · SPP_SMOKE 24 pages clean boot.

@@ -93,7 +93,9 @@ fn render_sync_health_page(dark: bool, width: f32, name: &str) {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                s.page.ui(ui, &s.db, None);
+                // VF-4 (V1 completion): render through the shared
+                // production host — the exact funnel app/mod.rs uses.
+                design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db, None));
             },
             SyncHealthPageState {
                 installed: false,
@@ -147,7 +149,9 @@ fn r3_sync_health_run_action_light() {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                s.page.ui(ui, &s.db, None);
+                // VF-4 (V1 completion): render through the shared
+                // production host — the exact funnel app/mod.rs uses.
+                design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db, None));
             },
             SyncHealthPageState {
                 installed: false,

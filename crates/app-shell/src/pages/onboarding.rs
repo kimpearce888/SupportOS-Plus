@@ -210,6 +210,21 @@ impl OnboardingPage {
                 }
             });
         }
+        // VF-3 (C5): the hero's short-content state — the checklist card
+        // ended and the window's bottom half was an unmanaged void. The
+        // end-note bounds the page with the setup's true progress.
+        let done_steps = [credentials_step, sync_step, complete_step]
+            .iter()
+            .filter(|done| **done)
+            .count();
+        design::list_end_note(
+            ui,
+            &format!(
+                "setup {done_steps}/3 steps complete · {} conversation{} in the local mirror",
+                status.conversations,
+                if status.conversations == 1 { "" } else { "s" }
+            ),
+        );
     }
 }
 

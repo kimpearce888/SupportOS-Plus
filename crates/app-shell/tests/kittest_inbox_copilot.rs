@@ -188,18 +188,11 @@ fn render_copilot_state(dark: bool, w: f32, h: f32, open_copilot: bool, name: &s
                     s.installed = true;
                 }
                 // AUD-V1: production host wrapper (see kittest_inbox_page).
-                egui::CentralPanel::default()
-                    .frame(
-                        egui::Frame::new()
-                            .fill(design::tokens(ui).background)
-                            .inner_margin(egui::Margin::symmetric(
-                                design::scale::space::SP5 as i8,
-                                14,
-                            )),
-                    )
-                    .show(ui, |ui| {
-                        s.page.ui(ui, &s.db, &s.bus, None);
-                    });
+                // VF-4 (V1 completion): the shared inbox production host —
+                // one definition, no inline copies left to drift.
+                design::host_inbox_page(ui, |ui| {
+                    s.page.ui(ui, &s.db, &s.bus, None);
+                });
             },
             CopilotPageState {
                 installed: false,
@@ -237,18 +230,11 @@ fn render_copilot_routed(name: &str) {
                     s.installed = true;
                 }
                 // AUD-V1: production host wrapper (see kittest_inbox_page).
-                egui::CentralPanel::default()
-                    .frame(
-                        egui::Frame::new()
-                            .fill(design::tokens(ui).background)
-                            .inner_margin(egui::Margin::symmetric(
-                                design::scale::space::SP5 as i8,
-                                14,
-                            )),
-                    )
-                    .show(ui, |ui| {
-                        s.page.ui(ui, &s.db, &s.bus, None);
-                    });
+                // VF-4 (V1 completion): the shared inbox production host —
+                // one definition, no inline copies left to drift.
+                design::host_inbox_page(ui, |ui| {
+                    s.page.ui(ui, &s.db, &s.bus, None);
+                });
             },
             CopilotPageState {
                 installed: false,

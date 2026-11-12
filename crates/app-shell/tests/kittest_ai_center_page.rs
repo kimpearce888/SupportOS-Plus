@@ -94,7 +94,9 @@ fn render_ai_center_page(dark: bool, width: f32, name: &str) {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                s.page.ui(ui, &s.db);
+                // VF-4 (V1 completion): render through the shared
+                // production host — the exact funnel app/mod.rs uses.
+                design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db));
             },
             AiCenterPageState {
                 installed: false,
@@ -148,7 +150,9 @@ fn r3_ai_center_usage_tab_light() {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                s.page.ui(ui, &s.db);
+                // VF-4 (V1 completion): render through the shared
+                // production host — the exact funnel app/mod.rs uses.
+                design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db));
             },
             AiCenterPageState {
                 installed: false,
@@ -215,7 +219,9 @@ fn render_seeded_tab(tab: &str, width: f32, name: &str) {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                s.page.ui(ui, &s.db);
+                // VF-4 (V1 completion): render through the shared
+                // production host — the exact funnel app/mod.rs uses.
+                design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db));
             },
             AiCenterPageState {
                 installed: false,
@@ -270,7 +276,9 @@ fn audp1_ai_center_price_editor_light() {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                s.page.ui(ui, &s.db);
+                // VF-4 (V1 completion): render through the shared
+                // production host — the exact funnel app/mod.rs uses.
+                design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db));
             },
             AiCenterPageState {
                 installed: false,

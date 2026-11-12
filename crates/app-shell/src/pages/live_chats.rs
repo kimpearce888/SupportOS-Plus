@@ -197,6 +197,17 @@ impl LiveChatsPage {
                 return Some(request);
             }
         }
+        // VF-3 (C5): the short-content end-of-page marker — the chat list is
+        // short by nature; the note bounds the page with the true count so a
+        // tall window reads "complete page", never a void.
+        design::list_end_note(
+            ui,
+            &format!(
+                "{} chat{} in the local mirror",
+                visible.len(),
+                if visible.len() == 1 { "" } else { "s" }
+            ),
+        );
         None
     }
 

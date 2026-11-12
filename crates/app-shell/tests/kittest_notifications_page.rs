@@ -153,7 +153,9 @@ fn render_notifications_page(dark: bool, width: f32, name: &str) {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                s.page.ui(ui, &s.db);
+                // VF-4 (V1 completion): render through the shared
+                // production host — the exact funnel app/mod.rs uses.
+                design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db));
             },
             NotificationsPageState {
                 installed: false,
@@ -207,7 +209,9 @@ fn r3_notifications_mentions_tab_light() {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                s.page.ui(ui, &s.db);
+                // VF-4 (V1 completion): render through the shared
+                // production host — the exact funnel app/mod.rs uses.
+                design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db));
             },
             NotificationsPageState {
                 installed: false,
@@ -284,7 +288,9 @@ fn audp1_notifications_deep_link_light() {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                s.page.ui(ui, &s.db);
+                // VF-4 (V1 completion): render through the shared
+                // production host — the exact funnel app/mod.rs uses.
+                design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db));
             },
             NotificationsPageState {
                 installed: false,

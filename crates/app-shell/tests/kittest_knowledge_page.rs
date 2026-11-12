@@ -107,7 +107,9 @@ fn render_knowledge_page(dark: bool, width: f32, name: &str) {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                s.page.ui(ui, &s.db, None);
+                // VF-4 (V1 completion): render through the shared
+                // production host — the exact funnel app/mod.rs uses.
+                design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db, None));
             },
             KnowledgePageState {
                 installed: false,
@@ -161,7 +163,9 @@ fn r3_knowledge_help_center_tab_light() {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                s.page.ui(ui, &s.db, None);
+                // VF-4 (V1 completion): render through the shared
+                // production host — the exact funnel app/mod.rs uses.
+                design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db, None));
             },
             KnowledgePageState {
                 installed: false,
@@ -226,7 +230,9 @@ fn render_help_center_reader(dark: bool, width: f32, name: &str) {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                s.page.ui(ui, &s.db, None);
+                // VF-4 (V1 completion): render through the shared
+                // production host — the exact funnel app/mod.rs uses.
+                design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db, None));
             },
             KnowledgePageState {
                 installed: false,
@@ -308,7 +314,9 @@ fn audp2_knowledge_doc_reader_light() {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                s.page.ui(ui, &s.db, None);
+                // VF-4 (V1 completion): render through the shared
+                // production host — the exact funnel app/mod.rs uses.
+                design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db, None));
             },
             KnowledgePageState {
                 installed: false,

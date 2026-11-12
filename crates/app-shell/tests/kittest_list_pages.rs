@@ -205,30 +205,9 @@ fn render_organizations_page(dark: bool, width: f32, name: &str) {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                // AUD-V1: the production host for standard pages —
-                // CentralPanel + scroll + content column + the SP5/14
-                // inset, exactly as app/mod.rs hosts them.
-                egui::CentralPanel::default()
-                    .frame(egui::Frame::new().fill(design::tokens(ui).background))
-                    .show(ui, |ui| {
-                        egui::ScrollArea::vertical()
-                            .id_salt("spp-page-scroll")
-                            .auto_shrink([false; 2])
-                            .show(ui, |ui| {
-                                ui.add_space(2.0);
-                                design::content_column(ui, |ui| {
-                                    egui::Frame::new()
-                                        .fill(egui::Color32::TRANSPARENT)
-                                        .inner_margin(egui::Margin::symmetric(
-                                            design::scale::space::SP5 as i8,
-                                            14,
-                                        ))
-                                        .show(ui, |ui| {
-                                            s.page.ui(ui, &s.db, None);
-                                        });
-                                });
-                            });
-                    });
+                // VF-4 (V1 completion): the shared standard-page production
+                // host — one definition, no inline copies left to drift.
+                design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db, None));
             },
             OrganizationsPageState {
                 installed: false,
@@ -558,30 +537,9 @@ fn render_customers_page(dark: bool, width: f32, name: &str) {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                // AUD-V1: the production host for standard pages —
-                // CentralPanel + scroll + content column + the SP5/14
-                // inset, exactly as app/mod.rs hosts them.
-                egui::CentralPanel::default()
-                    .frame(egui::Frame::new().fill(design::tokens(ui).background))
-                    .show(ui, |ui| {
-                        egui::ScrollArea::vertical()
-                            .id_salt("spp-page-scroll")
-                            .auto_shrink([false; 2])
-                            .show(ui, |ui| {
-                                ui.add_space(2.0);
-                                design::content_column(ui, |ui| {
-                                    egui::Frame::new()
-                                        .fill(egui::Color32::TRANSPARENT)
-                                        .inner_margin(egui::Margin::symmetric(
-                                            design::scale::space::SP5 as i8,
-                                            14,
-                                        ))
-                                        .show(ui, |ui| {
-                                            s.page.ui(ui, &s.db, None);
-                                        });
-                                });
-                            });
-                    });
+                // VF-4 (V1 completion): the shared standard-page production
+                // host — one definition, no inline copies left to drift.
+                design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db, None));
             },
             CustomersPageState {
                 installed: false,

@@ -479,6 +479,19 @@ impl OrganizationsPage {
             },
         );
 
+        // VF-3 (C5): the short-content end-of-page marker — the org list is
+        // short by nature; the note bounds the page with the true count.
+        if !orgs.is_empty() {
+            design::list_end_note(
+                ui,
+                &format!(
+                    "{} organization{} · Open shows members, domains and conversation counts",
+                    orgs.len(),
+                    if orgs.len() == 1 { "" } else { "s" }
+                ),
+            );
+        }
+
         let detail = self.detail.clone();
         let title = detail
             .as_ref()

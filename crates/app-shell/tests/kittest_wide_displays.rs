@@ -162,7 +162,12 @@ fn uxg_inbox_reader_capped_7680() {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                s.page.ui(ui, &s.db, &s.bus, None);
+                // VF-4 (V1 completion): the 8K geometry check runs
+                // through the shared inbox production host, like the
+                // goldens.
+                design::host_inbox_page(ui, |ui| {
+                    s.page.ui(ui, &s.db, &s.bus, None);
+                });
             },
             InboxState {
                 installed: false,

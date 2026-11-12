@@ -654,6 +654,19 @@ impl AutomationPage {
                     });
             },
         );
+        // VF-3 (C5): the page's short-content state — with a handful of
+        // rules the window's bottom half was an unmanaged void. The
+        // end-note bounds the page with the list's true count.
+        if !rules.is_empty() {
+            design::list_end_note(
+                ui,
+                &format!(
+                    "{} rule{} · automations fire on new customer conversations and replies",
+                    rules.len(),
+                    if rules.len() == 1 { "" } else { "s" }
+                ),
+            );
+        }
         if let Some((id, approve)) = decided {
             self.decide(db, id, approve);
         }

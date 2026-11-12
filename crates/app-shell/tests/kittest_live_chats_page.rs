@@ -137,7 +137,9 @@ fn render_live_chats_page(dark: bool, width: f32, name: &str) {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                s.page.ui(ui, &s.db);
+                // VF-4 (V1 completion): render through the shared
+                // production host — the exact funnel app/mod.rs uses.
+                design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db));
             },
             LiveChatsPageState {
                 installed: false,
@@ -191,7 +193,9 @@ fn r3_live_chats_tab_switch_light() {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                s.page.ui(ui, &s.db);
+                // VF-4 (V1 completion): render through the shared
+                // production host — the exact funnel app/mod.rs uses.
+                design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db));
             },
             LiveChatsPageState {
                 installed: false,
@@ -235,7 +239,7 @@ fn audp2_live_chats_conversation_link_light() {
                 }
                 // Sticky capture: a later no-nav frame must not erase a
                 // nav the click frame produced.
-                if let Some(nav) = s.page.ui(ui, &s.db) {
+                if let Some(nav) = design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db)).inner {
                     s.nav = Some(nav);
                 }
             },

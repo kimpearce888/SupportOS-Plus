@@ -952,6 +952,66 @@ pub fn content_column<R>(
     centered_column(ui, scale::CONTENT_MAX, add_contents)
 }
 
+/// VF-4 (V1 completion): THE production host for standard pages — the one
+/// funnel `ShellApp::update` (app/mod.rs) pushes every non-inbox page
+/// through: `CentralPanel(background fill) → ScrollArea("spp-page-scroll",
+/// auto_shrink) → content_column(1800) → Frame(inner_margin
+/// symmetric(SP5, 14))`. The golden suites call this SAME function, so a
+/// golden can never again render outside the host the real app uses — the
+/// register's V1 acceptance ("goldens render through the exact production
+/// host wrapper") now holds for every page suite, not just three. Do not
+/// inline this composition elsewhere; a second copy is a drift vector.
+pub fn host_standard_page<R>(
+    ui: &mut egui::Ui,
+    add_contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> egui::InnerResponse<R> {
+    let bg = tokens(ui).background;
+    egui::CentralPanel::default()
+        .frame(egui::Frame::new().fill(bg))
+        .show(ui, |ui| {
+            egui::ScrollArea::vertical()
+                .id_salt("spp-page-scroll")
+                .auto_shrink([false; 2])
+                .show(ui, |ui| {
+                    ui.add_space(2.0);
+                    content_column(ui, |ui| {
+                        egui::Frame::new()
+                            .fill(egui::Color32::TRANSPARENT)
+                            .inner_margin(egui::Margin::symmetric(
+                                scale::space::SP5 as i8,
+                                scale::space::PAD_CARD as i8,
+                            ))
+                            .show(ui, add_contents)
+                            .inner
+                    })
+                    .inner
+                })
+                .inner
+        })
+}
+
+/// VF-4 (V1 completion): THE production host for the Inbox page — the
+/// non-scrolling three-panel composition funnel from `ShellApp::update`:
+/// `CentralPanel(background fill + inner_margin symmetric(SP5, 14))`. Same
+/// rule as `host_standard_page`: the inbox goldens call this exact
+/// function, never a hand-rolled copy.
+pub fn host_inbox_page<R>(
+    ui: &mut egui::Ui,
+    add_contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> egui::InnerResponse<R> {
+    let bg = tokens(ui).background;
+    egui::CentralPanel::default()
+        .frame(
+            egui::Frame::new()
+                .fill(bg)
+                .inner_margin(egui::Margin::symmetric(
+                    scale::space::SP5 as i8,
+                    scale::space::PAD_CARD as i8,
+                )),
+        )
+        .show(ui, add_contents)
+}
+
 /// DC: DS-C-03 StatTile — muted 12px label, 26px tabular value, 12px hint.
 pub fn metric_card(ui: &mut egui::Ui, label: &str, value: &str, hint: Option<&str>) {
     metric_card_w(ui, label, value, hint, 150.0);
@@ -2004,7 +2064,14 @@ pub fn message_card_with<B, A, R>(
     }
 }
 
-/// DC: DS-C-20 day divider — hairlines meeting a centered 11.5px label.
+/// DC: DS-C-20 day divider — hairlines meeting a centered label.
+/// VF-2 (H5): the old divider was a near-invisible hairline plus an 11.5px
+/// bare caption that competed with (and lost to) message content. The
+/// register's acceptance is a muted centered caption with adequate
+/// contrast/size: the label now rides a quiet muted pill (12px, strong,
+/// `muted_foreground` on `muted`), the hairlines upgrade to `border_strong`,
+/// and callers give it SP2 breathing room above and below — muted vs. the
+/// message cards, but clearly readable at every monitor class.
 pub fn day_divider(ui: &mut egui::Ui, label: &str) {
     let t = tokens(ui);
     ui.horizontal(|ui| {
@@ -2012,16 +2079,55 @@ pub fn day_divider(ui: &mut egui::Ui, label: &str) {
         let half = (w - 120.0) / 2.0;
         let (r1, _id) = ui.allocate_exact_size(egui::vec2(half, 1.0), egui::Sense::hover());
         ui.painter()
-            .line_segment([r1.min, r1.max], egui::Stroke::new(1.0, t.border));
-        ui.label(
-            egui::RichText::new(label)
-                .size(scale::text::META_HALF)
-                .color(t.muted_foreground),
-        );
+            .line_segment([r1.min, r1.max], egui::Stroke::new(1.0, t.border_strong));
+        egui::Frame::new()
+            .fill(t.muted)
+            .corner_radius(egui::CornerRadius::same(scale::radius::BADGE))
+            .inner_margin(egui::Margin::symmetric(
+                scale::space::SP2 as i8,
+                scale::space::SP1 as i8,
+            ))
+            .show(ui, |ui| {
+                ui.label(
+                    egui::RichText::new(label)
+                        .size(scale::text::SMALL)
+                        .strong()
+                        .color(t.muted_foreground),
+                );
+            });
         let (r2, _id2) = ui.allocate_exact_size(egui::vec2(half, 1.0), egui::Sense::hover());
         ui.painter()
-            .line_segment([r2.min, r2.max], egui::Stroke::new(1.0, t.border));
+            .line_segment([r2.min, r2.max], egui::Stroke::new(1.0, t.border_strong));
     });
+}
+
+/// VF-3 (C5): the short-content end-of-page marker. Seven register pages
+/// (automation, connectors, customers, incidents, organizations, live chats,
+/// onboarding hero) rendered their content strip and left the window's
+/// bottom half unmanaged — in production a background void with no
+/// empty-state. This bounds the page: a `border_strong` hairline over a
+/// quiet centered caption carrying the list's true count, so a tall window
+/// reads as "complete page, N items" instead of a void. Zero-row lists keep
+/// their existing `empty_state` (this marker is for non-empty short
+/// content); the count text must stay honest — it states what the local
+/// mirror holds, not what Help Scout holds.
+pub fn list_end_note(ui: &mut egui::Ui, text: &str) {
+    let t = tokens(ui);
+    ui.add_space(scale::space::SP3);
+    let w = ui.available_width();
+    let (id, rect) = ui.allocate_space(egui::vec2(w, 1.0));
+    ui.painter()
+        .rect_filled(rect, egui::CornerRadius::ZERO, t.border_strong);
+    let _ = id;
+    ui.add_space(scale::space::SP1);
+    ui.vertical_centered(|ui| {
+        ui.label(
+            egui::RichText::new(text)
+                .size(scale::text::META)
+                .color(t.muted_foreground),
+        );
+    });
+    ui.add_space(scale::space::SP2);
 }
 
 /// DC: DS-C-21 composer modes — Reply (primary surface) | Note (amber).

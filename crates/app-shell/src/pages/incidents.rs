@@ -669,6 +669,19 @@ impl IncidentsPage {
             self.select(db, id);
         }
 
+        // VF-3 (C5): the short-content end-of-page marker — an incident list
+        // is short by nature; the note bounds the page with the true count.
+        if !rows.is_empty() {
+            design::list_end_note(
+                ui,
+                &format!(
+                    "{} incident{} · select a row to open its workspace",
+                    rows.len(),
+                    if rows.len() == 1 { "" } else { "s" }
+                ),
+            );
+        }
+
         let detail = self.detail.clone();
         let title = detail
             .as_ref()

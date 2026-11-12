@@ -488,6 +488,22 @@ impl CustomersPage {
             self.reload_search(db);
         }
 
+        // VF-3 (C5): the short-content end-of-page marker — a filtered list
+        // of a few rows left the window's bottom half unmanaged. The note
+        // bounds the page with the mirror's true total (the pager handles
+        // page math; this answers "is that all of them?").
+        if !rows.is_empty() {
+            let total = self.total;
+            design::list_end_note(
+                ui,
+                &format!(
+                    "{} customer{} in the local mirror",
+                    total,
+                    if total == 1 { "" } else { "s" }
+                ),
+            );
+        }
+
         if let Some(id) = pick {
             self.open_profile(db, id);
         }

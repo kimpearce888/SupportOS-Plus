@@ -2822,7 +2822,12 @@ impl InboxPage {
         for entry in &detail.thread {
             let day: String = entry.created_at.chars().take(10).collect();
             if last_day.as_deref() != Some(day.as_str()) {
+                // VF-2 (H5): the day separator breathes — SP2 above and
+                // below keeps the muted pill from competing with the
+                // message cards it separates.
+                ui.add_space(design::scale::space::SP2);
                 design::day_divider(ui, &day);
+                ui.add_space(design::scale::space::SP2);
                 last_day = Some(day);
             }
             let (role, role_label) = message_role_of(&entry.thread_type);

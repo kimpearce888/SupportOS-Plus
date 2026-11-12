@@ -275,18 +275,11 @@ fn render_inbox_page(dark: bool, width: f32, name: &str) {
                 // SP5/14 inset app/mod.rs applies — so the drift gate
                 // finally gates the look the user sees. Bare-ui renders
                 // certified a synthetic composition.
-                egui::CentralPanel::default()
-                    .frame(
-                        egui::Frame::new()
-                            .fill(design::tokens(ui).background)
-                            .inner_margin(egui::Margin::symmetric(
-                                design::scale::space::SP5 as i8,
-                                14,
-                            )),
-                    )
-                    .show(ui, |ui| {
-                        s.page.ui(ui, &s.db, &s.bus, None);
-                    });
+                // VF-4 (V1 completion): the shared inbox production host —
+                // one definition, no inline copies left to drift.
+                design::host_inbox_page(ui, |ui| {
+                    s.page.ui(ui, &s.db, &s.bus, None);
+                });
             },
             InboxPageState {
                 installed: false,
@@ -370,18 +363,11 @@ fn render_inbox_page_overflow(dark: bool, width: f32, name: &str) {
                 // SP5/14 inset app/mod.rs applies — so the drift gate
                 // finally gates the look the user sees. Bare-ui renders
                 // certified a synthetic composition.
-                egui::CentralPanel::default()
-                    .frame(
-                        egui::Frame::new()
-                            .fill(design::tokens(ui).background)
-                            .inner_margin(egui::Margin::symmetric(
-                                design::scale::space::SP5 as i8,
-                                14,
-                            )),
-                    )
-                    .show(ui, |ui| {
-                        s.page.ui(ui, &s.db, &s.bus, None);
-                    });
+                // VF-4 (V1 completion): the shared inbox production host —
+                // one definition, no inline copies left to drift.
+                design::host_inbox_page(ui, |ui| {
+                    s.page.ui(ui, &s.db, &s.bus, None);
+                });
             },
             InboxPageState {
                 installed: false,
@@ -567,18 +553,11 @@ fn run_geometry(width: f32, open_copilot: bool) -> InboxPanelGeometry {
                     s.installed = true;
                 }
                 // The production host wrapper (AUD-V1).
-                egui::CentralPanel::default()
-                    .frame(
-                        egui::Frame::new()
-                            .fill(design::tokens(ui).background)
-                            .inner_margin(egui::Margin::symmetric(
-                                design::scale::space::SP5 as i8,
-                                14,
-                            )),
-                    )
-                    .show(ui, |ui| {
-                        s.page.ui(ui, &s.db, &s.bus, None);
-                    });
+                // VF-4 (V1 completion): the shared inbox production host —
+                // one definition, no inline copies left to drift.
+                design::host_inbox_page(ui, |ui| {
+                    s.page.ui(ui, &s.db, &s.bus, None);
+                });
                 *sink.lock().unwrap() = s.page.panel_geometry();
             },
             InboxPageState {

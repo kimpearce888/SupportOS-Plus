@@ -200,7 +200,9 @@ fn render_operations_page(dark: bool, width: f32, name: &str) {
                 s.page.kittest_freeze_generated_at();
                 // AUD-P2-17 (C13): the bus rides along for one-click assign.
                 let bus = spp_core::event_bus::EventBus::new(8);
-                s.page.ui(ui, &s.db, &bus);
+                // VF-4 (V1 completion): render through the shared
+                // production host — the exact funnel app/mod.rs uses.
+                design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db, &bus));
             },
             OperationsPageState {
                 installed: false,
@@ -258,7 +260,9 @@ fn r3_operations_workload_tab_light() {
                 s.page.kittest_freeze_generated_at();
                 // AUD-P2-17 (C13): the bus rides along for one-click assign.
                 let bus = spp_core::event_bus::EventBus::new(8);
-                s.page.ui(ui, &s.db, &bus);
+                // VF-4 (V1 completion): render through the shared
+                // production host — the exact funnel app/mod.rs uses.
+                design::host_standard_page(ui, |ui| s.page.ui(ui, &s.db, &bus));
             },
             OperationsPageState {
                 installed: false,

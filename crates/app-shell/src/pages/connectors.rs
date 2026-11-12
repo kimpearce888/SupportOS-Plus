@@ -569,6 +569,19 @@ impl ConnectorsPage {
             ui.add_space(10.0);
             self.rows_ui(ui, db);
         }
+        // VF-3 (C5): the short-content end-of-page marker — the connector
+        // list is short by nature; the note bounds the page with the true
+        // count instead of leaving the bottom half an unmanaged void.
+        if !connectors.is_empty() {
+            design::list_end_note(
+                ui,
+                &format!(
+                    "{} connector{} · read-only tables the AI tools can query",
+                    connectors.len(),
+                    if connectors.len() == 1 { "" } else { "s" }
+                ),
+            );
+        }
         nav
     }
 

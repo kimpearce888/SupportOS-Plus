@@ -901,119 +901,65 @@ impl ShellApp {
         let sync = self.sync.clone();
         let mut nav: Option<NavRequest> = None;
         if self.page == PageKey::Inbox {
-            egui::CentralPanel::default()
-                // AUD-V2: the production host inset is the SP5 token —
-                // the SAME value the inbox panels and the golden host
-                // wrapper use, so the goldens render the real look.
-                .frame(
-                    egui::Frame::new()
-                        .fill(t.background)
-                        .inner_margin(egui::Margin::symmetric(design::scale::space::SP5 as i8, 14)),
-                )
-                .show(ui, |ui| self.inbox.ui(ui, &self.db, &bus, sync.as_ref()));
-            nav = None;
+            // AUD-V2 + VF-4: the inbox host (CentralPanel + fill + SP5/14
+            // inset) is the shared `design::host_inbox_page` — the golden
+            // suites render through the SAME function, so the drift gate
+            // gates the real look.
+            let _ = design::host_inbox_page(ui, |ui| {
+                self.inbox.ui(ui, &self.db, &bus, sync.as_ref());
+            });
         } else {
-            egui::CentralPanel::default()
-                .frame(egui::Frame::new().fill(t.background))
-                .show(ui, |ui| {
-                    egui::ScrollArea::vertical()
-                        .id_salt("spp-page-scroll")
-                        .auto_shrink([false; 2])
-                        .show(ui, |ui| {
-                            ui.add_space(2.0);
-                            // UXG-1-1: one content-column discipline for
-                            // every standard page — full width up to
-                            // CONTENT_MAX (1800), a centered exact-width
-                            // column above it. On 2K/4K/8K displays the
-                            // page holds professional proportions instead
-                            // of stretching to the full window; on windows
-                            // under the cap the layout is pixel-identical
-                            // to the uncapped render.
-                            design::content_column(ui, |ui| {
-                                egui::Frame::new()
-                                    .fill(egui::Color32::TRANSPARENT)
-                                    .inner_margin(egui::Margin::symmetric(
-                                        design::scale::space::SP5 as i8,
-                                        14,
-                                    ))
-                                    .show(ui, |ui| match self.page {
-                                        PageKey::Dashboard => {
-                                            self.dashboard.ui(ui, &self.db, sync.as_ref());
-                                        }
-                                        PageKey::Customers => {
-                                            nav = self.customers.ui(ui, &self.db, sync.as_ref());
-                                        }
-                                        PageKey::Knowledge => {
-                                            nav = self.knowledge.ui(ui, &self.db, sync.as_ref());
-                                        }
-                                        PageKey::Reports => {
-                                            nav = self.reports.ui(ui, &self.db, sync.as_ref());
-                                        }
-                                        PageKey::LiveChats => {
-                                            nav = self.live_chats.ui(ui, &self.db);
-                                        }
-                                        PageKey::Operations => {
-                                            nav = self.operations.ui(ui, &self.db, &self.bus);
-                                        }
-                                        PageKey::AiCenter => {
-                                            nav = self.ai_center.ui(ui, &self.db);
-                                        }
-                                        PageKey::Automation => {
-                                            nav = self.automation.ui(ui, &self.db);
-                                        }
-                                        PageKey::Connectors => {
-                                            nav = self.connectors.ui(ui, &self.db, &bus);
-                                        }
-                                        PageKey::CustomObjects => {
-                                            nav = self.custom_objects.ui(ui, &self.db);
-                                        }
-                                        PageKey::Incidents => {
-                                            nav = self.incidents.ui(ui, &self.db);
-                                        }
-                                        // AUD-P2-12 (C8): the radar drill-downs
-                                        // surface as NavRequests now.
-                                        PageKey::IssueRadar => {
-                                            nav = self.issue_radar.ui(ui, &self.db);
-                                        }
-                                        PageKey::Notifications => {
-                                            nav = self.notifications.ui(ui, &self.db);
-                                            // AUD-P1-1 (C1): the page just
-                                            // (re)loaded — its unread count
-                                            // is fresher than the last event.
-                                            self.unread_notifications =
-                                                self.notifications.unread_badge();
-                                        }
-                                        PageKey::Onboarding => {
-                                            self.onboarding.ui(ui, &self.db, sync.as_ref());
-                                        }
-                                        PageKey::Organizations => {
-                                            nav =
-                                                self.organizations.ui(ui, &self.db, sync.as_ref());
-                                        }
-                                        PageKey::Outreach => {
-                                            nav = self.outreach.ui(ui, &self.db);
-                                        }
-                                        PageKey::Search => {
-                                            nav = self.search.ui(ui, &self.db);
-                                        }
-                                        PageKey::Settings => {
-                                            nav = self.settings.ui(ui, &self.db);
-                                        }
-                                        PageKey::SupportGraph => {
-                                            nav = self.support_graph.ui(ui, &self.db);
-                                        }
-                                        PageKey::Diagnostics => {
-                                            nav = self.diagnostics.ui(ui, &self.db);
-                                        }
-                                        PageKey::SyncHealth => {
-                                            self.sync_health.ui(ui, &self.db, sync.as_ref());
-                                        }
-                                        PageKey::Shell => self.shell_ui(ui),
-                                        PageKey::Inbox => unreachable!("inbox handled above"),
-                                    });
-                            });
-                        });
-                });
+            // VF-4 (V1 completion): every standard page renders through the
+            // shared `design::host_standard_page` — CentralPanel + scroll +
+            // content_column(1800) + the SP5/14 inset — the exact funnel the
+            // golden suites use, from the one definition.
+            nav = design::host_standard_page(ui, |ui| match self.page {
+                PageKey::Dashboard => {
+                    self.dashboard.ui(ui, &self.db, sync.as_ref());
+                    None
+                }
+                PageKey::Customers => self.customers.ui(ui, &self.db, sync.as_ref()),
+                PageKey::Knowledge => self.knowledge.ui(ui, &self.db, sync.as_ref()),
+                PageKey::Reports => self.reports.ui(ui, &self.db, sync.as_ref()),
+                PageKey::LiveChats => self.live_chats.ui(ui, &self.db),
+                PageKey::Operations => self.operations.ui(ui, &self.db, &self.bus),
+                PageKey::AiCenter => self.ai_center.ui(ui, &self.db),
+                PageKey::Automation => self.automation.ui(ui, &self.db),
+                PageKey::Connectors => self.connectors.ui(ui, &self.db, &bus),
+                PageKey::CustomObjects => self.custom_objects.ui(ui, &self.db),
+                PageKey::Incidents => self.incidents.ui(ui, &self.db),
+                // AUD-P2-12 (C8): the radar drill-downs
+                // surface as NavRequests now.
+                PageKey::IssueRadar => self.issue_radar.ui(ui, &self.db),
+                PageKey::Notifications => {
+                    let nav = self.notifications.ui(ui, &self.db);
+                    // AUD-P1-1 (C1): the page just
+                    // (re)loaded — its unread count
+                    // is fresher than the last event.
+                    self.unread_notifications = self.notifications.unread_badge();
+                    nav
+                }
+                PageKey::Onboarding => {
+                    self.onboarding.ui(ui, &self.db, sync.as_ref());
+                    None
+                }
+                PageKey::Organizations => self.organizations.ui(ui, &self.db, sync.as_ref()),
+                PageKey::Outreach => self.outreach.ui(ui, &self.db),
+                PageKey::Search => self.search.ui(ui, &self.db),
+                PageKey::Settings => self.settings.ui(ui, &self.db),
+                PageKey::SupportGraph => self.support_graph.ui(ui, &self.db),
+                PageKey::Diagnostics => self.diagnostics.ui(ui, &self.db),
+                PageKey::SyncHealth => {
+                    self.sync_health.ui(ui, &self.db, sync.as_ref());
+                    None
+                }
+                PageKey::Shell => {
+                    self.shell_ui(ui);
+                    None
+                }
+                PageKey::Inbox => unreachable!("inbox handled above"),
+            })
+            .inner;
         }
         if let Some(nav) = nav {
             self.apply_nav(nav);
