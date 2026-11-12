@@ -87,9 +87,11 @@ These appear in the goldens but are **golden-context symptoms of V1**, not produ
 - **AF2** Black bottom-half voids (7 pages): unpainted harness canvas beyond content — production paints the panel background. The real-app symptom (unmanaged empty region) is registered once as C5.
 - **AF3** Mouse-cursor overlaps in a few goldens (outreach, SLA tab): harness cursor rendering; excluded.
 
-## Next step
+## Next step — TERMINAL
 
-Phase 1 (owner gate): the one-page layout spec — spacing scale + panel inset rules + inbox composition wireframe — for sign-off BEFORE any fix code. Then L-class fixes with invariant tests, then tokenization (V2) with the style-lint gate, then page passes tier by tier.
+**None. This register is closed.** The Phase-1 sign-off gate below was superseded by the owner's later blanket directive ("start fixing everything, take the best decision, do not ask me, verify every fix with proof on all monitors"), under which every phase ran to completion: L-class fixes with invariant tests, tokenization (V2) with the style-lint gate, page passes tier by tier, and the close-out of every open/partial item. Terminal state: 35/35 (24 FIXED + 5 VERIFIED + 3 ADDRESSED + 2 RECLASSIFIED + 1 SUPERSEDED), 0 OPEN, 0 PARTIAL — see the OUTCOME LOG below and the evidence pack (`ai/audit/visual/evidence/`).
+
+*(Historical, for the record — the original Phase-1 plan: the one-page layout spec — spacing scale + panel inset rules + inbox composition wireframe — for sign-off BEFORE any fix code. Then L-class fixes with invariant tests, then tokenization (V2) with the style-lint gate, then page passes tier by tier.)*
 
 ---
 
