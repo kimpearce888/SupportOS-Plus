@@ -30,50 +30,28 @@ pub struct OutreachPage {
     campaigns: Vec<serde_json::Value>,
     segments: Vec<serde_json::Value>,
     dnc: Vec<(i64, String, String)>,
-    /// AUD-P2-13 (C9): the sending mailboxes behind the campaign form's
-    /// picker (replaces the raw "Mailbox id" text field).
     mailboxes: Vec<(i64, String)>,
     selected: Option<i64>,
     report: Option<serde_json::Value>,
     show_new: bool,
-    /// AUD-P2-13 (C9): Some(id) puts the campaign form into edit mode for
-    /// that draft (prefilled); None is the plain create form.
     edit_campaign_id: Option<i64>,
     new_name: String,
     new_subject: String,
     new_body: String,
-    /// AUD-P2-13 (C9): the picked sending mailbox — the picker's value.
     new_mailbox_pick: Option<i64>,
-    /// Raw mailbox id — AUD-P2-13 (C9) fallback, only shown when no
-    /// mailboxes exist to pick.
     new_mailbox: String,
-    /// AUD-P2-13 (C9): the picked target segment — the picker's value.
     new_segment_pick: Option<i64>,
-    /// Raw segment id — AUD-P2-13 (C9) fallback, only shown when no
-    /// segments exist to pick.
     new_segment_json: String,
     show_new_segment: bool,
-    /// AUD-P2-13 (C9): Some(id) puts the segment form into edit mode for
-    /// that saved segment (prefilled); None is the plain create form.
     edit_segment_id: Option<i64>,
     new_segment_name: String,
-    /// AUD-P2-13 (C9): the segment description, edited alongside the name
-    /// (rides with the edit lane; `save_segment_v2` accepts it).
     new_segment_description: String,
     new_segment_criteria: String,
-    /// AUD-P2-13 (C9): the form's pre-save recipient preview, if computed.
     segment_preview: Option<SegmentPreview>,
-    /// AUD-P2-13 (C9): the in-place recipient preview of a saved segment,
-    /// keyed by its row id.
     row_preview: Option<(i64, SegmentPreview)>,
-    /// AUD-P2-13 (C9): the DNC customer search query.
     dnc_query: String,
-    /// AUD-P2-13 (C9): the query the current DNC results were fetched for
-    /// (None = never fetched for this query).
     dnc_results_for: Option<String>,
-    /// AUD-P2-13 (C9): the customer picker's options for the current query.
     dnc_results: Vec<serde_json::Value>,
-    /// AUD-P2-13 (C9): the picked DNC customer (replaces the raw id field).
     new_dnc_pick: Option<i64>,
     new_dnc_reason: String,
     message: Option<String>,
@@ -130,7 +108,6 @@ impl OutreachPage {
         self.campaigns.clear();
         self.segments.clear();
         self.dnc.clear();
-        // AUD-P2-13 (C9): the picker options reload with the rest.
         self.mailboxes.clear();
         self.report = None;
     }
@@ -141,7 +118,6 @@ impl OutreachPage {
                 spp_core::outreach::list_outreach_campaigns(conn).unwrap_or_default(),
                 spp_core::outreach::list_segments_v2(conn).unwrap_or_default(),
                 spp_core::outreach::list_dnc(conn).unwrap_or_default(),
-                // AUD-P2-13 (C9): the campaign form's mailbox picker options.
                 crate::pages::dashboard::mailboxes(conn),
             )
         });
@@ -200,18 +176,13 @@ impl OutreachPage {
         else {
             return;
         };
-        let segment_id: Option<i64> = self
-            // AUD-P2-13 (C9): the picker owns the value; the raw id text
-            // field is the no-options fallback only.
-            .new_segment_pick
-            .filter(|v| *v > 0)
-            .or_else(|| {
-                self.new_segment_json
-                    .trim()
-                    .parse::<i64>()
-                    .ok()
-                    .filter(|v| *v > 0)
-            });
+        let segment_id: Option<i64> = self.new_segment_pick.filter(|v| *v > 0).or_else(|| {
+            self.new_segment_json
+                .trim()
+                .parse::<i64>()
+                .ok()
+                .filter(|v| *v > 0)
+        });
         let tree: Option<SegmentDefinition> = db.with_read(|conn| {
             if let Some(sid) = segment_id {
                 spp_core::outreach::get_segment_v2(conn, sid)
@@ -276,7 +247,6 @@ impl OutreachPage {
             Ok(id) => {
                 self.show_new = false;
                 self.edit_campaign_id = None;
-                // AUD-P2-13 (C9): the pickers reset with the rest of the form.
                 self.reset_campaign_form();
                 self.selected = Some(id);
                 self.set_message(format!(
@@ -289,8 +259,6 @@ impl OutreachPage {
         }
     }
 
-    /// AUD-P2-13 (C9): the field validation shared by the create and
-    /// draft-edit lanes — the same honest errors either way.
     fn validate_campaign_fields(&mut self, db: &DbHandle) -> Option<(String, String, String, i64)> {
         let name = self.new_name.trim().to_string();
         if name.is_empty() || name.len() > 200 {
@@ -307,8 +275,6 @@ impl OutreachPage {
             self.set_error("body must be 1-200000 characters.");
             return None;
         }
-        // AUD-P2-13 (C9): the mailbox picker owns the value; the raw id
-        // text field is the no-options fallback only.
         let mailbox_local_id = self
             .new_mailbox_pick
             .or_else(|| self.new_mailbox.trim().parse::<i64>().ok());
@@ -331,12 +297,8 @@ impl OutreachPage {
         Some((name, subject, body, mailbox_local_id))
     }
 
-    /// AUD-P2-13 (C9): open the campaign form prefilled with a draft.
-    /// Only drafts offer the act on their card, but the core re-checks —
-    /// a stale card cannot edit a queued campaign.
     fn start_campaign_edit(&mut self, db: &DbHandle, campaign: &serde_json::Value) {
         let id = i64_field(campaign, "id");
-        // The list row carries no body — read it from the record.
         let body = db.with_read(|conn| {
             conn.query_row(
                 "SELECT body FROM outreach_campaigns WHERE id = ?1",
@@ -354,15 +316,10 @@ impl OutreachPage {
         self.new_body = body;
         self.new_mailbox_pick = campaign.get("mailbox_local_id").and_then(|v| v.as_i64());
         self.new_mailbox.clear();
-        // AUD-P2-13 (C9): targeting is frozen at creation — the pick only
-        // feeds the read-only display in the form.
         self.new_segment_pick = campaign.get("segment_id").and_then(|v| v.as_i64());
         self.new_segment_json.clear();
     }
 
-    /// AUD-P2-13 (C9): save the edit form back to the draft campaign via
-    /// the core's update lane; a refusal (non-draft, missing mailbox,
-    /// blank fields) surfaces verbatim and the form stays open.
     fn save_campaign_edit(&mut self, db: &DbHandle) {
         let Some(id) = self.edit_campaign_id else {
             return;
@@ -395,7 +352,6 @@ impl OutreachPage {
         }
     }
 
-    /// AUD-P2-13 (C9): abandon the campaign edit and clear the form.
     fn cancel_campaign_edit(&mut self) {
         self.edit_campaign_id = None;
         self.show_new = false;
@@ -403,7 +359,6 @@ impl OutreachPage {
         self.error = None;
     }
 
-    /// AUD-P2-13 (C9): clear the campaign form back to its create state.
     fn reset_campaign_form(&mut self) {
         self.new_name.clear();
         self.new_subject.clear();
@@ -441,11 +396,8 @@ impl OutreachPage {
             self.set_error("criteria must be { combinator, conditions[], exclude[] } JSON");
             return;
         }
-        // AUD-P2-13 (C9): the description rides along (None when blank).
         let description = self.new_segment_description.trim().to_string();
         let description = (!description.is_empty()).then_some(description);
-        // AUD-P2-13 (C9): Some(id) updates the saved segment (bumping its
-        // version) instead of inserting a sibling.
         let editing = self.edit_segment_id;
         let result = db.with_write(|conn| {
             spp_core::outreach::save_segment_v2(
@@ -470,8 +422,6 @@ impl OutreachPage {
         }
     }
 
-    /// AUD-P2-13 (C9): open the segment form prefilled with a saved
-    /// segment — delete + recreate is no longer the only path.
     fn start_segment_edit(&mut self, segment: &serde_json::Value) {
         self.edit_segment_id = Some(i64_field(segment, "id"));
         self.show_new_segment = true;
@@ -490,7 +440,6 @@ impl OutreachPage {
             .unwrap_or_default();
     }
 
-    /// AUD-P2-13 (C9): abandon the segment edit and clear the form.
     fn cancel_segment_edit(&mut self) {
         self.edit_segment_id = None;
         self.show_new_segment = false;
@@ -498,7 +447,6 @@ impl OutreachPage {
         self.error = None;
     }
 
-    /// AUD-P2-13 (C9): clear the segment form back to its create state.
     fn reset_segment_form(&mut self) {
         self.new_segment_name.clear();
         self.new_segment_description.clear();
@@ -506,8 +454,6 @@ impl OutreachPage {
         self.segment_preview = None;
     }
 
-    /// AUD-P2-13 (C9): count the form's unsaved criteria before saving —
-    /// a pre-save guard, not a requirement. Parse errors surface honestly.
     fn preview_new_segment(&mut self, db: &DbHandle) {
         match compute_segment_preview(db, &self.new_segment_criteria) {
             Ok(preview) => self.segment_preview = Some(preview),
@@ -518,8 +464,6 @@ impl OutreachPage {
         }
     }
 
-    /// AUD-P2-13 (C9): count a saved segment's recipients in place — the
-    /// row answers "how many would this hit?" without opening the form.
     fn preview_segment_row(&mut self, db: &DbHandle, id: i64, definition: &str) {
         match compute_segment_preview(db, definition) {
             Ok(preview) => self.row_preview = Some((id, preview)),
@@ -537,8 +481,6 @@ impl OutreachPage {
     }
 
     fn add_dnc(&mut self, db: &DbHandle) {
-        // AUD-P2-13 (C9): the picker resolves the customer — the raw id
-        // typed from memory is gone.
         let Some(customer_id) = self.new_dnc_pick.filter(|v| *v > 0) else {
             self.set_error("pick a customer first — search by name or email");
             return;
@@ -563,8 +505,6 @@ impl OutreachPage {
         }
     }
 
-    /// AUD-P2-13 (C9): fetch the customer picker's options for the
-    /// current query (first 25 matches).
     fn refresh_dnc_results(&mut self, db: &DbHandle) {
         let query = self.dnc_query.trim().to_string();
         self.dnc_results = db
@@ -664,7 +604,6 @@ impl OutreachPage {
         let campaigns = self.campaigns.clone();
         let mut acted: Option<(i64, CampaignAction)> = None;
         let mut picked: Option<i64> = None;
-        // AUD-P2-13 (C9): the draft-edit target, if any.
         let mut edit_requested: Option<serde_json::Value> = None;
         egui::ScrollArea::vertical()
             .id_salt("outreach-campaigns")
@@ -701,10 +640,6 @@ impl OutreachPage {
                             ),
                         );
                         ui.horizontal(|ui| {
-                            // AUD-P2-13 (C9): drafts open in the form above;
-                            // past draft, the lifecycle acts below are the
-                            // honest surface (the core refuses edits on
-                            // anything non-draft).
                             if str_field(campaign, "status") == "draft"
                                 && design::button(ui, "Edit", ButtonVariant::Outline)
                                     .on_hover_text("open this draft in the form above")
@@ -756,19 +691,17 @@ impl OutreachPage {
                         });
                     });
                 }
-                if campaigns.is_empty() {
-                    // UX-16: the empty state carries the action it describes
-                    // instead of stranding the CTA 250px away in the header.
-                    if design::empty_state_cta(
+                if campaigns.is_empty()
+                    && design::empty_state_cta(
                         ui,
                         Icon::Megaphone,
                         "No campaigns yet",
                         "Campaigns send a message to a saved segment. Create your \
                          first one to get started.",
                         "New Campaign",
-                    ) {
-                        self.show_new = true;
-                    }
+                    )
+                {
+                    self.show_new = true;
                 }
             });
         if let Some(campaign) = edit_requested {
@@ -803,9 +736,6 @@ impl OutreachPage {
         };
         let t = design::tokens(ui);
         design::card_titled(ui, "Campaign report", None, |ui| {
-            // AU2-10: the core nests the counters under `totals`
-            // (outreach::campaign_report) — the reader used to look for
-            // top-level keys and rendered zeros for every row.
             let totals = report.get("totals");
             let f64_or_dash = |v: Option<&serde_json::Value>| -> String {
                 match v.and_then(|f| f.as_f64()) {
@@ -846,7 +776,6 @@ impl OutreachPage {
     }
 
     fn new_campaign_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
-        // AUD-P2-13 (C9): one form, two modes — create and draft-edit.
         let editing = self.edit_campaign_id.is_some();
         let t = design::tokens(ui);
         let mailboxes = self.mailboxes.clone();
@@ -883,9 +812,6 @@ impl OutreachPage {
                 )
                 .labelled_by(body_label.id);
                 ui.end_row();
-                // AUD-P2-13 (C9): the mailbox picker replaces the raw
-                // "Mailbox id" text field; the raw field survives only as
-                // the no-options fallback.
                 let mailbox_label = design::field_label(ui, "Mailbox");
                 if mailboxes.is_empty() {
                     ui.add_sized(
@@ -912,13 +838,8 @@ impl OutreachPage {
                     .labelled_by(mailbox_label.id);
                 }
                 ui.end_row();
-                // AUD-P2-13 (C9): the segment picker replaces the raw
-                // "Segment id" text field and the "saved segments: …"
-                // hint line — the options are the hint.
                 let segment_label = design::field_label(ui, "Segment");
                 if editing {
-                    // Targeting is frozen at creation — the update lane has
-                    // no segment parameter, so it renders read-only.
                     let fixed = self
                         .new_segment_pick
                         .map(|sid| {
@@ -967,7 +888,6 @@ impl OutreachPage {
                 }
                 ui.end_row();
             });
-            // AUD-P2-13 (C9): honest empty states behind the raw fallbacks.
             if mailboxes.is_empty() {
                 design::hint_text(
                     ui,
@@ -999,7 +919,6 @@ impl OutreachPage {
                         self.create_campaign(db);
                     }
                 }
-                // AUD-P2-13 (C9): abandon the edit — Cancel clears the form.
                 if editing && design::button(ui, "Cancel", ButtonVariant::Outline).clicked() {
                     self.cancel_campaign_edit();
                 }
@@ -1022,7 +941,6 @@ impl OutreachPage {
 
         let segments = self.segments.clone();
         let mut deleted: Option<(i64, String)> = None;
-        // AUD-P2-13 (C9): the edit/preview acts collected from the rows.
         let mut edit_requested: Option<serde_json::Value> = None;
         let mut preview_requested: Option<(i64, String)> = None;
         egui::ScrollArea::vertical()
@@ -1058,17 +976,12 @@ impl OutreachPage {
                                             str_field(segment, "name"),
                                         ));
                                     }
-                                    // AUD-P2-13 (C9): preview the saved
-                                    // definition's recipient count in place.
                                     if design::button(ui, "Preview", ButtonVariant::Outline)
                                         .on_hover_text("count the recipients this segment hits")
                                         .clicked()
                                     {
                                         preview_requested = Some((id, criteria.clone()));
                                     }
-                                    // AUD-P2-13 (C9): edit in the form above —
-                                    // delete + recreate is no longer the only
-                                    // path.
                                     if design::button(ui, "Edit", ButtonVariant::Outline)
                                         .on_hover_text("open this segment in the form above")
                                         .clicked()
@@ -1083,8 +996,6 @@ impl OutreachPage {
                                 .small()
                                 .color(t.muted_foreground),
                         );
-                        // AUD-P2-13 (C9): the in-place recipient count,
-                        // when asked for.
                         if let Some((previewed_id, preview)) = &self.row_preview
                             && *previewed_id == id
                         {
@@ -1118,8 +1029,6 @@ impl OutreachPage {
         None
     }
 
-    /// AUD-P2-13 (C9): the segment form — create mode, edit mode, and the
-    /// pre-save recipient preview.
     fn new_segment_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         let editing = self.edit_segment_id;
         design::card(ui, |ui| {
@@ -1140,7 +1049,6 @@ impl OutreachPage {
                 )
                 .labelled_by(name_label.id);
                 ui.end_row();
-                // AUD-P2-13 (C9): the description rides with the edit lane.
                 let description_label = design::field_label(ui, "Description");
                 ui.add_sized(
                     [240.0, 28.0],
@@ -1172,23 +1080,18 @@ impl OutreachPage {
                 {
                     self.create_segment(db);
                 }
-                // AUD-P2-13 (C9): the pre-save recipient count — a guard,
-                // not a requirement; the save path never demands it.
                 if design::button(ui, "Preview", ButtonVariant::Outline)
                     .on_hover_text("count the recipients before saving")
                     .clicked()
                 {
                     self.preview_new_segment(db);
                 }
-                // AUD-P2-13 (C9): abandon the edit — Cancel clears the form.
                 if editing.is_some()
                     && design::button(ui, "Cancel", ButtonVariant::Outline).clicked()
                 {
                     self.cancel_segment_edit();
                 }
             });
-            // AUD-P2-13 (C9): the preview hint — "≈N recipients (X
-            // without email, Y on DNC)" plus the engine's notes.
             if let Some(preview) = &self.segment_preview {
                 design::hint_text(ui, &preview.hint());
                 for note in &preview.notes {
@@ -1199,9 +1102,6 @@ impl OutreachPage {
     }
 
     fn dnc_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
-        // AUD-P2-13 (C9): resolve the customer by search + pick — a raw
-        // id typed from memory is not a picker. Refetch only when the
-        // query changed (or on the first frame).
         if self.dnc_results_for.as_deref() != Some(self.dnc_query.as_str()) {
             self.refresh_dnc_results(db);
         }
@@ -1214,7 +1114,6 @@ impl OutreachPage {
             Some("Customers on this list are excluded from every campaign."),
             |ui| {
                 design::form_grid(ui, "outreach-dnc-new", |ui| {
-                    // AUD-P2-13 (C9): the search narrows the picker's options.
                     let search_label = design::field_label(ui, "Search");
                     ui.add_sized(
                         [180.0, 28.0],
@@ -1223,8 +1122,6 @@ impl OutreachPage {
                     )
                     .labelled_by(search_label.id);
                     ui.end_row();
-                    // AUD-P2-13 (C9): the customer picker replaces the raw
-                    // "Customer id" text field.
                     let customer_label = design::field_label(ui, "Customer");
                     let pick_label = self
                         .new_dnc_pick
@@ -1237,7 +1134,6 @@ impl OutreachPage {
                         })
                         .unwrap_or_else(|| "pick a customer…".to_string());
                     design::select(ui, "outreach-dnc-customer", &pick_label, 280.0, |ui| {
-                        // AUD-P2-13 (C9): the honest empty state, in the menu.
                         if results.is_empty() {
                             ui.label("no customers match");
                         }
@@ -1258,7 +1154,6 @@ impl OutreachPage {
                     .labelled_by(reason_label.id);
                     ui.end_row();
                 });
-                // AUD-P2-13 (C9): the honest empty state, under the picker.
                 if results.is_empty() {
                     design::hint_text(
                         ui,
@@ -1308,8 +1203,6 @@ impl OutreachPage {
                                 ui,
                                 Icon::X,
                                 "No customers on the list",
-                                // AUD-P2-13 (C9): the raw id field is gone —
-                                // the hint names the actual path.
                                 "Search and pick a customer above to exclude them from \
                                  campaigns.",
                             );
@@ -1342,9 +1235,6 @@ fn campaign_status_tone(status: &str) -> BadgeTone {
     }
 }
 
-/// AUD-P2-13 (C9): the recipient-count preview behind the segment form's
-/// (and the segment rows') Preview act — the same numbers a campaign
-/// snapshot would freeze.
 #[derive(Debug, Clone)]
 struct SegmentPreview {
     matched: i64,
@@ -1362,8 +1252,6 @@ impl SegmentPreview {
     }
 }
 
-/// AUD-P2-13 (C9): parse criteria and run the same engine the campaign
-/// snapshot uses. Parse errors come back verbatim — surfaced honestly.
 fn compute_segment_preview(db: &DbHandle, criteria: &str) -> Result<SegmentPreview, String> {
     let body = serde_json::from_str::<serde_json::Value>(criteria)
         .map_err(|e| format!("criteria is not valid JSON: {e}"))?;
@@ -1392,8 +1280,6 @@ fn compute_segment_preview(db: &DbHandle, criteria: &str) -> Result<SegmentPrevi
     })
 }
 
-/// AUD-P2-13 (C9): the DNC picker's option label — enough to tell two
-/// customers apart without typing a raw id.
 fn dnc_customer_label(row: &serde_json::Value) -> String {
     let id = row.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
     let first = row
@@ -1476,7 +1362,6 @@ mod tests {
         page.new_name = "Latched".into();
         page.new_subject = "Sub".into();
         page.new_body = "Body".into();
-        // AUD-P2-13 (C9): the pickers replace the raw id text fields.
         page.new_mailbox_pick = Some(mailbox);
         page.new_segment_pick = Some(segment_id);
         page.create_campaign(&db);
@@ -1505,7 +1390,6 @@ mod tests {
         page.new_name = "Check-in".into();
         page.new_subject = "How is it going?".into();
         page.new_body = "Hi {{first_name}}, just checking in.".into();
-        // AUD-P2-13 (C9): the pickers replace the raw id text fields.
         page.new_mailbox_pick = Some(1);
         page.new_segment_pick = Some(segment_id);
         page.create_campaign(&db);
@@ -1534,7 +1418,6 @@ mod tests {
         page.new_name = "No segment".into();
         page.new_subject = "Hi".into();
         page.new_body = "Body".into();
-        // AUD-P2-13 (C9): nothing picked — the honest empty pick state.
         page.new_mailbox_pick = Some(1);
         page.new_segment_pick = None;
         page.create_campaign(&db);
@@ -1551,8 +1434,6 @@ mod tests {
         page.new_name = "X".into();
         page.new_subject = "Y".into();
         page.new_body = "Z".into();
-        // AUD-P2-13 (C9): the no-options fallback lane — the pick is unset
-        // and the raw text is not an id.
         page.new_mailbox = "not-a-number".into();
         page.create_campaign(&db);
         assert!(page.error.is_some());
@@ -1581,8 +1462,6 @@ mod tests {
         assert_eq!(page.dnc[0].0, 9);
         assert_eq!(page.dnc[0].1, "asked politely");
 
-        // AU2-13: the dead is_on_dnc convenience was deleted; the round-trip
-        // is asserted through list_dnc, the API the program itself uses.
         let on_dnc = db.with_read(spp_core::outreach::list_dnc);
         assert!(on_dnc.expect("dnc list").iter().any(|(id, _, _)| *id == 9));
 
@@ -1594,8 +1473,6 @@ mod tests {
 
     #[test]
     fn dnc_requires_a_picked_customer() {
-        // AUD-P2-13 (C9): the raw customer-id text field is gone — nothing
-        // picked is the honest refusal.
         let db = fixture(Vec::new());
         let mut page = OutreachPage::new();
         page.new_dnc_pick = None;
@@ -1629,7 +1506,6 @@ mod tests {
         page.new_name = "Everyone".into();
         page.new_subject = "Hello all".into();
         page.new_body = "Hi {{first_name}}.".into();
-        // AUD-P2-13 (C9): the pickers replace the raw id text fields.
         page.new_mailbox_pick = Some(1);
         page.new_segment_pick = Some(segment_id);
         page.create_campaign(&db);
@@ -1655,12 +1531,9 @@ mod tests {
 
     #[test]
     fn audp2_segment_preview_counts_recipients_before_save() {
-        // AUD-P2-13 (C9): the pre-save preview runs the same engine that
-        // snapshots campaign recipients; parse errors surface honestly.
         let db = fixture(vec![("conv", 1, "Hello", "active", "email", 1, 5, 9)]);
         let mut page = OutreachPage::new();
 
-        // the form preview on the unsaved criteria
         page.new_segment_criteria = TICKET_CUSTOMERS_DEFINITION.into();
         page.preview_new_segment(&db);
         let preview = page.segment_preview.clone().expect("preview computed");
@@ -1668,7 +1541,6 @@ mod tests {
         assert_eq!(preview.without_email, 0, "the seeded customer has an email");
         assert!(preview.notes.is_empty());
 
-        // invalid criteria is refused honestly, with no preview
         page.new_segment_criteria = "not json".into();
         page.preview_new_segment(&db);
         assert!(
@@ -1681,7 +1553,6 @@ mod tests {
             "the error names the field: {error}"
         );
 
-        // the row preview of a saved segment
         let segment_id = db.with_write(|conn| seed_segment(conn, "S", TICKET_CUSTOMERS_DEFINITION));
         let definition = db.with_read(|conn| {
             spp_core::outreach::get_segment_v2(conn, segment_id)
@@ -1698,8 +1569,6 @@ mod tests {
 
     #[test]
     fn audp2_campaign_edit_round_trips_on_drafts_only() {
-        // AUD-P2-13 (C9): the draft edit lane — prefill, save, and the
-        // core's refusal once the campaign leaves draft.
         let db = fixture(vec![("conv", 1, "Hello", "active", "email", 1, 5, 9)]);
         let segment_id =
             db.with_write(|conn| seed_segment(conn, "Ticket owners", TICKET_CUSTOMERS_DEFINITION));
@@ -1716,7 +1585,6 @@ mod tests {
         let id = i64_field(&draft, "id");
         assert_eq!(str_field(&draft, "status"), "draft");
 
-        // open the edit form prefilled with the draft
         page.start_campaign_edit(&db, &draft);
         assert_eq!(page.edit_campaign_id, Some(id));
         assert_eq!(page.new_name, "Check-in");
@@ -1724,7 +1592,6 @@ mod tests {
         assert_eq!(page.new_body, "Hi {{first_name}}.");
         assert_eq!(page.new_mailbox_pick, Some(1));
 
-        // change the subject and save
         page.new_subject = "Updated subject".into();
         page.save_campaign_edit(&db);
         assert!(page.error.is_none(), "{:?}", page.error);
@@ -1738,7 +1605,6 @@ mod tests {
         );
         assert_eq!(str_field(&page.campaigns[0], "subject"), "Updated subject");
 
-        // the core refuses non-drafts — queue, then try the same edit again
         page.campaign_action(&db, id, CampaignAction::Queue);
         assert_eq!(str_field(&page.campaigns[0], "status"), "queued");
         page.start_campaign_edit(&db, &page.campaigns[0].clone());
@@ -1760,8 +1626,6 @@ mod tests {
 
     #[test]
     fn audp2_segment_edit_bumps_version_via_save_segment_v2() {
-        // AUD-P2-13 (C9): the segment edit lane — Some(id) updates the row
-        // (version bump) instead of inserting a sibling.
         let db = fixture(Vec::new());
         let mut page = OutreachPage::new();
         page.new_segment_name = "Churn risk".into();
@@ -1771,7 +1635,6 @@ mod tests {
         assert_eq!(page.segments.len(), 1);
         assert_eq!(i64_field(&page.segments[0], "version"), 1);
 
-        // open the form prefilled with the saved segment
         let saved = page.segments[0].clone();
         let segment_id = i64_field(&saved, "id");
         page.start_segment_edit(&saved);
@@ -1779,7 +1642,6 @@ mod tests {
         assert_eq!(page.new_segment_name, "Churn risk");
         assert!(page.new_segment_criteria.contains("ticket_count"));
 
-        // rename + describe, save — the row updates in place
         page.new_segment_name = "Churn risk v2".into();
         page.new_segment_description = "customers with at least one ticket".into();
         page.create_segment(&db);
@@ -1811,12 +1673,9 @@ mod tests {
 
     #[test]
     fn audp2_dnc_picker_resolves_a_customer() {
-        // AUD-P2-13 (C9): the DNC customer picker — search resolves the
-        // person, the pick lands the right row, empty states stay honest.
         let db = fixture(Vec::new());
         let mut page = OutreachPage::new();
 
-        // the search resolves Kim Pearce by name
         page.dnc_query = "Kim".into();
         page.refresh_dnc_results(&db);
         assert_eq!(page.dnc_results.len(), 1, "one customer matches 'Kim'");
@@ -1826,12 +1685,10 @@ mod tests {
         assert!(label.contains("Kim Pearce"), "{label}");
         assert!(label.contains("kim@example.com"), "{label}");
 
-        // no match is honest
         page.dnc_query = "zzz-no-match".into();
         page.refresh_dnc_results(&db);
         assert!(page.dnc_results.is_empty(), "no customers match");
 
-        // picking then adding lands the right customer
         page.new_dnc_pick = Some(9);
         page.new_dnc_reason = "asked politely".into();
         page.add_dnc(&db);

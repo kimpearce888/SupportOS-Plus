@@ -106,33 +106,17 @@ pub(crate) fn filters_from_bar(
     filters
 }
 
-/// AUD-V3: named inbox geometry — the single source of truth for the
-/// four-column composition and its fold behavior, shared with the
-/// kittest geometry suite (kittest_inbox_geometry) so the invariants and
-/// the layout read the SAME constants.
 pub mod inbox_geo {
-    /// Views rail width (folded below `RAIL_FOLD_W`).
     pub const RAIL_W: f32 = 168.0;
-    /// Docked copilot panel width.
     pub const COPILOT_W: f32 = 300.0;
-    /// The reader never renders below this width.
     pub const READER_FLOOR: f32 = 480.0;
-    /// Below this total width the views rail folds into the list.
     pub const RAIL_FOLD_W: f32 = 900.0;
-    /// Conversation list proportional share, clamped.
     pub const LIST_SHARE: f32 = 0.30;
-    /// Conversation list clamp range.
     pub const LIST_MIN_W: f32 = 280.0;
-    /// Composer panel height bounds (measurement-based, capped).
     pub const COMPOSER_MIN_H: f32 = 120.0;
-    /// Conversation list upper clamp (proportional default).
     pub const LIST_MAX_W: f32 = 560.0;
-    /// Conversation list proportional clamp (default size).
     pub const LIST_RESIZE_MAX_W: f32 = 520.0;
-    /// Composer panel default height (first frame fallback).
     pub const COMPOSER_DEFAULT_H: f32 = 348.0;
-    /// Panel inner insets (the geometry suite restores true panel edges
-    /// from the recorded inner-ui rects with these).
     pub const COPILOT_INSET: f32 = 12.0;
     pub const COMPOSER_TOP_INSET: f32 = 8.0;
     pub const COMPOSER_X_INSET: f32 = 24.0;
@@ -281,7 +265,6 @@ pub struct InboxPage {
     directory: Directory,
     status: Option<String>,
     assign_pick: Option<i64>,
-    /// AUD-P1-4 (C5): the tag editor's input on the action card.
     tag_edit: String,
     detail_error: Option<String>,
     outbound_note: Option<(String, bool)>,
@@ -289,15 +272,7 @@ pub struct InboxPage {
     status_is_error: bool,
     status_message_at: Option<std::time::Instant>,
     copilot_open: bool,
-    /// UXE-1-7: measured height of the composer card from the last frame
-    /// — drives the composer bottom panel's EXACT height. The old
-    /// auto-sized panel converged to a sliver and clipped the composer
-    /// at the window bottom (the owner's screenshot report; the defect
-    /// is present in the pre-batch goldens).
     composer_panel_h: Option<f32>,
-    /// AUD-V2: live panel rects, recorded each frame — the geometry
-    /// invariant suite (kittest_inbox_geometry) asserts the composition
-    /// contracts on every monitor class from these measured values.
     pub(crate) panel_rail_rect: Option<egui::Rect>,
     pub(crate) panel_list_rect: Option<egui::Rect>,
     pub(crate) panel_copilot_rect: Option<egui::Rect>,
@@ -506,8 +481,6 @@ impl InboxPage {
                 self.detail_error = None;
             }
             Some(Ok(None)) => {
-                // AU2-6: terminal state — the conversation row is gone (deleted).
-                // Keeping `selected` here would re-query every frame forever.
                 self.detail = None;
                 self.detail_error = None;
                 self.selected = None;
@@ -515,9 +488,6 @@ impl InboxPage {
                 self.set_status_message("Conversation not found — it may have been deleted.", true);
             }
             Some(Err(e)) => {
-                // AU2-6: keep the error sticky (with the ensure_loaded gate) so a
-                // persistent read failure cannot spin the query every frame; the
-                // user retries by clicking the conversation again.
                 self.detail = None;
                 self.detail_error = Some(e.to_string());
             }
@@ -785,9 +755,6 @@ impl InboxPage {
         self.status_message = None;
         self.status_message_at = None;
         self.pending_ai = None;
-        // AU2-4: the body was replaced from the stash (or cleared) — the caret
-        // captured for @-mentions pointed into the previous draft and must not
-        // survive the switch (stale byte offsets can land mid-char → panic).
         self.mention_caret = 0;
         self.mention_active = 0;
         self.coaching_review = None;
@@ -931,11 +898,6 @@ impl InboxPage {
         outcome
     }
 
-    // AUD-P0-10 (A3): the local priority edit control's write path. Priority
-    // is a SupportOS-local concept — the write goes through the existing
-    // ticket-op (supportos_priority + a ticket_state_transitions record) and
-    // is NOT pushed to Help Scout, so unlike status/assign there is no
-    // outbound job after the local half.
     pub(crate) fn set_priority(
         &mut self,
         db: &DbHandle,
@@ -972,12 +934,6 @@ impl InboxPage {
         outcome
     }
 
-    // AUD-P2-19 (B4): the workflow-state write path — the local lane the
-    // Priority control above uses, now for `TicketOperation::SetTicketState`
-    // (supportos_state + supportos_state_id + the transitions audit row;
-    // deliberately no outbound job — the state is a SupportOS-local
-    // concept feeding the reports CustomState dimension and the AI
-    // metadata tool, exactly like priority).
     pub(crate) fn set_workflow_state(
         &mut self,
         db: &DbHandle,
@@ -1014,10 +970,6 @@ impl InboxPage {
         outcome
     }
 
-    // AUD-P1-4 (C5): the tag edit write path — the same lane automation's
-    // add_tag uses (local mirror write + the idempotency-keyed "update_tags"
-    // outbound job), opened up to the full list replace the provider API
-    // models (add + remove + clear).
     pub(crate) fn set_tags(
         &mut self,
         db: &DbHandle,
@@ -1055,9 +1007,6 @@ impl InboxPage {
         outcome
     }
 
-    // AUD-P1-4 (C5): the snooze write path — local column (the mirror's
-    // snoozed_until) + the new "snooze"/"unsnooze" outbound jobs. Presets
-    // keep it one click; the provider gets the exact timestamp.
     pub(crate) fn snooze(
         &mut self,
         db: &DbHandle,
@@ -1192,18 +1141,7 @@ impl InboxPage {
 
         let detail = self.detail.clone();
 
-        // AUD-L1 (register L1, the owner's complaint): the composition is
-        // now an explicit T — the composer strip is allocated BEFORE the
-        // copilot right panel, so it spans the full reader+copilot zone
-        // and BOTH columns end at its top edge. The old order allocated
-        // the copilot first (full window height) and the composer after
-        // (confined to the reader column), so the sidebar column ran
-        // beneath/beside the reply strip — the exact defect the owner
-        // photographed. Panel geometry is named constants (AUD-V3), not
-        // scattered magic numbers, and every inset is a scale token
-        // (AUD-V2): SP5 horizontal page inset, SP3 column insets.
         let avail = ui.available_width();
-        // AUD-V3: geometry constants live in `inbox_geo` at file scope.
         let rail_fits = avail >= inbox_geo::RAIL_FOLD_W;
         let mut rail_w = if rail_fits { inbox_geo::RAIL_W } else { 0.0 };
         let list_est = ((avail - rail_w) * inbox_geo::LIST_SHARE)
@@ -1217,11 +1155,6 @@ impl InboxPage {
             }
         }
 
-        // AUD-V2: rect instrumentation for the geometry invariants —
-        // every panel records its exact rect each frame; the kittest
-        // geometry suite asserts the composition contracts (no sibling
-        // panel intersections, copilot ends at the composer's top, the
-        // reader floor holds) at every monitor class.
         self.panel_rail_rect = None;
         self.panel_list_rect = None;
         self.panel_copilot_rect = None;
@@ -1247,8 +1180,6 @@ impl InboxPage {
                 });
         }
         egui::Panel::left("inbox-list")
-            // UX-8: the conversation list is proportional to the window
-            // and user-resizable; the floor keeps small displays a reader.
             .default_size(
                 (avail - rail_w)
                     .mul_add(inbox_geo::LIST_SHARE, 0.0)
@@ -1267,18 +1198,10 @@ impl InboxPage {
                 self.panel_list_rect = Some(ui.max_rect());
                 self.list_ui(ui, db, engine, rail_w == 0.0);
             });
-        // The reader hosts whatever remains; the copilot docks beside it
-        // only when the reader keeps its floor.
         let remaining = ui.available_width();
         let copilot_docked =
             self.copilot_open && remaining >= inbox_geo::COPILOT_W + inbox_geo::READER_FLOOR;
 
-        // AUD-L1 step 2: the composer is allocated BEFORE the copilot
-        // panel — in egui each panel splits the remaining rect in show
-        // order, so the bottom strip spans the reader+copilot zone and
-        // the right panel (shown next) ends exactly at its top edge.
-        // The composer is only meaningful with the reader in view — in
-        // copilot narrow mode it steps aside with the reader.
         if detail.is_some() && !(self.copilot_open && !copilot_docked) {
             let composer_h = self
                 .composer_panel_h
@@ -1309,10 +1232,6 @@ impl InboxPage {
                             .max_height(max_h)
                             .auto_shrink([false, true])
                             .show(ui, |ui| {
-                                // The composer card rides the same reading
-                                // measure as the thread above it — on
-                                // 2K/4K/8K panes both hold and center on
-                                // the same edges.
                                 design::centered_column(ui, design::scale::READER_MEASURE, |ui| {
                                     self.composer_pane_ui(ui, db, bus, &d);
                                 });
@@ -1352,18 +1271,8 @@ impl InboxPage {
             .show(ui, |ui| {
                 self.panel_reader_rect = Some(ui.max_rect());
                 if self.copilot_open && !copilot_docked {
-                    // Narrow mode: the copilot swaps in over the reader —
-                    // never a crushed half-thread.
                     self.copilot_pane_ui(ui, db, detail.as_ref());
                 } else {
-                    // UXG-1-2: the reader content (head, action bar,
-                    // thread, triage/QA cards) holds at the reading
-                    // measure — full pane width up to 860px, a centered
-                    // reading column above it (the Gmail/Help Scout
-                    // wide-window register). Every existing ≤1440 state
-                    // sits under the cap and renders unchanged; 1920+
-                    // windows keep a readable thread instead of a wall
-                    // of text.
                     design::centered_column(ui, design::scale::READER_MEASURE, |ui| {
                         self.reader_ui(ui, db, bus, detail);
                     });
@@ -1372,8 +1281,6 @@ impl InboxPage {
     }
 
     fn views_rail_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
-        // UXE-1-2/5: one micro-label convention across the app — 11px
-        // muted sentence case, same as the sidebar groups.
         ui.label(
             egui::RichText::new("Views")
                 .size(design::scale::text::META)
@@ -1403,8 +1310,6 @@ impl InboxPage {
     ) {
         let t = design::tokens(ui);
         if folded {
-            // UXE-1-4: the views rail folded — the views ride along as
-            // chips above the list header.
             let counts = self.view_counts;
             ui.horizontal_wrapped(|ui| {
                 for (count, view) in counts.into_iter().zip(ViewFilter::ALL) {
@@ -1442,11 +1347,6 @@ impl InboxPage {
             |ui| {
                 ui.horizontal_wrapped(|ui| {
                     let mut search = self.search_edit.clone();
-                    // UX-27/UXE-1-5: the search input reserves the `#`
-                    // input's and the Apply button's width so the primary
-                    // row composes on ONE line at every legal list width
-                    // (280px floor); the optional selects wrap below as
-                    // whole controls.
                     const NUMBER_W: f32 = 56.0;
                     const APPLY_W: f32 = 82.0;
                     let row_rest = NUMBER_W + APPLY_W + 2.0 * 8.0;
@@ -1474,8 +1374,6 @@ impl InboxPage {
                         apply_entered = true;
                     }
                     if self.show_filters {
-                        // UXE-1-3/5: the native comboboxes are now styled
-                        // selects on the 32px control height.
                         let mailbox_selected = self
                             .mailbox_pick
                             .and_then(|id| {
@@ -1528,9 +1426,6 @@ impl InboxPage {
         );
 
         ui.horizontal(|ui| {
-            // AUD-S3: two coherent clusters — the filter pair (Filters /
-            // Reset) reads as ONE left group instead of a lone label
-            // mid-row; the sync action owns the right edge.
             if design::button(
                 ui,
                 if self.show_filters {
@@ -1658,13 +1553,6 @@ impl InboxPage {
                                     },
                                 );
                             });
-                            // AUD-H1: the subject is the PRIMARY line —
-                            // CONTROL strong foreground — and the sender
-                            // line above it is quiet metadata (muted,
-                            // not strong). The old inversion (strong
-                            // sender, weak subject) made every row read
-                            // at one flat weight: the owner's
-                            // "unprofessional inbox".
                             ui.add_space(design::scale::space::SP1);
                             ui.add(
                                 egui::Label::new(
@@ -1693,9 +1581,6 @@ impl InboxPage {
                             });
                         })
                         .response;
-                    // UXE-1-5: selected rows carry a 3px accent bar on the
-                    // left edge — the selected conversation is findable at
-                    // a glance, not just by a faint fill.
                     if selected {
                         let r = response.rect;
                         ui.painter().rect_filled(
@@ -1814,10 +1699,6 @@ impl InboxPage {
                 }
                 self.thread_ui(ui, &detail);
                 ui.add_space(design::scale::space::SP2);
-                // AUD-P2-19 (B4): the transition history — the local audit
-                // trail ticket_state_transitions records for this
-                // conversation (workflow-state and priority moves), which
-                // existed in core but was never surfaced anywhere.
                 self.state_history_ui(ui, db, &detail);
                 if let Some(qa) = self.qa_review.clone() {
                     self.qa_card_ui(ui, db, &qa, detail.id);
@@ -1853,10 +1734,6 @@ impl InboxPage {
             detail.priority.as_deref().unwrap_or("none"),
         );
         let t = design::tokens(ui);
-        // AUD-S6: no avatar in the reader head — the subject block and
-        // the cards below it share the column's left edge (the old avatar
-        // row pushed the title off the grid); customer identity rides
-        // the meta line, the HelpScout register.
         let head = egui::containers::Sides::new().shrink_left().show(
             ui,
             |ui| {
@@ -1920,14 +1797,7 @@ impl InboxPage {
         bus: &EventBus,
         detail: &ConversationDetail,
     ) {
-        // AUD-S2/S8/H2: the properties card is one titled, rhythm-locked
-        // form — a 64px label column shared by every row (controls start
-        // on ONE left edge, not staggered by label width), SP2 between
-        // rows, and a titled header instead of eight bare lowercase
-        // segmented rows that read as a debug panel.
         design::card_titled(ui, "Conversation", None, |ui| {
-            // UXE-1-6: the toolbar is explicit rows — deterministic at
-            // every width, and each label stays adjacent to its control.
             fn row_label(ui: &mut egui::Ui, text: &str) {
                 ui.allocate_ui(egui::vec2(64.0, 28.0), |ui| {
                     ui.vertical(|ui| {
@@ -1975,18 +1845,12 @@ impl InboxPage {
                 }
             });
             ui.add_space(design::scale::space::SP2);
-            // AUD-P0-10 (A3): the priority edit control — the local
-            // (SupportOS) priority, written through ticket_ops and recorded
-            // in ticket_state_transitions. No segment is highlighted while
-            // the priority is unset (the reader header shows "Priority:
-            // none"); it is not pushed to Help Scout.
             ui.horizontal(|ui| {
                 row_label(ui, "Priority");
                 let priorities = ["low", "normal", "high", "urgent"];
                 let active_idx = priorities
                     .iter()
                     .position(|p| Some(*p) == detail.priority.as_deref())
-                    // usize::MAX matches no segment — honest "nothing set".
                     .unwrap_or(usize::MAX);
                 if let Some(i) = design::segmented(ui, "inbox-priority", &priorities, active_idx)
                     && detail.priority.as_deref() != Some(priorities[i])
@@ -1995,14 +1859,6 @@ impl InboxPage {
                 }
             });
             ui.add_space(design::scale::space::SP2);
-            // AUD-P2-19 (B4): the local workflow state control — the six
-            // built-in states of `ticket_states`, written through the
-            // existing `TicketOperation::SetTicketState` lane (supportos_state
-            // + supportos_state_id + a ticket_state_transitions audit row;
-            // no outbound push — it is a SupportOS-local concept). No
-            // segment is highlighted while unset, the same honesty as the
-            // Priority row above. Pre-fix the operation existed in core
-            // with no caller anywhere — built, never reachable.
             ui.horizontal(|ui| {
                 row_label(ui, "State");
                 let states = spp_core::ticket_states::TICKET_WORKFLOW_STATES;
@@ -2017,10 +1873,6 @@ impl InboxPage {
                 }
             });
             ui.add_space(design::scale::space::SP2);
-            // AUD-P1-4 (C5): the tag editor — current tags are removable
-            // chips, new tags land in the same full-list replace the
-            // provider models (local mirror write + the "update_tags"
-            // outbound lane automation already uses).
             ui.horizontal(|ui| {
                 row_label(ui, "Tags");
                 for tag in &detail.tags {
@@ -2062,9 +1914,6 @@ impl InboxPage {
                 }
             });
             ui.add_space(design::scale::space::SP2);
-            // AUD-P1-4 (C5): the snooze control — core had the provider
-            // calls and the local column; the presets ride the new
-            // "snooze"/"unsnooze" outbound jobs.
             ui.horizontal(|ui| {
                 row_label(ui, "Snooze");
                 if let Some(until) = detail.snoozed_until.as_deref() {
@@ -2097,8 +1946,6 @@ impl InboxPage {
                     }
                 }
             });
-            // AUD-S2: a bottom inset — the last row never sits flush
-            // against the card's bottom border.
             ui.add_space(design::scale::space::SP2);
             self.expire_status_message();
             if let Some(msg) = &self.status_message {
@@ -2213,11 +2060,6 @@ impl InboxPage {
         db: &DbHandle,
         detail: Option<&ConversationDetail>,
     ) {
-        // AUD-L2/S4: one header row — icon + title left, close right —
-        // and the "local" nature as ONE quiet caption line under it. The
-        // old header packed the title, a Local badge, and the X button
-        // into a single row that collided at panel widths; the nature is
-        // no longer stated twice (badge + caption).
         ui.horizontal(|ui| {
             Icon::Sparkles.show(ui, 14.0, design::tokens(ui).ai);
             ui.label(
@@ -2257,9 +2099,6 @@ impl InboxPage {
                 let a = &report.analysis;
 
                 design::card_titled(ui, "Signals", None, |ui| {
-                    // AUD-S5: sentiment lives in the READER's triage row —
-                    // one placement per fact; this card keeps intent,
-                    // urgency, and escalation risk.
                     ui.horizontal_wrapped(|ui| {
                         design::badge(ui, &a.intent, design::BadgeTone::Info);
                         let urgency_tone = match a.urgency.as_str() {
@@ -2401,16 +2240,11 @@ impl InboxPage {
                     self.composer_mode = ComposerMode::Reply;
                     self.inserted_draft = None;
                     self.composer_body = report.suggested_reply.clone();
-                    // AU2-4: out-of-band body replacement — stale mention caret.
                     self.mention_caret = 0;
                     self.mention_active = 0;
                     self.draft_saved = false;
                 }
                 ui.add_space(design::scale::space::SP2);
-                // AIE-1-3: the LM Studio reply-draft trigger. The job reads
-                // the full thread, the knowledge base, the help center and
-                // similar resolutions, then writes a verified draft into the
-                // card below — review + Insert before anything is sent.
                 let lmstudio_ok = db.with_read(spp_core::ai_local::generative_backend_available);
                 if lmstudio_ok {
                     let drafting = self
@@ -2461,7 +2295,6 @@ impl InboxPage {
                             self.composer_mode = ComposerMode::Reply;
                             self.inserted_draft = Some((draft_id, draft.clone()));
                             self.composer_body = draft.clone();
-                            // AU2-4: out-of-band body replacement — stale mention caret.
                             self.mention_caret = 0;
                             self.mention_active = 0;
                             self.draft_saved = false;
@@ -2620,7 +2453,6 @@ impl InboxPage {
         {
             self.inserted_draft = Some((draft_id, draft.clone()));
             self.composer_body = draft;
-            // AU2-4: out-of-band body replacement — stale mention caret.
             self.mention_caret = 0;
             self.mention_active = 0;
             self.set_status_message("Latest AI draft inserted — review before sending.", false);
@@ -2631,7 +2463,6 @@ impl InboxPage {
             }
             self.inserted_draft = None;
             self.composer_body = text;
-            // AU2-4: out-of-band body replacement — stale mention caret.
             self.mention_caret = 0;
             self.mention_active = 0;
             self.set_status_message("Suggested reply inserted — review before sending.", false);
@@ -2703,7 +2534,6 @@ impl InboxPage {
                         match result {
                             Some(text) if !text.trim().is_empty() => {
                                 self.composer_body = text;
-                                // AU2-4: out-of-band body replacement — stale mention caret.
                                 self.mention_caret = 0;
                                 self.mention_active = 0;
                                 self.set_status_message(
@@ -2736,8 +2566,6 @@ impl InboxPage {
                         });
                         self.set_status_message("Post-resolution QA AI review finished.", false);
                     }
-                    // AIE-1-3: the draft card below reads the fresh row on
-                    // the next frame — announce it so the reviewer knows.
                     "generate_draft" => {
                         self.set_status_message(
                             "LM Studio draft ready — review the draft card, then Insert into \
@@ -2822,9 +2650,6 @@ impl InboxPage {
         for entry in &detail.thread {
             let day: String = entry.created_at.chars().take(10).collect();
             if last_day.as_deref() != Some(day.as_str()) {
-                // VF-2 (H5): the day separator breathes — SP2 above and
-                // below keeps the muted pill from competing with the
-                // message cards it separates.
                 ui.add_space(design::scale::space::SP2);
                 design::day_divider(ui, &day);
                 ui.add_space(design::scale::space::SP2);
@@ -2881,10 +2706,6 @@ impl InboxPage {
             .map(|(name, _)| name.clone())
             .collect();
 
-        // UXE-1-7: the recipient and AI-tool rows render inside the
-        // composer card through closures; tool clicks are collected into
-        // `tool` and applied after the composer returns (the closures
-        // cannot borrow `self`).
         let mut cc = self.composer_cc.clone();
         let mut bcc = self.composer_bcc.clone();
         let mut translate_lang = self.translate_lang.clone();
@@ -2925,9 +2746,6 @@ impl InboxPage {
             &mut state,
             &saved_reply_names,
             |ui| {
-                // UX-27/UXE-1-7: recipients before the body (the mail
-                // layout) — To is static (replies go to the customer),
-                // Cc/Bcc are compact inputs on aligned label columns.
                 if reply_mode {
                     recipient_row_static(ui, "To", &to_who);
                     recipient_row_input(ui, "Cc", &mut cc);
@@ -2936,9 +2754,6 @@ impl InboxPage {
                 }
             },
             |ui| {
-                // UXE-1-7: AI tools live under the body — Review is always
-                // available with a draft; rewrite/translate need a routed
-                // Draft model.
                 if !busy && !body_empty {
                     if design::chip_with_icon(ui, false, Icon::Sparkles, "Review Draft")
                         .on_hover_text(
@@ -2991,9 +2806,6 @@ impl InboxPage {
         self.composer_bcc = bcc;
         self.translate_lang = translate_lang;
         self.composer_focused = state.focused;
-        // AUD-V2: the measured card height plus the panel's vertical
-        // frame margins (SP2 top + SP2 bottom) feeds the next frame's
-        // exact panel height — token-derived, not a magic 18.
         self.composer_panel_h = Some(ui.min_rect().height() + 2.0 * design::scale::space::SP2);
         if let Some(caret) = state.caret {
             self.mention_caret = char_index_to_byte(&state.draft, caret);
@@ -3051,7 +2863,6 @@ impl InboxPage {
                 if let Some((_, text)) = self.saved_replies.get(index) {
                     let text = text.clone();
                     self.composer_edited(text);
-                    // AU2-4: out-of-band body replacement — stale mention caret.
                     self.mention_caret = 0;
                     self.mention_active = 0;
                     self.draft_saved = true;
@@ -3084,8 +2895,6 @@ impl InboxPage {
                                 let completed =
                                     apply_completion(&body, start, token, self.mention_caret);
                                 self.composer_body = completed;
-                                // AU2-4: the @-token was consumed — drop the caret
-                                // so the popup closes and no stale offset survives.
                                 self.mention_caret = 0;
                                 self.mention_active = 0;
                             }
@@ -3102,8 +2911,6 @@ impl InboxPage {
                 {
                     let completed = apply_completion(&body, start, token, self.mention_caret);
                     self.composer_body = completed;
-                    // AU2-4: the @-token was consumed — drop the caret
-                    // so the popup closes and no stale offset survives.
                     self.mention_caret = 0;
                     self.mention_active = 0;
                 }
@@ -3200,12 +3007,6 @@ impl InboxPage {
         );
     }
 
-    // AUD-P2-19 (B4): the transition-history card — the audit trail
-    // `ticket_state_transitions` keeps for this conversation (workflow
-    // state and priority moves with actor + timestamp), read through the
-    // new `ticket_states::list_state_transitions`. Hidden when empty so
-    // conversations that never used the local state/priority lanes stay
-    // clean.
     fn state_history_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle, detail: &ConversationDetail) {
         let rows = db.with_read(|conn| {
             spp_core::ticket_states::list_state_transitions(conn, detail.remote_id, 20)
@@ -3356,9 +3157,6 @@ impl InboxPage {
     }
 }
 
-/// AUD-V2: the measured composition of the last frame — the geometry
-/// suite (kittest_inbox_page::aud_geo_*) reads these live rects to
-/// assert the inbox composition contracts on every monitor class.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct InboxPanelGeometry {
     pub rail: Option<egui::Rect>,
@@ -3369,7 +3167,6 @@ pub struct InboxPanelGeometry {
 }
 
 impl InboxPage {
-    /// The exact rects the five inbox panels occupied on the last frame.
     pub fn panel_geometry(&self) -> InboxPanelGeometry {
         InboxPanelGeometry {
             rail: self.panel_rail_rect,
@@ -3396,10 +3193,6 @@ fn truncate_chars(s: &str, max: usize) -> String {
     }
 }
 
-/// UXE-1-7/AUD-S1: composer recipient rows — one fixed label column
-/// and ONE field treatment: every row is a bordered 28px field on the
-/// same left grid (the static To row renders as a read-only field, not
-/// a floating label — three rows, three treatments was the defect).
 fn recipient_label(ui: &mut egui::Ui, text: &str) {
     ui.vertical(|ui| {
         ui.set_min_width(34.0);
@@ -4416,10 +4209,6 @@ mod audp0_tests {
     use super::*;
     use crate::testsupport::fixture;
 
-    // AUD-P0-10 (A3): the priority control writes the local priority through
-    // the real ticket-op path (supportos_priority + a transition record) and
-    // — unlike status/assign — queues no outbound job, because priority is a
-    // SupportOS-local concept.
     #[test]
     fn set_priority_writes_the_local_priority_without_an_outbound_job() {
         let db = fixture(vec![(
@@ -4466,14 +4255,11 @@ mod audp0_tests {
             assert_eq!(outbound, 0, "a local priority is not pushed to Help Scout");
         });
 
-        // The reloaded detail carries the new priority — the control and the
-        // reader header now reflect the same live column.
         assert_eq!(
             page.detail.as_ref().and_then(|d| d.priority.clone()),
             Some("urgent".to_string())
         );
 
-        // A junk priority never reaches the write path.
         let rejected = page.set_priority(&db, &bus, "mega-critical");
         assert!(
             matches!(rejected, ActionOutcome::Rejected(_)),
@@ -4481,8 +4267,6 @@ mod audp0_tests {
         );
     }
 
-    // AUD-P2-19 (B4): the workflow-state control's write path — the
-    // SetTicketState operation that existed in core with no caller.
     #[test]
     fn audp219_set_workflow_state_writes_state_id_and_transition_without_an_outbound_job() {
         let db = fixture(vec![(
@@ -4523,8 +4307,6 @@ mod audp0_tests {
                 .expect("conversation");
             assert_eq!(state, "investigating");
             assert_eq!(transitions, 1, "the state transition is recorded");
-            // The id linkage the reports CustomState dimension and the AI
-            // metadata tool read — the chain nothing ever populated.
             let resolved: i64 = conn
                 .query_row(
                     "SELECT id FROM ticket_states WHERE key = 'investigating'",
@@ -4542,21 +4324,17 @@ mod audp0_tests {
             );
         });
 
-        // The reloaded detail carries the new state — the State control
-        // reflects the live column.
         assert_eq!(
             page.detail.as_ref().and_then(|d| d.workflow_state.clone()),
             Some("investigating".to_string())
         );
 
-        // A junk state never reaches the write path.
         let rejected = page.set_workflow_state(&db, &bus, "investigating-typo");
         assert!(
             matches!(rejected, ActionOutcome::Rejected(_)),
             "unknown workflow states are rejected, not invented: {rejected:?}"
         );
     }
-    // ---- AUD-P1-4 (C5): tags + snooze write paths ----
 
     #[test]
     fn audp14_set_tags_writes_the_mirror_and_queues_the_update_tags_job() {
@@ -4579,7 +4357,6 @@ mod audp0_tests {
                 .expect("conversation 1 exists"),
         );
 
-        // add two tags
         let outcome = page.set_tags(&db, &bus, vec!["vip".into(), "billing".into()]);
         assert!(
             matches!(outcome, ActionOutcome::Success(_)),
@@ -4605,12 +4382,10 @@ mod audp0_tests {
             );
         });
 
-        // the reloaded detail carries the tags (the dead field is live)
         let mut reloaded = page.detail.clone().expect("detail").tags;
         reloaded.sort();
         assert_eq!(reloaded, vec!["billing".to_string(), "vip".to_string()]);
 
-        // remove one — the job carries the remaining list
         let outcome = page.set_tags(&db, &bus, vec!["billing".into()]);
         assert!(matches!(outcome, ActionOutcome::Success(_)));
         db.with_read(|conn| {
@@ -4618,7 +4393,6 @@ mod audp0_tests {
             assert_eq!(tags, vec!["billing".to_string()]);
         });
 
-        // clearing all tags is a legitimate full replace
         let outcome = page.set_tags(&db, &bus, Vec::new());
         assert!(matches!(outcome, ActionOutcome::Success(_)));
         db.with_read(|conn| {

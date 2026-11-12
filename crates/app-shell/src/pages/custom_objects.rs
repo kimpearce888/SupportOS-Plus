@@ -6,11 +6,8 @@ use super::{ConfirmRequest, NavRequest, i64_field, opt_str_field, str_field};
 use crate::design::{self, ButtonVariant};
 use crate::icons::Icon;
 
-/// AUD-P2-11 (C3): objects page size — 50 per page (the core list caps at
-/// 200; 50 matches the customers list and keeps the cards readable).
 const OBJECTS_PAGE_SIZE: i64 = 50;
 
-/// UX-16: "3 types" / "1 type" — proper pluralization for the page counts.
 fn count_noun(count: i64, noun: &str) -> String {
     if count == 1 {
         format!("1 {noun}")
@@ -50,10 +47,6 @@ impl FieldType {
         }
     }
 
-    /// AUD-P2-11 (C3): map a stored field type back into the builder's
-    /// vocabulary (edit prefill). Legacy "checkbox" normalizes to its
-    /// canonical boolean twin — the core validates both identically — so
-    /// the builder only ever speaks the six canonical kinds.
     fn parse(field_type: &str) -> Self {
         match field_type {
             "long_text" => Self::LongText,
@@ -111,8 +104,6 @@ impl FieldDraft {
     }
 }
 
-/// AUD-P2-11 (C3): per-object add-link mini form state (target kind + row
-/// id + optional note) — the card-level lane that finally lets a link exist.
 #[derive(Debug, Clone)]
 struct LinkDraft {
     kind: String,
@@ -137,30 +128,21 @@ pub struct CustomObjectsPage {
     objects: Vec<serde_json::Value>,
     objects_loaded: bool,
     objects_total: i64,
-    // AUD-P2-11 (C3): real pagination — the "showing first N of M — the
-    // list has no pager" hint is gone.
     objects_page: i32,
     object_query: String,
-    // AUD-P2-11 (C3): links per object (labels already resolved by the
-    // core), loaded with the object list — one read per reload, not per frame.
     object_links: std::collections::HashMap<i64, Vec<serde_json::Value>>,
-    // AUD-P2-11 (C3): add-link mini form state per object card.
     link_drafts: std::collections::HashMap<i64, LinkDraft>,
     report: Option<serde_json::Value>,
     show_new_type: bool,
-    // AUD-P2-11 (C3): the type builder doubles as the edit form.
     edit_type_id: Option<i64>,
     new_type_name: String,
     new_type_description: String,
     new_fields: Vec<FieldDraft>,
     new_object_title: String,
     new_object_fields: Vec<(String, String)>,
-    // AUD-P2-11 (C3): the new-object form's link row — create_object used
-    // to pass a hard-coded `Vec::new()` while the header advertised "N links".
     new_object_link_kind: String,
     new_object_link_id: String,
     new_object_link_note: String,
-    // AUD-P2-11 (C3): the object form doubles as the edit form.
     edit_object_id: Option<i64>,
     error: Option<String>,
 }
@@ -207,7 +189,6 @@ impl CustomObjectsPage {
         self.objects.clear();
         self.objects_loaded = false;
         self.report = None;
-        // AUD-P2-11 (C3): the pager and the link caches reset with the rest.
         self.objects_page = 0;
         self.object_links.clear();
         self.link_drafts.clear();
@@ -226,8 +207,6 @@ impl CustomObjectsPage {
                     self.objects.clear();
                     self.objects_loaded = false;
                     self.new_object_fields.clear();
-                    // AUD-P2-11 (C3): the selected type vanished — the
-                    // in-progress object edit and link state go with it.
                     self.cancel_object_edit();
                     self.object_links.clear();
                     self.link_drafts.clear();
@@ -244,7 +223,6 @@ impl CustomObjectsPage {
             return;
         };
         let query = self.object_query.trim().to_string();
-        // AUD-P2-11 (C3): the pager's page feeds the offset — page * 50.
         let offset =
             u32::try_from(i64::from(self.objects_page.max(0)) * OBJECTS_PAGE_SIZE).unwrap_or(0);
         let result = db.with_read(|conn| -> spp_core::Result<_> {
@@ -259,8 +237,6 @@ impl CustomObjectsPage {
                 u32::try_from(OBJECTS_PAGE_SIZE).unwrap_or(50),
                 offset,
             )?;
-            // AUD-P2-11 (C3): the objects' links ride along (labels already
-            // resolved by the core) so the cards never query per frame.
             let mut links = std::collections::HashMap::new();
             for object in &objects {
                 let id = i64_field(object, "id");
@@ -271,9 +247,6 @@ impl CustomObjectsPage {
         match result {
             Ok((objects, total, links)) => {
                 if objects.is_empty() && self.objects_page > 0 && total > 0 {
-                    // AUD-P2-11 (C3): a page past the end (the last object
-                    // on the last page was deleted, say) falls back to the
-                    // last page instead of showing an empty list.
                     let last = ((total + OBJECTS_PAGE_SIZE - 1) / OBJECTS_PAGE_SIZE - 1).max(0);
                     self.objects_page = i32::try_from(last).unwrap_or(0);
                     return self.reload_objects(db);
@@ -281,7 +254,6 @@ impl CustomObjectsPage {
                 self.objects = objects;
                 self.objects_total = total;
                 self.object_links = links;
-                // keep only the mini-form drafts of the objects on screen
                 self.link_drafts
                     .retain(|id, _| self.object_links.contains_key(id));
                 self.error = None;
@@ -304,16 +276,12 @@ impl CustomObjectsPage {
         self.selected_type = Some(id);
         self.objects.clear();
         self.objects_loaded = false;
-        // AUD-P2-11 (C3): a fresh type starts on page 1 — and any
-        // in-progress object edit belonged to the previous type.
         self.objects_page = 0;
         self.cancel_object_edit();
         self.reload_objects(db);
         self.rebuild_new_object_fields();
     }
 
-    /// AUD-P2-11 (C3): the object form's typed inputs track the selected
-    /// type's field set (also refreshed after a type edit changes it).
     fn rebuild_new_object_fields(&mut self) {
         if let Some(t) = self
             .selected_type
@@ -377,13 +345,10 @@ impl CustomObjectsPage {
                     self.objects.clear();
                     self.objects_loaded = false;
                     self.new_object_fields.clear();
-                    // AUD-P2-11 (C3): link state for the deleted type's
-                    // objects goes with them.
                     self.object_links.clear();
                     self.link_drafts.clear();
                     self.cancel_object_edit();
                 }
-                // AUD-P2-11 (C3): the deleted type cannot be saved anymore.
                 if self.edit_type_id == Some(id) {
                     self.edit_type_id = None;
                 }
@@ -406,9 +371,6 @@ impl CustomObjectsPage {
         let Some(properties) = self.collect_form_properties(type_id) else {
             return;
         };
-        // AUD-P2-11 (C3): the form's link row finally feeds real
-        // LinkInputs — `create_object` used to pass a hard-coded
-        // `Vec::new()` while the header counted and advertised "N links".
         let Some(links) = self.collect_form_links() else {
             return;
         };
@@ -429,9 +391,6 @@ impl CustomObjectsPage {
         }
     }
 
-    /// AUD-P2-11 (C3): the form's typed inputs → a property map (shared by
-    /// create and edit so both paths coerce identically). None + an error
-    /// in the slot when a value cannot coerce.
     fn collect_form_properties(
         &mut self,
         type_id: i64,
@@ -471,9 +430,6 @@ impl CustomObjectsPage {
         Some(properties)
     }
 
-    /// AUD-P2-11 (C3): the new-object form's link row → LinkInputs. An
-    /// empty target id means "no link at creation"; a non-numeric id is
-    /// refused before any write.
     fn collect_form_links(&mut self) -> Option<Vec<LinkInput>> {
         let raw = self.new_object_link_id.trim().to_string();
         if raw.is_empty() {
@@ -497,8 +453,6 @@ impl CustomObjectsPage {
         self.new_object_link_kind = spp_core::custom_objects::LINK_TARGET_KINDS[0].to_string();
     }
 
-    /// AUD-P2-11 (C3): prefill the object form from a stored row (the
-    /// connectors `start_edit` idiom, applied to objects).
     fn start_object_edit(&mut self, object: &serde_json::Value) {
         let Some(type_id) = self.selected_type else {
             return;
@@ -532,8 +486,6 @@ impl CustomObjectsPage {
             .unwrap_or_default();
     }
 
-    /// AUD-P2-11 (C3): save the object edit (title + properties, validated
-    /// by the core against the type's current fields).
     fn save_object_edit(&mut self, db: &DbHandle) {
         let Some(object_id) = self.edit_object_id else {
             return;
@@ -561,7 +513,6 @@ impl CustomObjectsPage {
         }
     }
 
-    /// AUD-P2-11 (C3): leave edit mode and hand the form back to "New object".
     fn cancel_object_edit(&mut self) {
         self.edit_object_id = None;
         self.new_object_title.clear();
@@ -570,7 +521,6 @@ impl CustomObjectsPage {
         }
     }
 
-    /// AUD-P2-11 (C3): attach a link from an object card's mini form.
     fn add_object_link(&mut self, db: &DbHandle, object_id: i64) {
         let Some(draft) = self.link_drafts.get(&object_id) else {
             return;
@@ -590,7 +540,6 @@ impl CustomObjectsPage {
             db.with_write(|conn| spp_core::custom_objects::add_link(conn, object_id, &link));
         match result {
             Ok(_) => {
-                // the card's form starts fresh for the next link
                 if let Some(draft) = self.link_drafts.get_mut(&object_id) {
                     draft.id.clear();
                     draft.note.clear();
@@ -602,7 +551,6 @@ impl CustomObjectsPage {
         }
     }
 
-    /// AUD-P2-11 (C3): remove a link (the removable chip on the card).
     fn remove_object_link(
         &mut self,
         db: &DbHandle,
@@ -620,8 +568,6 @@ impl CustomObjectsPage {
         self.reload_types(db);
     }
 
-    /// AUD-P2-11 (C3): prefill the type builder from an existing type (the
-    /// connectors `start_edit` idiom, applied to types).
     fn start_type_edit(&mut self, t: &TypeDetail) {
         self.edit_type_id = Some(t.id);
         self.show_new_type = true;
@@ -641,7 +587,6 @@ impl CustomObjectsPage {
             .collect();
     }
 
-    /// AUD-P2-11 (C3): leave type-edit mode with the form wiped.
     fn cancel_type_edit(&mut self) {
         self.edit_type_id = None;
         self.show_new_type = false;
@@ -657,9 +602,6 @@ impl CustomObjectsPage {
         }];
     }
 
-    /// AUD-P2-11 (C3): save the type edit — the core refuses to drop a
-    /// field still set on objects; that refusal lands in the error slot
-    /// verbatim so the user can fix the form instead of losing data.
     fn save_type_edit(&mut self, db: &DbHandle) {
         let Some(type_id) = self.edit_type_id else {
             return;
@@ -699,9 +641,6 @@ impl CustomObjectsPage {
                 self.cancel_type_edit();
                 self.reload_types(db);
                 if was_selected {
-                    // AUD-P2-11 (C3): the selected type's field set just
-                    // changed — rebuild the object form and drop any
-                    // in-progress object edit built on the old fields.
                     self.cancel_object_edit();
                     self.rebuild_new_object_fields();
                 }
@@ -715,9 +654,6 @@ impl CustomObjectsPage {
         if let Err(e) = &result {
             self.error = Some(e.to_string());
         }
-        // AUD-P2-11 (C3): the confirm flow can remove the object being
-        // edited — drop the stale edit state instead of saving into a
-        // deleted row.
         if self.edit_object_id == Some(id) {
             self.cancel_object_edit();
         }
@@ -734,8 +670,6 @@ impl CustomObjectsPage {
                 .get("types")
                 .and_then(|t| t.as_array())
                 .map_or(0, std::vec::Vec::len);
-            // UX-16: real pluralization — "0 type(s) · …" read as a debug
-            // string, and screen readers announce it letter by letter.
             let objects = i64_field(report, "total_objects");
             let links = i64_field(report, "total_links");
             format!(
@@ -768,8 +702,6 @@ impl CustomObjectsPage {
             let types = self.types.clone();
             let mut picked: Option<i64> = None;
             let mut deleted_type: Option<(i64, String)> = None;
-            // AUD-P2-11 (C3): types were create-only — Edit opens the
-            // builder prefilled.
             let mut edit_type: Option<TypeDetail> = None;
             egui::ScrollArea::vertical()
                 .id_salt("co-types")
@@ -798,19 +730,17 @@ impl CustomObjectsPage {
                             design::hint_text(ui, desc);
                         }
                     }
-                    if types.is_empty() {
-                        // UX-16: the empty state carries the "create a type"
-                        // action instead of only naming it in prose.
-                        if design::empty_state_cta(
+                    if types.is_empty()
+                        && design::empty_state_cta(
                             ui,
                             Icon::Boxes,
                             "No types yet",
                             "A type defines the fields your custom objects carry — \
                              create one to start storing objects.",
                             "New Type",
-                        ) {
-                            self.show_new_type = true;
-                        }
+                        )
+                    {
+                        self.show_new_type = true;
                     }
                 });
             if let Some(id) = picked {
@@ -834,8 +764,6 @@ impl CustomObjectsPage {
 
     fn objects_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) -> Option<NavRequest> {
         let Some(type_id) = self.selected_type else {
-            // UX-16: don't tell the user to "pick a type on the left" when
-            // no types exist — that instruction was impossible to follow.
             if self.types.is_empty() {
                 design::empty_state(
                     ui,
@@ -858,9 +786,6 @@ impl CustomObjectsPage {
             design::section_title(ui, &format!("{} objects", t.name));
             design::page_counter(ui, &self.objects_total.to_string());
         });
-        // AUD-P2-11 (C3): the self-admitted "the list has no pager" hint is
-        // gone — the honest range line stays, the pager below the list
-        // moves through it.
         let shown = self.objects.len() as i64;
         if self.objects_total > shown {
             let from = i64::from(self.objects_page.max(0)) * OBJECTS_PAGE_SIZE + 1;
@@ -889,7 +814,6 @@ impl CustomObjectsPage {
             "Search",
         );
         if apply.clicked() {
-            // AUD-P2-11 (C3): a new search restarts from page 1.
             self.objects_page = 0;
             self.reload_objects(db);
         }
@@ -897,9 +821,6 @@ impl CustomObjectsPage {
 
         let objects = self.objects.clone();
         let mut deleted: Option<(i64, String)> = None;
-        // AUD-P2-11 (C3): deferred card actions — collected while the
-        // widgets render, applied after (the page's existing borrow-safe
-        // pick/delete order).
         let mut edit_object: Option<serde_json::Value> = None;
         let mut link_object: Option<i64> = None;
         let mut unlink: Option<(i64, String, i64)> = None;
@@ -909,8 +830,6 @@ impl CustomObjectsPage {
                 let tokens = design::tokens(ui);
                 for object in &objects {
                     let object_id = i64_field(object, "id");
-                    // AUD-P2-11 (C3): per-card state cloned out so the
-                    // widgets edit locals and write back once, card-scoped.
                     let mut draft = self
                         .link_drafts
                         .get(&object_id)
@@ -956,9 +875,6 @@ impl CustomObjectsPage {
                                     });
                                 }
                             }
-                            // AUD-P2-11 (C3): the links row the header has
-                            // always counted — chips remove (the hover says
-                            // so), the mini form below adds.
                             ui.horizontal_wrapped(|ui| {
                                 design::field_label(ui, "Links:");
                                 if links.is_empty() {
@@ -987,9 +903,6 @@ impl CustomObjectsPage {
                                     }
                                 }
                             });
-                            // AUD-P2-11 (C3): the add-link mini form — kind
-                            // select over the core's LINK_TARGET_KINDS,
-                            // numeric target id, optional note.
                             ui.horizontal(|ui| {
                                 let selected_kind = draft.kind.clone();
                                 design::select(
@@ -1039,8 +952,6 @@ impl CustomObjectsPage {
                     );
                 }
             });
-        // AUD-P2-11 (C3): the pager the audit flagged — ‹ Prev / Next ›
-        // under the list, offset = page * 50 on reload_objects.
         let pages = u32::try_from(
             ((self.objects_total + OBJECTS_PAGE_SIZE - 1) / OBJECTS_PAGE_SIZE).max(1),
         )
@@ -1074,8 +985,6 @@ impl CustomObjectsPage {
         });
         ui.add_space(10.0);
 
-        // AUD-P2-11 (C3): the form doubles as the object edit form
-        // (connectors idiom) — shared labels switch, Cancel appears.
         let editing_object = self.edit_object_id.is_some();
         let keys: Vec<String> = self
             .new_object_fields
@@ -1111,9 +1020,6 @@ impl CustomObjectsPage {
                     .labelled_by(label.id);
                 }
                 if !editing_object {
-                    // AUD-P2-11 (C3): the link row that replaces the
-                    // hard-coded `Vec::new()` — one link can land at
-                    // creation time; more can be added on the card above.
                     ui.add_space(4.0);
                     ui.horizontal(|ui| {
                         design::field_label(ui, "Link to:");
@@ -1176,8 +1082,6 @@ impl CustomObjectsPage {
     }
 
     fn new_type_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
-        // AUD-P2-11 (C3): the builder doubles as the type edit form
-        // (connectors idiom) — shared labels switch, Cancel appears.
         let editing = self.edit_type_id.is_some();
         design::card(ui, |ui| {
             design::section_title(ui, if editing { "Edit Type" } else { "New Type" });
@@ -1340,9 +1244,6 @@ fn coerce_property_value(
     }
 }
 
-/// AUD-P2-11 (C3): a stored property value back into form text so an edit
-/// prefills exactly what was saved — numbers and booleans round-trip
-/// through `coerce_property_value`.
 fn property_to_form_string(value: &serde_json::Value) -> String {
     match value {
         serde_json::Value::String(s) => s.clone(),
@@ -1713,12 +1614,8 @@ mod tests {
         );
     }
 
-    // AUD-P2-11 (C3): the links lifecycle the page advertised but never
-    // had — add via the card's mini form, list with resolved labels,
-    // remove via the chip action.
     #[test]
     fn audp2_link_add_list_remove_round_trip() {
-        // fixture() seeds customers 9 (Kim Pearce) and 10 (Ada Customer).
         let db = fixture(Vec::new());
         let (type_id, _) = db.with_write(|conn| {
             spp_core::custom_objects::create_type(
@@ -1738,7 +1635,6 @@ mod tests {
         assert!(page.error.is_none(), "{:?}", page.error);
         let object_id = i64_field(&page.objects[0], "id");
 
-        // add through the card's mini form state
         {
             let draft = page.link_drafts.entry(object_id).or_default();
             draft.kind = "customer".into();
@@ -1752,15 +1648,12 @@ mod tests {
         assert_eq!(str_field(&links[0], "label"), "Kim Pearce");
         assert_eq!(str_field(&links[0], "target_kind"), "customer");
         assert_eq!(i64_field(&links[0], "target_local_id"), 9);
-        // the header's "N links" count picked it up
         assert_eq!(
             i64_field(page.report.as_ref().expect("report"), "total_links"),
             1
         );
-        // the card's form cleared after the successful add
         assert!(page.link_drafts[&object_id].id.is_empty());
 
-        // a non-numeric target id is refused before any write
         page.link_drafts.get_mut(&object_id).unwrap().id = "not-a-number".into();
         page.add_object_link(&db, object_id);
         assert!(
@@ -1772,7 +1665,6 @@ mod tests {
             page.error
         );
 
-        // a nonexistent target surfaces the core's validation error
         page.link_drafts.get_mut(&object_id).unwrap().id = "999".into();
         page.add_object_link(&db, object_id);
         let error = page.error.as_deref().unwrap_or_default().to_string();
@@ -1786,7 +1678,6 @@ mod tests {
             "no second link landed"
         );
 
-        // remove → gone, header count back to zero
         page.remove_object_link(&db, object_id, "customer", 9);
         assert!(page.error.is_none(), "{:?}", page.error);
         assert!(
@@ -1799,8 +1690,6 @@ mod tests {
         );
     }
 
-    // AUD-P2-11 (C3): the new-object form's link row — create_object used
-    // to pass a hard-coded `Vec::new()`.
     #[test]
     fn audp2_create_object_with_link_from_the_form() {
         let db = fixture(Vec::new());
@@ -1827,10 +1716,8 @@ mod tests {
         let links = page.object_links.get(&object_id).expect("creation link");
         assert_eq!(links.len(), 1);
         assert_eq!(str_field(&links[0], "label"), "Kim Pearce");
-        // the form cleared after the create
         assert!(page.new_object_link_id.is_empty());
 
-        // a garbage target id stops the create before any write
         page.new_object_title = "Never lands".into();
         page.new_object_link_id = "nine".into();
         page.create_object(&db);
@@ -1845,8 +1732,6 @@ mod tests {
         assert_eq!(page.objects_total, 1, "no second object was created");
     }
 
-    // AUD-P2-11 (C3): objects were create-only — the form now prefills
-    // from the stored row and saves through update_object.
     #[test]
     fn audp2_object_edit_round_trip() {
         let db = fixture(Vec::new());
@@ -1875,7 +1760,6 @@ mod tests {
         page.create_object(&db);
         assert!(page.error.is_none(), "{:?}", page.error);
 
-        // the edit prefills title + typed properties
         let object = page.objects[0].clone();
         let object_id = i64_field(&object, "id");
         page.start_object_edit(&object);
@@ -1906,7 +1790,6 @@ mod tests {
         assert_eq!(updated["properties"]["qty"].as_i64(), Some(7));
         assert_eq!(updated["properties"]["in_stock"].as_bool(), Some(false));
 
-        // cancel returns the form to create mode without writing
         page.start_object_edit(&page.objects[0].clone());
         page.new_object_title = "Scratch".into();
         page.cancel_object_edit();
@@ -1919,9 +1802,6 @@ mod tests {
         );
     }
 
-    // AUD-P2-11 (C3): types were create-only — the builder now prefills,
-    // saves through update_type, and shows the core's refusal when a
-    // dropped field is still set on objects.
     #[test]
     fn audp2_type_edit_round_trip_and_in_use_field_refusal() {
         let db = fixture(Vec::new());
@@ -1944,7 +1824,6 @@ mod tests {
         page.create_object(&db);
         assert!(page.error.is_none(), "{:?}", page.error);
 
-        // the builder prefills from the stored type
         let t = page
             .types
             .iter()
@@ -1958,7 +1837,6 @@ mod tests {
         assert_eq!(page.new_fields[0].key, "sku");
         assert!(page.new_fields[0].required);
 
-        // dropping a field still set on an object is refused, honestly
         page.new_fields.clear();
         page.save_type_edit(&db);
         let error = page.error.as_deref().unwrap_or_default().to_string();
@@ -1978,7 +1856,6 @@ mod tests {
             .unwrap();
         assert_eq!(still.fields.len(), 1, "the type is untouched on refusal");
 
-        // a real edit: rename + add a field
         page.new_type_name = "Warranty Claims v2".into();
         page.new_fields = vec![
             FieldDraft {
@@ -2007,9 +1884,7 @@ mod tests {
             .unwrap();
         assert_eq!(updated.name, "Warranty Claims v2");
         assert_eq!(updated.fields.len(), 2);
-        // the slug is identity — it stays
         assert_eq!(updated.slug, "warranty-claims");
-        // the selected type's object form picked up the new field set
         assert_eq!(page.selected_type, Some(type_id));
         assert_eq!(
             page.new_object_fields
@@ -2018,13 +1893,10 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["sku", "qty"]
         );
-        // the object survived the type edit
         assert_eq!(page.objects_total, 1);
         assert_eq!(str_field(&page.objects[0], "title"), "Broken hinge");
     }
 
-    // AUD-P2-11 (C3): the pager the page self-admitted it lacked — page 2
-    // must load different objects, and the page state must reset.
     #[test]
     fn audp2_objects_pager_loads_page_two() {
         let db = fixture(Vec::new());
@@ -2037,7 +1909,6 @@ mod tests {
             )
             .expect("type")
         });
-        // 55 objects → two pages at 50 per page
         db.with_write(|conn| {
             for i in 1..=55 {
                 let mut props = serde_json::Map::new();
@@ -2062,7 +1933,6 @@ mod tests {
             page.objects.iter().map(|o| i64_field(o, "id")).collect();
         assert_eq!(seen.len(), 50, "no duplicates on page 1");
 
-        // page 2 loads the rest — different objects
         page.objects_page = 1;
         page.reload_objects(&db);
         assert_eq!(page.objects.len(), 5, "page 2 holds the rest");
@@ -2074,7 +1944,6 @@ mod tests {
             );
         }
 
-        // a page past the end falls back to the last page
         page.objects_page = 9;
         page.reload_objects(&db);
         assert_eq!(
@@ -2083,7 +1952,6 @@ mod tests {
         );
         assert_eq!(page.objects.len(), 5);
 
-        // re-selecting a type restarts at page 1
         page.objects_page = 1;
         page.select_type(&db, type_id);
         assert_eq!(page.objects_page, 0, "selecting a type restarts at page 1");

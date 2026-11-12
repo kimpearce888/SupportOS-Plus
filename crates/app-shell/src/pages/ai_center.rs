@@ -223,8 +223,6 @@ pub struct AiCenterPage {
     probe_slot: Arc<Mutex<Option<(String, String)>>>,
     key_edit_for: Option<String>,
     key_edit_value: String,
-    /// AUD-P1-6 (C7): the inline price editor (Some(endpoint id) while
-    /// open) — prices became editable after creation.
     price_edit_for: Option<String>,
     price_edit_prompt: String,
     price_edit_completion: String,
@@ -366,8 +364,6 @@ impl AiCenterPage {
         }
         let _ = db.with_write(|conn| spp_core::ai_hub::save_roles(conn, roles));
         self.hub_roles_saved = roles.clone();
-        // AU2-8: role edits now commit per keystroke, so coalesce the
-        // verification job — skip it when one is already queued.
         let pending = db
             .with_read(|conn| spp_core::jobs::has_pending(conn, "ai", "golden_eval"))
             .unwrap_or(true);
@@ -556,10 +552,6 @@ impl AiCenterPage {
             );
             return;
         }
-        // UXF-1-3: session chips wrap (the old plain `horizontal` could
-        // not — a long session list ran its chips past the right edge on
-        // narrow displays) and the block reads as one contained section
-        // instead of a floating divider.
         egui::ScrollArea::vertical()
             .id_salt("copilot-sessions")
             .max_height(420.0)
@@ -747,11 +739,6 @@ impl AiCenterPage {
         self.draft_states = draft_states;
         self.edit_stats = edit_stats;
 
-        // UXF-1-2: the three Usage sections share one anatomy — full-width
-        // titled cards on the 10px card rhythm (the dashboard/settings
-        // register). The old raw section_titles + hint_text floated
-        // uncased on the page background and hugged the left third of
-        // the content column on wide displays (owner screenshot report).
         design::card_titled_wide(
             ui,
             "Per-feature usage — last 30 days",
@@ -904,10 +891,6 @@ impl AiCenterPage {
             return;
         };
         let t = design::tokens(ui);
-        // UXF-1-3: full-width card — the Health tab's cards hugged their
-        // natural width and left the right of the page dead on wide
-        // displays (same defect class the owner's screenshots report on
-        // Jobs/Usage).
         design::card_titled_wide(ui, "LM Studio settings", None, |ui| {
             design::form_grid(ui, "ai-health", |ui| {
                 design::field_label(ui, "AI enabled:");
@@ -1083,10 +1066,6 @@ impl AiCenterPage {
                         }
                     }
                 });
-                // AUD-H4: the raw provider record is DEBUG logging, not a
-                // product surface — the "stored record: provider_kind=none
-                // chat_model=(unset)…" line rendered into the UI and read
-                // as a debug dump. Diagnostics owns introspection.
                 tracing::debug!(
                     provider_kind = record.provider_kind.as_str(),
                     chat_model = record.chat_model.as_deref().unwrap_or("(unset)"),
@@ -1259,9 +1238,6 @@ impl AiCenterPage {
                             }
                         }
                         if !endpoint.builtin {
-                            // AUD-P1-6 (C7): the price line is real now — the
-                            // current $/mtok pair with an inline editor,
-                            // instead of a hint floating next to nothing.
                             if self.price_edit_for.as_deref() == Some(endpoint.id.as_str()) {
                                 ui.horizontal(|ui| {
                                     design::field_label(ui, "$ / mtok prompt:");
@@ -1293,9 +1269,6 @@ impl AiCenterPage {
                                                         conn, &id, p, c,
                                                     )
                                                 });
-                                                // the per-endpoint status line
-                                                // (the probe display slot) carries
-                                                // the outcome
                                                 let id_for_note = endpoint.id.clone();
                                                 match updated {
                                                     Ok(true) => {
@@ -1455,9 +1428,6 @@ impl AiCenterPage {
                                 .width(200.0)
                                 .selected_text(selected.clone())
                                 .show_ui(ui, |ui| {
-                                    // AU2-8: the old "(unset)" row wrote into a
-                                    // throwaway `None::<usize>` temporary, so a routed
-                                    // role could never be unrouted. Clear for real.
                                     if ui.selectable_label(false, "(unset)").clicked() {
                                         roles.set(role, None);
                                         changed = true;
@@ -1523,9 +1493,6 @@ impl AiCenterPage {
                                             .then(|| model_edit.trim().to_string()),
                                     }),
                                 );
-                                // AU2-8: commit on every change — committing only on
-                                // lost_focus silently dropped edits when the user
-                                // switched tabs/pages before the text field defocused.
                                 self.commit_role_map(db, &roles);
                             }
                             ui.label(
@@ -1687,9 +1654,6 @@ impl AiCenterPage {
         std::thread::Builder::new()
             .name("spp-hub-probe".to_string())
             .spawn(move || {
-                // AU2-8: a probe-runtime failure must still clear the "probing…"
-                // row — an .expect() here panicked the thread and left the slot
-                // empty (the row showed "probing…" forever).
                 let text = match tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
@@ -1713,8 +1677,6 @@ impl AiCenterPage {
                     }
                     Err(error) => format!("probe failed — runtime unavailable ({error})"),
                 };
-                // Deliver even through a poisoned mutex (a poisoned lock would
-                // otherwise swallow every later probe result as well).
                 let mut guard = match slot.lock() {
                     Ok(guard) => guard,
                     Err(poisoned) => poisoned.into_inner(),
@@ -1778,9 +1740,6 @@ impl AiCenterPage {
             return;
         };
         let t = design::tokens(ui);
-        // UXF-1-3: full-width card (the Jobs/Usage register) — the old
-        // natural-width card + icon/badge header hugged the left third
-        // of the page on wide displays.
         design::card_titled_wide(
             ui,
             "Analytics",
@@ -1852,9 +1811,6 @@ impl AiCenterPage {
     fn attributes_ui(&mut self, ui: &mut egui::Ui) {
         let t = design::tokens(ui);
         let distributions = self.distributions.clone();
-        // UXF-1-3: full-width card + bar_row distributions (the dashboard
-        // breakdown register) — the old nested natural-width cards and
-        // indented mono value lines hugged the left and read as raw text.
         design::card_titled_wide(
             ui,
             "Catalog",
@@ -1910,10 +1866,6 @@ impl AiCenterPage {
             );
             return;
         }
-        // UXF-1-1: full-width card + exact-column data_table — the old
-        // natural-width card/Grid hugged ~35% of the content column on
-        // wide displays (owner screenshot report) and the unbounded
-        // show_rows scroll left dead space inside the card.
         design::card_titled_wide(
             ui,
             "Recent AI runs",
@@ -1971,13 +1923,6 @@ fn job_status_tone(status: &str) -> BadgeTone {
     }
 }
 
-/// UXF-1-2: one contained block per golden run — pass badge, backend and
-/// run meta on one header row, then the failed cases grouped by distinct
-/// error (identical failures collapse to one mono line instead of
-/// stacking up to nine raw hint lines straight on the page — the owner
-/// screenshot's 27-line dump). The frame is the DS-C-15 callout register
-/// (muted fill, CONTROL radius) so it reads as a contained sub-block of
-/// its card in both themes.
 fn golden_run_block(ui: &mut egui::Ui, run: &spp_core::ai_eval::GoldenRunRow) {
     let t = design::tokens(ui);
     egui::Frame::new()

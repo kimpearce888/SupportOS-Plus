@@ -98,11 +98,6 @@ pub struct ReportsPage {
     b_f_state_key: String,
     b_f_mailbox_ids: String,
     b_f_assignee_ids: String,
-    /// AUD-P2-14 (C10): picker selections replace the raw CSV id fields —
-    /// mailboxes and assignees pick from the live lists (the same sources
-    /// the Inbox uses); the text fields remain the serialization (load/
-    /// save round-trips keep working) but editing goes through the
-    /// pickers' chip rows.
     b_mailboxes: Vec<(i64, String)>,
     b_assignees: Vec<(i64, String)>,
     b_outcome: Option<std::result::Result<spp_core::reports::ReportRunOutcome, String>>,
@@ -125,8 +120,6 @@ pub struct ReportsPage {
 }
 
 impl ReportsPage {
-    /// AU2-9: replace the click-time "syncing…" note with the completion
-    /// outcome (the note used to stick forever once set).
     pub(crate) fn sync_finished(&mut self, outcome: &str) {
         if !self.sync_note.is_empty() {
             self.sync_note = outcome.to_string();
@@ -227,8 +220,6 @@ impl ReportsPage {
     }
 
     fn reload(&mut self, db: &DbHandle) {
-        // AUD-P2-14 (C10): the builder's picker lists — the same sources
-        // the Inbox uses (mailboxes + assignable users).
         self.b_mailboxes = db.with_read(crate::pages::dashboard::mailboxes);
         self.b_assignees = db.with_read(crate::pages::inbox::assignable_users);
         let now = self.today.unwrap_or_else(chrono::Utc::now);
@@ -406,9 +397,6 @@ impl ReportsPage {
             },
         );
         let labels: Vec<&str> = Tab::ALL.iter().map(|t| t.label()).collect();
-        // UXE-1-9: one underline tab row — the floating group labels over
-        // the tabs ("Volume & quality", …) read as broken layout, not
-        // grouping; the tab labels carry their own meaning.
         if let Some(clicked) = design::tabs(
             ui,
             &labels,
@@ -432,7 +420,6 @@ impl ReportsPage {
             Tab::Radar => self.radar_ui(ui),
             Tab::Quality => self.quality_ui(ui),
             Tab::Digest => self.digest_ui(ui, db),
-            // AUD-P2-14 (C10): happiness rows drill to conversations.
             Tab::Happiness => self.happiness_ui(ui, &mut nav),
             Tab::HelpScout => self.help_scout_ui(ui, db),
             Tab::Builder => self.builder_ui(ui, db),
@@ -467,11 +454,6 @@ impl ReportsPage {
             ("Not-good ratings", data.ratings_not_good),
             ("Unassigned", data.unassigned),
         ];
-        // UX-5: stretch the KPI cards across the full row width (same fix
-        // as the Dashboard metric grid). UXD-1: `metric_card_w` takes the
-        // card's OUTER width and the math is floored to integers — egui
-        // rounds fractional widget rects per column and the drift
-        // accumulates across a row.
         let gap = 10.0;
         let card_w = ((width - gap * (cols - 1) as f32) / cols as f32).floor();
         egui::Grid::new("reports-overview")
@@ -570,11 +552,6 @@ impl ReportsPage {
         });
         ui.add_space(10.0);
 
-        // UXG-1-3: the SLA list migrates to the exact-column data_table
-        // (hosted in a full-width titled card, the Jobs/Usage register) —
-        // the natural-width table hugged its content and could overflow
-        // its card on narrow windows; the data_table spans the card at
-        // every width.
         design::card_titled_wide(ui, "SLA by mailbox", None, |ui| {
             design::data_table(
                 ui,
@@ -912,11 +889,6 @@ impl ReportsPage {
             });
             ui.add_space(4.0);
             design::section_title(ui, "Filters (blank = unfiltered)");
-            // AUD-P2-14 (C10): the closed-vocabulary filters are pickers
-            // now — statuses as chips over the Help Scout vocabulary,
-            // mailboxes and assignees as chip rows over the live lists
-            // (the raw CSV serialization round-trips through load/save;
-            // the chip state derives from and writes back to it).
             {
                 ui.horizontal(|ui| {
                     design::field_label(ui, "Statuses");
@@ -991,7 +963,6 @@ impl ReportsPage {
                 });
                 ui.add_space(design::scale::space::SP1);
             }
-            // The open-vocabulary filters stay as text fields.
             design::form_grid(ui, "b-filters", |ui| {
                 for (label, field) in [
                     ("channel:", &mut self.b_f_channel),
@@ -1067,8 +1038,6 @@ impl ReportsPage {
             None => design::hint_text(ui, "run a report to see its rows"),
             Some(Err(e)) => design::error_text(ui, &format!("error: {e}")),
             Some(Ok(outcome)) => {
-                // UXG-1-3: full-width card + exact-column data_table — the
-                // outcome rows span the card at every width.
                 design::card_titled_wide(
                     ui,
                     &format!("{} — {}", outcome.metric.label, outcome.dimension.label),
@@ -1384,8 +1353,6 @@ impl ReportsPage {
                         "(no friction scores stored — recompute to fill the table)",
                     );
                 } else {
-                    // UXG-1-3: exact-column data_table — the friction list
-                    // spans the card at every width.
                     let friction_top = &self.i_friction_top;
                     design::data_table(
                         ui,
@@ -1428,11 +1395,6 @@ impl ReportsPage {
                                     .map(|v| v.to_string())
                                     .unwrap_or_else(|| "—".into()),
                             );
-                            // AUD-L7: one cell, one value, one treatment —
-                            // the escalated column rides the same right-
-                            // aligned mono register as its peers (the old
-                            // plain label collided visually with the
-                            // neighboring reopens cell at narrow widths).
                             design::td_num(
                                 ui,
                                 factors
@@ -1490,8 +1452,6 @@ impl ReportsPage {
                 if nodes.is_empty() {
                     design::hint_text(ui, "(no nodes stored)");
                 } else {
-                    // UXG-1-3: exact-column data_table — the node list spans
-                    // the card at every width.
                     design::data_table(
                         ui,
                         "insights-graph",
@@ -1514,8 +1474,6 @@ impl ReportsPage {
                                 if design::button(ui, "Inspect", ButtonVariant::Outline).clicked() {
                                     self.inspect_graph_node(db, node.id);
                                 }
-                                // AUD-P2-14 (C10): the node delete the
-                                // table's trailing column always reserved.
                                 if design::button(ui, "Delete", ButtonVariant::Ghost)
                                     .on_hover_text("delete this node and its human edges")
                                     .clicked()
@@ -1845,8 +1803,6 @@ impl ReportsPage {
             );
             return;
         }
-        // UXG-1-3: exact-column data_table — the ratings list spans the
-        // content column at every width.
         design::data_table(
             ui,
             "p1-happiness-list",
@@ -1864,8 +1820,6 @@ impl ReportsPage {
                     ui.label("Okay");
                 }
                 let number = r["conversation_number"].as_i64();
-                // AUD-P2-14 (C10): the conversation number is a deep-link
-                // now (inert text pre-fix) — the local id rides the row.
                 let conversation_id = r["conversation_id"].as_i64();
                 match (number, conversation_id) {
                     (Some(n), Some(id)) => {
@@ -2309,7 +2263,6 @@ mod tests {
     }
 }
 
-// AUD-P2-14 (C10): CSV id helpers for the picker chips.
 fn csv_contains_id(csv: &str, id: i64) -> bool {
     csv.split(',')
         .map(str::trim)
@@ -2334,7 +2287,6 @@ fn toggle_csv_id(csv: &str, id: i64) -> String {
         .join(",")
 }
 
-// AUD-P2-14 (C10): builder picker serialization + the node delete arm.
 #[cfg(test)]
 mod audp2_tests {
     use super::*;
@@ -2346,15 +2298,12 @@ mod audp2_tests {
         csv = toggle_csv_id(&csv, 1);
         assert_eq!(csv, "1");
         assert!(csv_contains_id(&csv, 1));
-        // Toggle on more ids (order preserved).
         csv = toggle_csv_id(&csv, 2);
         assert_eq!(csv, "1,2");
         assert!(csv_contains_id(&csv, 2));
-        // Remove one.
         csv = toggle_csv_id(&csv, 1);
         assert_eq!(csv, "2");
         assert!(!csv_contains_id(&csv, 1));
-        // Junk fields are ignored, not parsed into false positives.
         let junk = " 5 , x , 7 ";
         assert!(csv_contains_id(junk, 5));
         assert!(csv_contains_id(junk, 7));

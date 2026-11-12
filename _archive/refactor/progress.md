@@ -7,19 +7,21 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 
 ## CURRENT POINTER
 
-- Next task: **R1.8 — app-shell/pages A strip** (the seven 2K+ LOC
-  pages: inbox, settings, …; see `plan.md` §7 R1.8).
+- Next task: **R1.9 — app-shell/pages B strip** (remaining 16 pages +
+  `mod.rs` `queries.rs` + `crates/app-shell/tests/` — 26 kittest suites +
+  style_lint; see `plan.md` §7 R1.9).
 - Pre-flight: confirm CI green on the session-3 final head (run id in
   session log). If the session ended mid-CI, the run may still be
   in flight — next session must wait for it.
-- Session counter: 3 completed (R1.0-R1.7 executed — session 3 ran two
-  batches; see log). core + app-shell infra + catalog + xtask are
-  comment-free; the remaining R1.x comments are the app-shell pages +
-  tests.
+- Session counter: 3 completed (R1.0-R1.8 executed — session 3 ran three
+  batches; see log). core + app-shell infra + the 7 big pages + catalog +
+  xtask are comment-free; the remaining R1.x comments are 18 app-shell
+  src files + the tests tree.
 - Environment: toolchain installed this session (cold target/); disk hit
   G-05 twice (ld Bus error during app-shell test link — `rm -rf
   target/debug/incremental` + retry fixed both). Per-crate test lanes
-  mandatory (the 10-min tool window).
+  mandatory, ONE lane per tool call (the 10-min window killed a two-lane
+  chain mid-run once; rerun was green).
 
 ## Task states
 
@@ -33,8 +35,8 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 | R1.4 core/helpscout strip | done (session 2) | 26 lines removed from 3 of 9 files; cumulative subset check clean (50/50); battery green (all 4 test lanes); CI run#306 green |
 | R1.5 core/storage+config strip | done (session 2) | 54 lines removed from 6 of 23 files; audit.rs invariant-7 duty verified (allowlist lines untouched, gate clean); cumulative subset check clean (73/73); battery green; CI run#307 green |
 | R1.6 core/domain strip | done (session 3) | 479 whole lines + 1 inline comment removed from 26 of 122 files — core crate now 100% comment-free (135/135 cumulative); `core/tests/` in the plan is vacuous (tests are inline `#[cfg(test)]`); battery green (app-shell lane needed one G-05 disk retry); CI run#308 green |
-| R1.7 app-shell/infra strip | done (session 3) | 429 whole lines + 2 inline comments removed from 11 of 19 files; G-07 hit twice (comments had masked let_and_return in design/mod.rs + collapsible_if in workers_host.rs — fixed by behavior-identical restructure); cumulative subset check clean (154/154); battery green; CI pending |
-| R1.8 app-shell/pages-A strip | pending | 7 largest pages |
+| R1.7 app-shell/infra strip | done (session 3) | 429 whole lines + 2 inline comments removed from 11 of 19 files; G-07 hit twice (comments had masked let_and_return in design/mod.rs + collapsible_if in workers_host.rs — fixed by behavior-identical restructure); cumulative subset check clean (154/154); battery green; CI run#309 green |
+| R1.8 app-shell/pages-A strip | done (session 3) | 864 whole lines + 1 inline comment removed from 7 of 7 pages (inbox 226, knowledge 150, outreach 157, custom_objects 132, settings 114, ai_center 55, reports 51); G-07 hit twice more (collapsible_if in custom_objects.rs + outreach.rs empty-state CTAs — same restructure fix); cumulative check 161/161 clean over stripped scopes; battery green; CI pending |
 | R1.9 app-shell/pages-B strip | pending | + 26 kittest suites |
 | R1.10 comment closeout | pending | lint-attr cleanup + zero-check |
 | R2.1–R2.5 unnecessary code | pending | see plan §7 R2 |
@@ -104,6 +106,30 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
   app-shell-infra).
 - G-05 hit a second time mid-battery at the same spot (app-shell test
   link, 77% full): `rm -rf target/debug/incremental` + retry green.
+- R1.8 executed (same session, after run#309 went green on the R1.7 head):
+  the seven 2K+ pages (inbox 4715, settings 3316, knowledge 2647,
+  reports 2374, ai_center 2299, custom_objects 2092, outreach 1844) —
+  all 7 carried comments. Strip removed 864 whole lines + 1 inline
+  (inbox 226, knowledge 150, outreach 157, custom_objects 132,
+  settings 114, ai_center 55, reports 51; 8 fmt reflow insertions: the
+  knowledge.rs test trailing comment + a custom_objects.rs method-chain
+  reflow).
+- G-07 hit exactly as predicted (twice more): custom_objects.rs +
+  outreach.rs empty-state CTA blocks — the guard comment sat between
+  `if types.is_empty()` / `if campaigns.is_empty()` and the nested
+  `if design::empty_state_cta(..)`. Fixed by the same collapse
+  (`is_empty() && empty_state_cta(..)`) — the CTA render is still
+  gated on the empty list, pixel-neutral.
+- Battery: gate clean, fmt --check clean, clippy workspace (5.8s after
+  fix) + sandbox lane clean, app-shell 293+2 (289s), core 520 (459s),
+  core-sandbox 528 (483s), catalog+xtask 56, verify-icons verified,
+  cumulative subset --check clean (161/161 across core+catalog+xtask+
+  app-shell-infra+pages-A).
+- Process slip caught by the tool window: chaining core + sandbox lanes
+  in one command exceeded 10 min and the call was killed mid-second-lane
+  (the core lane itself had already passed — log confirmed 520/520;
+  clean rerun also green). Lesson recorded in the pointer: ONE test lane
+  per tool call.
 
 ### Session 2 — 2026-11-12
 - Pre-flight: sandbox reset AGAIN (clone + toolchain gone) — re-provisioned

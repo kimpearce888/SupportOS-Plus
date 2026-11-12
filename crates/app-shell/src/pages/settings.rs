@@ -54,11 +54,6 @@ pub(crate) struct GeneralSettings {
     pub reply_status_after: String,
     pub log_level: String,
     pub agent_language: String,
-    /// AUD-P2-3-3 (D8): the retention horizon in days. 0 (the default)
-    /// keeps everything; above 0 the maintenance sweep permanently
-    /// deletes audit-log entries and other operational records older
-    /// than the horizon — a compliance-relevant trade-off the UI must
-    /// state at the point of change, not only in the manual.
     pub retention_days: i64,
 }
 
@@ -94,7 +89,6 @@ impl GeneralSettings {
                 defaults.sync_interval_minutes,
             )
             .unwrap_or(defaults.sync_interval_minutes),
-            // AUD-P2-5 (D6): the scheduled-reconcile cadence.
             reconcile_interval_minutes: spp_core::settings::get_i64(
                 conn,
                 "reconcile_interval_minutes",
@@ -162,8 +156,6 @@ impl GeneralSettings {
                 .ok()
                 .flatten()
                 .unwrap_or(defaults.agent_language),
-            // AUD-P2-3-3 (D8): surface the retention horizon where it is
-            // actually changed — default 0 keeps everything.
             retention_days: spp_core::settings::get_i64(conn, "retention_days", 0)
                 .unwrap_or(0)
                 .clamp(0, 3650),
@@ -204,8 +196,6 @@ impl GeneralSettings {
         spp_core::settings::set_string(conn, "reply_status_after", &self.reply_status_after)?;
         spp_core::settings::set_string(conn, "log_level", &self.log_level)?;
         spp_core::settings::set_string(conn, "agent_language", &self.agent_language)?;
-        // AUD-P2-3-3 (D8): clamp defensively — a negative or absurd value
-        // must never silently arm an aggressive deletion horizon.
         spp_core::settings::set_i64(conn, "retention_days", self.retention_days.clamp(0, 3650))?;
         Ok(())
     }
@@ -416,8 +406,6 @@ pub struct SettingsPage {
     lmstudio_embedding_model: String,
     lmstudio_persisted: (String, String, String),
     vector_store_path: String,
-    /// AUD-P1-8 (D2): for the re-index action (drops + rebuilds the
-    /// semantic vector collection).
     vector_index: Option<std::sync::Arc<spp_core::vectorstore_sqlitevec::VectorIndex>>,
     hours: Vec<BusinessHoursRow>,
     hours_edit: Option<BusinessHoursRow>,
@@ -482,10 +470,6 @@ impl SettingsPage {
         self.data_dir = Some(dir);
     }
 
-    /// Screenshot-harness hook (ux-audit evidence): select a settings tab by
-    /// its user-facing label, case-insensitively. Feature-gated — the env
-    /// var is only read in `ui-screenshot` builds, never in normal ones.
-    /// Returns false when no tab label matches, so the caller can warn.
     #[cfg(feature = "ui-screenshot")]
     pub(crate) fn set_tab_by_label(&mut self, label: &str) -> bool {
         for tab in Tab::ALL {
@@ -526,8 +510,6 @@ impl SettingsPage {
         self.bus = Some(bus);
     }
 
-    /// AUD-P1-8 (D2): the vector index handle — the re-index action needs
-    /// it to drop the local collection before the corpus re-embeds.
     pub(crate) fn set_vector_index(
         &mut self,
         index: Option<std::sync::Arc<spp_core::vectorstore_sqlitevec::VectorIndex>>,
@@ -699,10 +681,6 @@ impl SettingsPage {
             self.lmstudio_chat_model.trim().to_string(),
             self.lmstudio_embedding_model.trim().to_string(),
         );
-        // UX-23: validate before persisting. An empty URL is legal (the app
-        // falls back to its default endpoint), but a non-empty value that is
-        // not an http(s) URL is the classic misconfiguration — saving it
-        // silently used to just move the failure to the first AI request.
         if !base.is_empty() && !(base.starts_with("http://") || base.starts_with("https://")) {
             self.message = None;
             self.error = Some(format!(
@@ -737,10 +715,6 @@ impl SettingsPage {
             );
             let _ = conn.execute("DELETE FROM oauth_tokens", []);
         });
-        // AU2-11: the tokens are gone — the in-session provider must be
-        // deactivated too, or every queued call keeps firing with the dead
-        // handle and lands 401s until restart (the same transition
-        // clear_helpscout_credentials already performs).
         if let Some(handle) = self.provider.clone() {
             let previous_kind = handle.deactivate();
             db.with_write(|conn| {
@@ -777,11 +751,6 @@ impl SettingsPage {
         });
         match result {
             Ok(()) => {
-                // UX-26B: the app now verifies webhook signatures with the
-                // FULL stored secret (Help Scout imposes no length cap — the
-                // audit's live probe proved it stores 48+ characters), so
-                // the old "keep it at 40 characters or fewer" warning is
-                // gone: any length works as long as both sides match.
                 self.message =
                     Some("credentials stored (encrypted) — activating the connection now…".into());
                 self.hs_client_secret.clear();
@@ -973,9 +942,6 @@ impl SettingsPage {
     }
 
     fn reset_workspace(&mut self, db: &DbHandle) {
-        // AU2-11: pause the background workers BEFORE the wipe — otherwise the
-        // auto-sync timer re-pulls the account within a minute while the
-        // message claims the re-pull happens on next start.
         if let Some(workers) = &self.workers {
             workers.pause();
         }
@@ -1105,8 +1071,6 @@ impl SettingsPage {
             Tab::ALL.iter().position(|t| *t == self.tab).unwrap_or(0),
         ) && let Some(tab) = Tab::ALL.get(i)
         {
-            // AU2-11: feedback belongs to the tab that produced it — a stale
-            // message/error must not glue above every tab until restart.
             if self.tab != *tab {
                 self.message = None;
                 self.error = None;
@@ -1139,8 +1103,6 @@ impl SettingsPage {
                 self.helpscout_ui(ui, db);
                 None
             }
-            // UX-23: settings can now navigate (the LM Studio tab's "Open
-            // AI Center" act) — the page returns the request to the shell.
             Tab::LmStudio => self.lmstudio_ui(ui, db),
             Tab::VectorIndex => {
                 self.vector_index_ui(ui, db);
@@ -1164,8 +1126,6 @@ impl SettingsPage {
         };
         design::card_titled_wide(ui, "Synchronization", None, |ui| {
             design::form_grid(ui, "settings-general", |ui| {
-                // UX-30: explicit input sizes — the default-width DragValue
-                // was a cramped two-digit sliver that read as static text.
                 let interval_label = design::field_label(ui, "Max quiet sync interval (minutes)");
                 ui.add_sized(
                     [110.0, 26.0],
@@ -1178,9 +1138,6 @@ impl SettingsPage {
                      send triggers an immediate poll.",
                 );
                 ui.end_row();
-                // AUD-P2-5 (D6): scheduled reconcile — the safety net
-                // for the incremental sync's 10-minute overlap window
-                // (a fast local clock can silently miss changes).
                 let reconcile_label =
                     design::field_label(ui, "Scheduled reconcile (minutes, 0 = off)");
                 ui.add_sized(
@@ -1248,11 +1205,6 @@ impl SettingsPage {
             });
         });
         ui.add_space(10.0);
-        // AUD-P2-3-3 (D8): the retention horizon finally has a Settings
-        // surface — the audit found the sweep deletes audit-log entries
-        // when enabled, yet the only disclosure was a manual table row;
-        // the UI that changes the value must state what it deletes and
-        // the compliance trade-off at the point of change.
         design::card_titled_wide(
             ui,
             "Data retention",
@@ -1312,10 +1264,6 @@ impl SettingsPage {
             "AI behaviour",
             Some("safe defaults — review before enabling write actions"),
             |ui| {
-                // UX-30/UXE-1-3: one consistent control list. The old
-                // striped grid alternated row backgrounds and the plain
-                // checkbox rows read as static "✓" text; every row is
-                // now a switch row on an even rhythm.
                 for (label, value) in [
                     ("AI enabled", &mut general.ai_enabled),
                     (
@@ -1396,10 +1344,6 @@ impl SettingsPage {
             );
         });
         ui.add_space(10.0);
-        // UX-30: the save row now reflects form state. A dirty form offers
-        // "Save Changes" with an unsaved-changes note; a clean one confirms
-        // "All changes saved" — the old permanently-active "Save Settings"
-        // button was easy to miss and gave no feedback either way.
         let dirty = self.general_persisted.as_ref() != Some(&general);
         ui.horizontal(|ui| {
             if dirty {
@@ -1512,11 +1456,6 @@ impl SettingsPage {
                         ui.spinner();
                     }
                 });
-                // UX-25: the browser authorization flow must stay reachable
-                // whenever credentials exist — gating it on `!configured`
-                // made it vanish exactly when the app was connected, and
-                // after a disconnect the provider is gone, so the only way
-                // in was racing an in-flight connect.
                 if status.credentials {
                     ui.add_space(4.0);
                     ui.collapsing(
@@ -1605,9 +1544,6 @@ impl SettingsPage {
                     )
                     .labelled_by(whs_label.id)
                     .on_hover_text(
-                        // UX-26B: verification uses the full secret, same as
-                        // Help Scout — any length works, keep both sides
-                        // identical.
                         "Help Scout signs each delivery with the full secret you \
                          set there, and SupportOS+ verifies against the full \
                          secret too — paste the exact same value on both sides.",
@@ -1702,9 +1638,6 @@ impl SettingsPage {
                      ngrok http 127.0.0.1:PORT · ssh -N -R 80:127.0.0.1:PORT serveo.net \
                      — the registered URL must forward to the loopback listener",
                 );
-                // AUD-P2-3-2 (D7): the card must state what no relay MEANS,
-                // not only how to build one — polling-only sync, and chats/
-                // ratings with no data path at all.
                 design::hint_text(
                     ui,
                     "without a relay the app is polling-only: conversations and \
@@ -2170,10 +2103,6 @@ impl SettingsPage {
                     if design::button(ui, "Save", ButtonVariant::Primary).clicked() {
                         self.save_lmstudio(db);
                     }
-                    // UX-23: the old subtitle was a dead end — "Test the
-                    // connection from the AI Center page" with no way to get
-                    // there. The test now sits one click from the fields it
-                    // tests.
                     if design::button(ui, "Open AI Center", ButtonVariant::Outline)
                         .on_hover_text(
                             "The AI Center page shows the connection status and \
@@ -2210,10 +2139,6 @@ impl SettingsPage {
                 design::form_grid(ui, "settings-vector-index", |ui| {
                     design::field_label(ui, "Store");
                     ui.horizontal(|ui| {
-                        // UX-24: the path truncates instead of overflowing on
-                        // narrow viewports, copies in one click, and shows
-                        // the full location on hover — it was a raw
-                        // unbounded monospace line before.
                         let path = if self.vector_store_path.is_empty() {
                             "(unknown data directory)".to_string()
                         } else {
@@ -2245,11 +2170,6 @@ impl SettingsPage {
                         })
                         .unwrap_or(true);
                     let enabled = prev;
-                    // UX-24/UXE-1-3: a labelled switch row. The bare
-                    // checkbox read as static "✓ vector index enabled"
-                    // text in the audit; the label plus the hover
-                    // explanation make the control — and what it
-                    // switches — obvious.
                     design::field_label(ui, "Semantic search");
                     let mut next = prev;
                     ui.horizontal(|ui| {
@@ -2283,9 +2203,6 @@ impl SettingsPage {
                             Err(e) => self.error = Some(e.to_string()),
                         }
                     }
-                    // AUD-P1-8 (D2): the user-facing semantic re-index — the
-                    // reset the audit found missing everywhere (5 failed
-                    // attempts used to exclude a chunk permanently).
                     design::field_label(ui, "Re-index");
                     ui.horizontal(|ui| {
                         if design::button(ui, "Rebuild vector index", ButtonVariant::Outline)
@@ -2325,8 +2242,6 @@ impl SettingsPage {
     }
 
     fn hours_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
-        // UX-29: the card explains what business hours actually drive — it
-        // was a bare table of mailboxes with no purpose statement.
         design::card_titled_wide(
             ui,
             "Business hours per mailbox",
@@ -2352,8 +2267,6 @@ impl SettingsPage {
                                 );
                                 if row.configured {
                                     design::badge(ui, "configured", BadgeTone::Success);
-                                    // UX-29: spell out the abbreviations —
-                                    // "fr 480m · res 1440m" read as noise.
                                     design::hint_text(
                                         ui,
                                         &format!(
@@ -2367,10 +2280,6 @@ impl SettingsPage {
                                         ),
                                     );
                                 } else {
-                                    // UX-29: a warning tone — "not configured"
-                                    // is a to-do, not a neutral fact, since
-                                    // reports fall back to defaults until it
-                                    // is set.
                                     design::badge(ui, "not configured", BadgeTone::Warning);
                                 }
                                 if design::button(ui, "Edit", ButtonVariant::Outline).clicked() {
@@ -2447,11 +2356,6 @@ impl SettingsPage {
     }
 
     fn backups_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
-        // UX-32: the tab no longer opens with a card that repeats its own
-        // name. Two purposeful cards instead: safe actions (create/export)
-        // above, restore in its own card below — separated like the Help
-        // Scout tab's danger zone, so the destructive control never sits
-        // beside the export buttons it used to share a row with.
         design::card_titled_wide(ui, "Back up or export your data", None, |ui| {
             ui.horizontal(|ui| {
                 if design::button_with_icon(
@@ -2465,10 +2369,6 @@ impl SettingsPage {
                 {
                     self.create_backup(db);
                 }
-                // UX-32: the exports wore the flat Secondary gray, which
-                // read as disabled next to the primary button — Outline
-                // (bordered, like every secondary action in the header)
-                // keeps them clearly enabled.
                 if design::button(ui, "Export JSON", ButtonVariant::Outline)
                     .on_hover_text(
                         "the whole workspace as one JSON file — for keeping \
@@ -2486,12 +2386,6 @@ impl SettingsPage {
                 }
             });
             ui.add_space(6.0);
-            // AUD-P2-10 (D4): backups carry stored credentials in
-            // encrypted form, decryptable only by this machine's
-            // secrets.key (the file next to the database). The audit
-            // found nothing told the user that — a backup copied to
-            // another computer without the key file can never unlock
-            // its credentials. Say it where backups are made.
             design::hint_text(
                 ui,
                 "Backups include your credentials in encrypted form — they unlock \
@@ -2521,9 +2415,6 @@ impl SettingsPage {
                                     egui::RichText::new(str_field(backup, "file"))
                                         .color(t.foreground),
                                 );
-                                // UX-22: metadata in user terms — "2.0 MB" and
-                                // "3h ago" instead of raw bytes and an RFC3339
-                                // stamp; the exact values stay one hover away.
                                 let size_bytes = i64_field(backup, "size_bytes");
                                 ui.label(
                                     egui::RichText::new(human_bytes(size_bytes))
@@ -2547,10 +2438,6 @@ impl SettingsPage {
                                     )
                                     .on_hover_text(created);
                                 }
-                                // UX-22: restore replaces the live database — a
-                                // destructive action, so it wears the danger
-                                // variant and arms a confirmation below (never a
-                                // one-click apply).
                                 if design::button(ui, "Restore", ButtonVariant::Destructive)
                                     .on_hover_text(
                                         "replaces the current database with this backup \
@@ -2622,7 +2509,6 @@ mod tests {
 
         let mut changed = original;
         changed.sync_interval_minutes = 15;
-        // AUD-P2-5 (D6): the scheduled-reconcile cadence round-trips too.
         changed.reconcile_interval_minutes = 720;
         changed.ai_enabled = false;
         changed.log_level = "debug".into();
