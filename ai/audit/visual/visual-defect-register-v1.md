@@ -121,4 +121,6 @@ Phase 1 (owner gate): the one-page layout spec — spacing scale + panel inset r
 
 **Battery on the final tree:** fmt PASS · clippy x2 lanes (incl. NEW kittest-ui lane) PASS · gates PASS · style-lint (new pages-margins rule) PASS · kittest 26 suites green on rebaselined goldens · geometry invariants 10/10 · SPP_SMOKE 24 pages clean boot.
 
+**Close-out arithmetic (self-corrected):** the VF-4 commit message overstated the fixed count ("21→31"). The honest terminal state after this batch: **24 FIXED** (V1 V2 V3 · L1 L2 L3 L4 L5 L7 L11 · S1–S6 S8 · H1–H6 · C5) + 5 VERIFIED (L10 S7 C2 C3 C6) + 3 ADDRESSED (C1 C4 C7) + 2 RECLASSIFIED→AF (L8 L9) + 1 SUPERSEDED (L6) = **35/35 in a terminal state, 0 OPEN, 0 PARTIAL.** The battery lines above all ran on the final close-out tree.
+
 **Proof artifacts:** `ai/audit/visual/evidence/` (before/after pairs, VLM passes, README matrix).
