@@ -1620,16 +1620,10 @@ fn audit92_get_rating_maps_404_to_none_not_an_error() {
     assert_eq!(hs_status(&err), Some(400), "the error keeps its status");
 }
 
-// AUD-P0-4 (A5): sync/delete jobs with malformed payloads (no remoteId)
-// must fail loudly. Pre-fix, `if let Some(remote) = …` with no else let a
-// producer bug complete green while doing nothing — silent data loss that
-// never surfaced in Jobs/Diagnostics.
 #[test]
 fn audp0_malformed_sync_job_payloads_fail_loudly() {
     let _secrets = secrets_guard();
     let mock = MockServer::start(Arc::new(|_req: &crate::mockserver::MockRequest| {
-        // Nothing here should be reached — every malformed-payload branch
-        // fails before any provider call.
         MockResponse::json(500, r#"{"error":"unreachable"}"#)
     }))
     .expect("mock server");

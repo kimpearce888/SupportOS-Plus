@@ -104,9 +104,6 @@ fn chat_with_opts_roundtrip_json_mode_and_usage() {
     let body: serde_json::Value = serde_json::from_str(&mock.hits()[0].body).expect("request json");
     assert_eq!(body["temperature"], 0.2);
     assert_eq!(body["max_tokens"], 128);
-    // UXF-2-1: json_mode must speak the json_schema form — LM Studio
-    // rejects the legacy json_object type with HTTP 400 (the failing-run
-    // root cause in the owner's screenshot report).
     assert_eq!(body["response_format"]["type"], "json_schema");
     assert_eq!(
         body["response_format"]["json_schema"]["name"],
@@ -120,12 +117,6 @@ fn chat_with_opts_roundtrip_json_mode_and_usage() {
 
 #[test]
 fn golden_set_passes_against_an_lm_studio_strict_response_format_server() {
-    // UXF-2-1 end-to-end regression lock: reproduces the owner-reported
-    // production failure — a server that behaves like LM Studio (HTTP 400
-    // unless response_format.type is 'json_schema' or 'text') failed
-    // EVERY golden case while the client still sent OpenAI's legacy
-    // {"type":"json_object"}. With the json_schema fix the whole 9-case
-    // seeded set passes; if anyone reverts the payload, this goes 0/9.
     let mock =
         crate::mockserver::MockServer::start(Arc::new(|req: &crate::mockserver::MockRequest| {
             if req.method == "POST" && req.path == "/v1/chat/completions" {
@@ -396,13 +387,6 @@ fn malformed_success_body_is_a_parse_error() {
 
 #[test]
 fn audp2_request_timeout_budget_survives_clone_and_covers_every_lane() {
-    // AUD-P2-2 (A8): the configured budget is applied per-request on
-    // every outbound lane (chat, embed, models), so it survives a
-    // client-level builder failure — the old `.unwrap_or_default()`
-    // fallback silently produced a no-timeout client. The clone proves
-    // the budget travels with the client (it is part of the client's
-    // state, not a one-shot builder setting), and both lanes must fail
-    // fast against a server that never answers in time.
     let mock = crate::mockserver::MockServer::start(Arc::new(
         move |req: &crate::mockserver::MockRequest| {
             std::thread::sleep(Duration::from_millis(800));

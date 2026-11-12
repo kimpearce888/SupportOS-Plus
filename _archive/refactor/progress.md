@@ -7,9 +7,10 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 
 ## CURRENT POINTER
 
-- Next task: **R1.4 — core/helpscout strip** (`helpscout_real/ helpscout/
-  it_helpscout.rs it_lm_studio.rs oauth_state.rs mirror.rs mockserver.rs`;
-  see `plan.md` §7 R1.4).
+- Next task: **R1.5 — core/storage+config strip** (`db.rs migrations.rs
+  migrations/ people_store/ saved_views/ config.rs crypto.rs audit.rs
+  logging.rs bootstrap.rs backup_service.rs data_reset.rs maintenance.rs
+  error.rs`; see `plan.md` §7 R1.5 — includes `audit.rs`, invariant 7!).
 - Pre-flight: confirm CI green on the session-2 final head (run id in
   session log).
 - Session counter: 2 completed (R1.0-R1.3 executed; see log).
@@ -25,8 +26,8 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 | R1.0 strip-comments tool | done (session 2) | lexer + 38 edge tests + --check mode; full battery green; commit 88e1770 |
 | R1.1 catalog+xtask strip | done (session 2) | 59 comment lines removed (catalog was already comment-free: 0 of 8 files); subset --check clean; CI run#303 green |
 | R1.2 core/ai_* strip | done (session 2) | 90 comment lines removed across 7 of 15 files; cumulative subset check clean (28/28); battery green; CI run#304 green |
-| R1.3 core/sync+workers strip | done (session 2) | 162 whole lines + 1 trailing comment removed from 8 of 13 files; cumulative subset check clean (41/41); battery green (per-crate lanes); CI pending |
-| R1.4 core/helpscout strip | pending | |
+| R1.3 core/sync+workers strip | done (session 2) | 162 whole lines + 1 trailing comment removed from 8 of 13 files; cumulative subset check clean (41/41); battery green (per-crate lanes); CI run#305 green |
+| R1.4 core/helpscout strip | done (session 2) | 26 lines removed from 3 of 9 files; cumulative subset check clean (50/50); battery green (all 4 test lanes); CI pending |
 | R1.5 core/storage+config strip | pending | includes audit.rs — see invariant 7 |
 | R1.6 core/domain strip | pending | + core/tests |
 | R1.7 app-shell/infra strip | pending | |
@@ -82,6 +83,12 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 - Session-2 disk incidents (for G-05/G-07 refinement): sandbox link
   bus-error fixed by rm incremental; later ENOSPC fixed by
   `cargo clean -p supportos-plus-core` (2.6G freed) + rebuild.
+- R1.4 executed (same session): 26 comment lines removed from 3 of 9 files
+  (it_lm_studio 16, it_helpscout 6, helpscout_real/mod 4; helpscout/,
+  oauth_state, mirror, mockserver already clean). CI run#305 green on the
+  R1.3 head mid-batch. Full per-crate battery: clippy x2, core 520,
+  core-sandbox 528 (after clean -p core), catalog+xtask 56, app-shell
+  293; verify-icons; cumulative subset --check 50/50.
 
 ### Session 1 — 2026-11-12
 - Research: full metrics snapshot (plan §6); read the no-simulation gate

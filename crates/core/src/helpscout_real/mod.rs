@@ -268,10 +268,6 @@ impl HsRateLimiter {
     }
 }
 
-/// GA-1: the limiter is consumed through the queue's `QueueRateLimiter`
-/// trait, so the dependency points one way (helpscout_real -> api_queue)
-/// and the former `api_queue.rs -> helpscout_real::HsRateLimiter` import
-/// (the module cycle the graphify audit surfaced) is gone.
 impl QueueRateLimiter for HsRateLimiter {
     fn wait_time_ms(&self, _is_write: bool) -> i64 {
         let now_ms = chrono::Utc::now().timestamp_millis();
