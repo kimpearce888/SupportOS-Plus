@@ -124,13 +124,6 @@ pub fn enforce_retention(conn: &Connection, retention_days: i64) -> Result<usize
             removed += n;
         }
     }
-    // AUD-P2-3-3 (D8): the notification clock. The manual has always
-    // documented "for read notifications the clock runs from when they
-    // were read" — but the old `created_at OR read_at` form made that
-    // false: since read_at >= created_at, the created_at branch alone
-    // deleted a 400-day-old notification you had read yesterday. The
-    // sweep now implements the documented contract exactly — unread
-    // rows age from creation, read rows age from when they were read.
     if let Ok(n) = conn.execute(
         "DELETE FROM notifications
          WHERE (read_at IS NULL AND julianday(created_at) < julianday('now', ?1))
@@ -207,19 +200,9 @@ mod tests {
         assert_eq!(n, 1, "retention off keeps every cached row");
     }
 
-    /// AUD-P2-3-3 (D8): `retention_days` deletes audit history when
-    /// enabled — the audit flagged this as compliance-relevant. The fix
-    /// discloses it honestly (the Settings "Data retention" card + the
-    /// USER_MANUAL trade-off) rather than changing the semantics, so the
-    /// semantics themselves are pinned here: the sweep prunes audit_log,
-    /// webhook_events, application_errors, ai_runs, translation_cache
-    /// and notifications past the horizon — and it NEVER touches
-    /// conversations or customers.
     #[test]
     fn audp2_3_d8_retention_deletes_audit_history_and_never_domain_data() {
         let conn = migrated();
-        // One stale row per pruned table (plus a fresh control row in the
-        // audit log so the boundary is proven, not just the delete).
         conn.execute(
             "INSERT INTO audit_log (timestamp, actor, action)
              VALUES (datetime('now', '-400 day'), 'agent', 'status.change'),
@@ -252,16 +235,12 @@ mod tests {
             [],
         )
         .expect("seed notifications");
-        // Read clock: the second notification was READ 1 day ago — the
-        // delete runs from read_at for read rows, so it must survive a
-        // 365-day horizon despite its 400-day-old creation.
         conn.execute(
             "UPDATE notifications SET read_at = datetime('now', '-1 day')
              WHERE dedup_key = 'd8-n2'",
             [],
         )
         .expect("mark read");
-        // Domain data that must never be pruned by this setting.
         conn.execute(
             "INSERT INTO customers (id, remote_id, email, created_at, updated_at)
              VALUES (1, 900, 'kept@example.com', datetime('now'), datetime('now'))",

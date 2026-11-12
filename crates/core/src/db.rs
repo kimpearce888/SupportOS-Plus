@@ -289,8 +289,6 @@ mod tests {
     fn clones_share_the_connection() {
         let handle = setup();
         let clone = handle.clone();
-        // AU2-13: the test-only is_shared_with accessor was deleted; the
-        // sharing invariant is proven by the observable mirror effect below.
         clone.with_write(|conn| {
             conn.execute("INSERT INTO probe (v) VALUES (1)", [])
                 .expect("insert");

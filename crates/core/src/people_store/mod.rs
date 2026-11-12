@@ -576,13 +576,6 @@ pub fn create_organization(conn: &Connection, name: &str, domains: &[String]) ->
     Ok(id)
 }
 
-// AUD-P2-16 (C12): the organization edit/delete lane — the page was
-// create-only end to end. Soft-delete keeps the mirror history (the
-// same deleted_at discipline the synced tables use), so a later sync
-// of the same remote id can still resurrect a genuinely live org.
-
-/// Edit an organization's name and domains. Returns false when the id
-/// is unknown or already soft-deleted.
 pub fn update_organization(
     conn: &Connection,
     org_id: i64,
@@ -615,9 +608,6 @@ pub fn update_organization(
     Ok(changed > 0)
 }
 
-/// Soft-delete an organization (members' organization_id links are
-/// historical facts and stay; the lists filter them out). Returns
-/// false when the id is unknown or already soft-deleted.
 pub fn delete_organization(conn: &Connection, org_id: i64) -> Result<bool> {
     let changed = conn.execute(
         "UPDATE organizations SET deleted_at = datetime('now')
@@ -841,7 +831,6 @@ mod batch29_audit103_104_105_tests {
     }
 }
 
-// AUD-P2-16 (C12): the organization edit/delete lane.
 #[cfg(test)]
 mod audp2_tests {
     use super::*;
@@ -877,11 +866,9 @@ mod audp2_tests {
         assert_eq!(name, "Acme Industries");
         assert!(domains.contains("acme.io"), "{domains}");
 
-        // Empty name is refused.
         let err = update_organization(&c, org, "   ", &[]).expect_err("name guard");
         assert!(err.to_string().contains("required"), "{err}");
 
-        // Delete is soft — the row stays, filtered from the lists.
         assert!(delete_organization(&c, org).expect("delete"));
         let gone: i64 = c
             .query_row(
@@ -891,7 +878,6 @@ mod audp2_tests {
             )
             .expect("count");
         assert_eq!(gone, 0);
-        // A second delete is a clean false; update on the gone row too.
         assert!(!delete_organization(&c, org).expect("delete again"));
         assert!(!update_organization(&c, org, "X", &[]).expect("update gone"));
     }

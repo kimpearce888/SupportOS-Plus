@@ -418,9 +418,6 @@ mod tests {
             [],
         )
         .expect("seed non-json audit row");
-        // AU2-13: with_conversation_id builder deleted — seed via the
-        // program's conversation-scoped audit API (stores after_state
-        // verbatim, which list_audit parses back as JSON).
         crate::jobs::audit(
             &conn,
             "user",

@@ -7,13 +7,11 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 
 ## CURRENT POINTER
 
-- Next task: **R1.5 — core/storage+config strip** (`db.rs migrations.rs
-  migrations/ people_store/ saved_views/ config.rs crypto.rs audit.rs
-  logging.rs bootstrap.rs backup_service.rs data_reset.rs maintenance.rs
-  error.rs`; see `plan.md` §7 R1.5 — includes `audit.rs`, invariant 7!).
+- Next task: **R1.6 — core/domain strip** (everything else in `core/src`
+  incl. `core/tests/`; see `plan.md` §7 R1.6).
 - Pre-flight: confirm CI green on the session-2 final head (run id in
   session log).
-- Session counter: 2 completed (R1.0-R1.3 executed; see log).
+- Session counter: 2 completed (R1.0-R1.5 executed; see log).
 - Environment: toolchain installed this session; target/ warm but disk-tight
   (G-05: `cargo clean -p <crate>` + `rm -rf target/debug/incremental`
   between lanes; per-crate test runs beat the 10-min tool window).
@@ -27,8 +25,8 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 | R1.1 catalog+xtask strip | done (session 2) | 59 comment lines removed (catalog was already comment-free: 0 of 8 files); subset --check clean; CI run#303 green |
 | R1.2 core/ai_* strip | done (session 2) | 90 comment lines removed across 7 of 15 files; cumulative subset check clean (28/28); battery green; CI run#304 green |
 | R1.3 core/sync+workers strip | done (session 2) | 162 whole lines + 1 trailing comment removed from 8 of 13 files; cumulative subset check clean (41/41); battery green (per-crate lanes); CI run#305 green |
-| R1.4 core/helpscout strip | done (session 2) | 26 lines removed from 3 of 9 files; cumulative subset check clean (50/50); battery green (all 4 test lanes); CI pending |
-| R1.5 core/storage+config strip | pending | includes audit.rs — see invariant 7 |
+| R1.4 core/helpscout strip | done (session 2) | 26 lines removed from 3 of 9 files; cumulative subset check clean (50/50); battery green (all 4 test lanes); CI run#306 green |
+| R1.5 core/storage+config strip | done (session 2) | 54 lines removed from 6 of 23 files; audit.rs invariant-7 duty verified (allowlist lines untouched, gate clean); cumulative subset check clean (73/73); battery green; CI pending |
 | R1.6 core/domain strip | pending | + core/tests |
 | R1.7 app-shell/infra strip | pending | |
 | R1.8 app-shell/pages-A strip | pending | 7 largest pages |
@@ -89,6 +87,14 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
   R1.3 head mid-batch. Full per-crate battery: clippy x2, core 520,
   core-sandbox 528 (after clean -p core), catalog+xtask 56, app-shell
   293; verify-icons; cumulative subset --check 50/50.
+- R1.5 executed (same session): 54 comment lines removed from 6 of 23 files
+  (maintenance 21, people_store/mod 13, migrations/cleanup 14, db 2,
+  audit 3, backup_service 1). Invariant 7 held: audit.rs's two gate-allowlist
+  lines are pure code lines (no trailing comments) — gate re-ran clean
+  with zero allowlist changes. Cumulative subset --check 73/73. Battery:
+  clippy x2, core 520, core-sandbox 528, catalog+xtask 56, app-shell 293,
+  verify-icons, gate — all green. CI run#306 green on the R1.4 head
+  mid-batch.
 
 ### Session 1 — 2026-11-12
 - Research: full metrics snapshot (plan §6); read the no-simulation gate
