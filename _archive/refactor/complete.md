@@ -20,11 +20,9 @@ CI evidence, date, notes.
 
 ## Terminal entries
 
-*(none yet — R0's entry lands when its CI run is confirmed green)*
-
 | Task | Commit | CI evidence | Date | Notes |
 |---|---|---|---|---|
-| R0 pipeline alignment | — | — | — | pending CI confirmation |
+| R0 pipeline alignment | `c6ab15d` | CI run#301 (id 43227385165), all 4 lanes success, 2026-11-12 | 2026-11-12 | traceability gate + 2 doc inputs archived; root docs/ removed; no-sim gate kept; zero stale references verified |
 
 ## Final metrics (fill at close-out)
 

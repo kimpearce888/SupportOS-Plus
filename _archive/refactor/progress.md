@@ -8,8 +8,8 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 ## CURRENT POINTER
 
 - Next task: **R1.0 — build `xtask strip-comments`** (see `plan.md` §7 R1).
-- Pre-flight: confirm CI run on the session-1 head is green (run id recorded
-  below in the session log / `complete.md`).
+- Pre-flight: confirm CI run#301 (id 43227385165) on `c6ab15d` is green — it
+  is (all 4 lanes, 2026-11-12); proceed directly to R1.0.
 - Session counter: 1 completed.
 - Environment note for session 2: toolchain must be provisioned first
   (`handover.md` §2 step 3) — session 1 did not need cargo.
@@ -18,7 +18,7 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 
 | Task | Status | Notes |
 |---|---|---|
-| R0 pipeline alignment | done (session 1) | gate + doc inputs archived; CI evidence pending in `complete.md` |
+| R0 pipeline alignment | terminal (session 1) | CI run#301 green — see `complete.md` |
 | R1.0 strip-comments tool | pending | spec in `plan.md` §5.1/§7 |
 | R1.1 catalog+xtask strip | pending | pilot batch, 12 files |
 | R1.2 core/ai_* strip | pending | ~13 files |
@@ -60,5 +60,7 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
   root `docs/` removed entirely (root = code + code-only build machinery).
   Verified: zero references to `gate_traceability|docs/audit` outside
   `_archive`; no-simulation gate clean.
-- Commits: `38f480b` (framework), R0 commit (see git log).
-- CI: pending at session close — session 2 must confirm green before R1.0.
+- Commits: `38f480b` (framework), `c6ab15d` (R0).
+- CI: run#301 (id 43227385165) — completed / success on all four lanes
+  (check, packages x86_64, packages arm64, kittest snapshot locks).
+  R0 terminal; evidence in `complete.md`.
