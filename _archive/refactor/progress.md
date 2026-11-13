@@ -149,6 +149,33 @@ Checks: cargo machete (v0.9.2, installed ad hoc) now reports only the 3 document
 - CI closures mid-session: run#316 green on `5c8dc5c` (docs head),
   run#317 green on `f06e1ba` (R2.2 head), run#318 green on `5e47b50`
   (R2.2 ledger addendum) — each verified before the next batch started.
+
+- R2.4 survey (prep for the next session; crude cfg(test) tracker —
+  numbers to be re-verified with a precise pass): 126 production-path
+  candidates vs 2,588 test-region occurrences across 131 files.
+  Classification of the 126: (a) ~45 static regex compiles
+  (Regex::new(CONST).unwrap/expect — security.rs 7, quality/* ~18,
+  coaching/* ~10, interaction_engine/* ~6, qa_ai 3, signals macro 1);
+  (b) ~19 mutex-poison expects (vectorstore_sqlitevec 11, helpscout/
+  inert 5, settings MASTER_KEY 3 — standard poison idiom; the
+  into_inner() recovery pattern is the likely elimination);
+  (c) ~15 post-condition expects ("checked above"/"loaded above"/
+  "hit_cap implies"/"12 kinds"/"static" — control-flow restructure);
+  (d) bench.rs ~25 (dev-only bench harness — classification verdict
+  needed: is xtask/bench-style build machinery 'production' under
+  D-10?); (e) xtask 4 (same verdict needed); (f) unreachable! arms
+  3 (app/mod PageKey, oauth_state hex_digit, workers/execute — R2.5
+  territory); (g) bootstrap-ish 3 (task_bridge spawn, design font
+  family, mockserver panic — mockserver is test-support in a prod
+  tree); (h) scanner false-positives possible (crude tracker; e.g.
+  inert.rs:659 sits near test-support code). NEXT SESSION must:
+  (1) re-run the triage with a precise parser, (2) write the per-class
+  policy as D-14 (static-regex + poison-recovery + xtask/bench
+  classification — possibly an owner question), (3) execute in 2-3
+  batches. NOTE: the plan's R2.4 policy is strict (bootstrap-only
+  exemption) — do not bulk-convert static regexes to error
+  propagation without the D-14 decision; that signature churn would
+  collide with R3's DRY pass.
 - R2.3 executed (after run#318 confirmed the green base): installed
   cargo-machete v0.9.2 + cargo-deny v0.20.2 ad hoc (both to ~/.cargo,
   ~5 min total). Machete's 4 candidates triaged: 1 REAL (scrypt —
