@@ -1,27 +1,24 @@
 # Refactor Progress — Live State
 
-Last updated: session 3 (2026-11-12). Update rule: every session updates
+Last updated: session 4 (2026-11-13). Update rule: every session updates
 this file before ending. Statuses: `pending` / `in_progress` / `done` /
 `terminal` (done + closed in `complete.md`) / `dropped` (with reason in
 `memory.md`).
 
 ## CURRENT POINTER
 
-- Next task: **R1.10 — comment closeout** (delete the redundant
-  `warn(missing_docs)` + `allow(missing_docs)` pairs in catalog/core;
-  the whole-tree `strip-comments --check crates` is ALREADY green —
-  205/205 this session; run the full battery + CI, record the exact
-  removed-comment count; see `plan.md` §7 R1.10).
-- Pre-flight: confirm CI green on the session-3 final head (run id in
-  session log). If the session ended mid-CI, the run may still be
-  in flight — next session must wait for it.
-- Session counter: 3 completed (R1.0-R1.9 executed — session 3 ran four
-  batches; see log). THE ENTIRE crates TREE IS COMMENT-FREE (205/205).
-- Environment: toolchain installed this session (cold target/); G-05 hit
-  three times (ld Bus error during app-shell test link — `rm -rf
-  target/debug/incremental` + retry fixed each). Per-crate test lanes
-  mandatory, ONE lane per tool call (the 10-min window killed a two-lane
-  chain mid-run once; rerun was green).
+- Next task: **R2.1 — dead-code sweep** (fix every dead-code/unused
+  warning by deleting or wiring the code; never `#[allow]`; see `plan.md`
+  §7 R2.1). The whole R1 comment-stripping stage is TERMINAL (R1.0–R1.10;
+  see `complete.md`).
+- Pre-flight: confirm CI green on the session-4 final head (run id in
+  session log). If the session ended mid-CI, the run may still be in
+  flight — next session must wait for it.
+- Session counter: 4 completed (R1.0-R1.10 executed; stage R1 terminal).
+- Environment: toolchain reinstalled this session (cold target/); G-05
+  hit once at 100%-full (app-shell test link) — `rm -rf
+  target/debug/incremental` (2.5G) + retry green. Per-crate test lanes
+  mandatory, ONE lane per tool call.
 
 ## Task states
 
@@ -38,7 +35,7 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 | R1.7 app-shell/infra strip | done (session 3) | 429 whole lines + 2 inline comments removed from 11 of 19 files; G-07 hit twice (comments had masked let_and_return in design/mod.rs + collapsible_if in workers_host.rs — fixed by behavior-identical restructure); cumulative subset check clean (154/154); battery green; CI run#309 green |
 | R1.8 app-shell/pages-A strip | done (session 3) | 864 whole lines + 1 inline comment removed from 7 of 7 pages (inbox 226, knowledge 150, outreach 157, custom_objects 132, settings 114, ai_center 55, reports 51); G-07 hit twice more (collapsible_if in custom_objects.rs + outreach.rs empty-state CTAs — same restructure fix); cumulative check 161/161 clean over stripped scopes; battery green; CI run#310 green |
 | R1.9 app-shell/pages-B strip | done (session 3) | 1011 whole lines + 1 inline comment removed from 44 of 51 scanned (16 pages + mod.rs + queries.rs + json_fields.rs + all 26 tests files); NO G-07 hits; whole-tree check crates 205/205 clean — the entire Rust source tree is comment-free; battery green (app-shell lane re-linked all 26 stripped kittest binaries); CI run#311 green |
-| R1.10 comment closeout | pending | lint-attr cleanup + zero-check |
+| R1.10 comment closeout | done (session 4) | redundant warn+allow missing_docs pairs deleted from catalog/core lib.rs (12 attr lines, 4 insertions after fmt); crate lint headers now match app-shell's clean form; whole-tree check crates 205/205 green; battery green; CI pending |
 | R2.1–R2.5 unnecessary code | pending | see plan §7 R2 |
 | R3.1–R3.6 DRY | pending | see plan §7 R3 |
 | R4.1–R4.5 clean code | pending | see plan §7 R4 |
@@ -51,6 +48,35 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 `module → construct → verdict(keep/merge/delete/rename) → outcome`)*
 
 ## Session log
+
+### Session 4 — 2026-11-13
+- Pre-flight: sandbox reset AGAIN (clone + toolchain gone) — re-provisioned
+  per handover §2 (re-clone ~1 min + toolchain 1.99.1 ~4 min). CI run#312
+  green on `bb29f10` confirmed before work began.
+- R1.10 executed: deleted the redundant `#![warn(clippy::all,
+  missing_docs)]` → `#![warn(clippy::all)]` and trimmed `missing_docs`
+  from the allow lists in `crates/catalog/src/lib.rs` +
+  `crates/core/src/lib.rs` (D-04 resolved; net lint config unchanged —
+  the allow was winning). app-shell already had the clean form; xtask has
+  no lint attrs; the three crate headers are now uniform. 12 attr lines
+  removed, 4 insertions after fmt (list reflow).
+- Whole-tree zero-check: `strip-comments --check crates` green
+  (205/205) — this was already green from session 3; R1.10's own diff
+  touched only attribute lines.
+- Battery: gate clean, fmt --check clean, clippy workspace (2m55s) +
+  sandbox lane (38s) clean, catalog+xtask 56, core 520 (460s),
+  core-sandbox 528 (455s), app-shell 293+2 (290s after one G-05 retry —
+  disk hit 100% full at the link step; `rm -rf
+  target/debug/incremental` freed 2.5G), verify-icons verified.
+- R1 STAGE TERMINAL (R1.0–R1.10). Exact stripper-verified counts for the
+  record: 3,174 whole comment lines + 6 inline comments removed across
+  R1.1–R1.9 (catalog contributed 0 — already clean); R1.10 removed 12
+  redundant lint-attr lines. Terminal entries written to `complete.md`
+  (R1.10's own CI row rides this push — final confirmation next poll).
+- Note for R2.2: the `#[allow]` census in the plan says 31 instances —
+  re-count at execution time (R1.x restructuring touched two sites:
+  design/mod.rs and workers_host.rs G-07 fixes, plus the audit allowlist
+  lines in core/src/audit.rs which are gate-anchored, invariant 7).
 
 ### Session 3 — 2026-11-12
 - Pre-flight: sandbox reset AGAIN (clone + toolchain gone) — re-provisioned

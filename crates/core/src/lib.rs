@@ -1,10 +1,6 @@
 #![deny(unsafe_code, rust_2018_idioms)]
-#![warn(clippy::all, missing_docs)]
-#![allow(
-    clippy::module_name_repetitions,
-    clippy::missing_errors_doc,
-    missing_docs
-)]
+#![warn(clippy::all)]
+#![allow(clippy::module_name_repetitions, clippy::missing_errors_doc)]
 
 pub mod activity;
 pub mod ai_attributes;

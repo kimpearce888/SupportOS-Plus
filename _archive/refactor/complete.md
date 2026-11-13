@@ -23,10 +23,23 @@ CI evidence, date, notes.
 | Task | Commit | CI evidence | Date | Notes |
 |---|---|---|---|---|
 | R0 pipeline alignment | `c6ab15d` | CI run#301 (id 43227385165), all 4 lanes success, 2026-11-12 | 2026-11-12 | traceability gate + 2 doc inputs archived; root docs/ removed; no-sim gate kept; zero stale references verified |
+| R1.0 strip-comments tool | `88e1770` | CI run#303 (id 43269465470) on `6362842` (R1.0+R1.1 pushed together), 2026-11-12 | 2026-11-12 | syntax-aware lexer in xtask (~280 lines, 38 edge tests); --check mode; never regex |
+| R1.1 catalog+xtask strip | `6362842` | CI run#303, 2026-11-12 | 2026-11-12 | 59 whole lines (xtask only — catalog already comment-free) |
+| R1.2 core/ai_* strip | `7b2ceb4` | CI run#304, 2026-11-12 | 2026-11-12 | 90 lines, 7 of 15 files |
+| R1.3 core/sync+workers strip | `b6fb8ad` | CI run#305, 2026-11-12 | 2026-11-12 | 162 whole + 1 trailing, 8 of 13 files |
+| R1.4 core/helpscout strip | `011a191` | CI run#306, 2026-11-12 | 2026-11-12 | 26 lines, 3 of 9 files |
+| R1.5 core/storage+config strip | `7a7b264` | CI run#307, 2026-11-12 | 2026-11-12 | 54 lines; audit.rs invariant-7 duty held |
+| R1.6 core/domain strip | `421c322` | CI run#308, 2026-11-12 | 2026-11-12 | 479 whole + 1 inline, 26 files; core crate fully comment-free |
+| R1.7 app-shell/infra strip | `17cfce1` | CI run#309, 2026-11-12 | 2026-11-12 | 429 whole + 2 inline; 2 G-07 masked-lint fixes (behavior-identical) |
+| R1.8 app-shell/pages-A strip | `ad13191` | CI run#310, 2026-11-12 | 2026-11-12 | 864 whole + 1 inline, the 7 largest pages; 2 more G-07 fixes |
+| R1.9 app-shell/pages-B + tests strip | `267da13` | CI run#311, 2026-11-12 | 2026-11-12 | 1011 whole + 1 inline; kittest goldens drift-locked green (pixel-neutral); whole tree comment-free (205/205) |
+| R1.10 comment closeout | (this push) | CI pending — row to be finalized with the run id after the push | 2026-11-13 | redundant warn/allow missing_docs pairs deleted (catalog+core lib.rs); 12 attr lines; stage R1 TERMINAL: 3,174 whole comment lines + 6 inline removed by the stripper across R1.1–R1.9, + 12 attr lines in R1.10 |
 
 ## Final metrics (fill at close-out)
 
-- Comments removed (exact, from stripper): —
+- Comments removed (exact, from stripper): **3,174 whole comment lines +
+  6 inline comments (R1.1–R1.9) + 12 redundant lint-attr lines (R1.10)**
+  — stage R1 terminal; the whole-refactor close-out (R6.2) fills the rest.
 - LOC delta: —
 - Deps removed: —
 - `unwrap`/`expect`/`panic` eliminated: —
