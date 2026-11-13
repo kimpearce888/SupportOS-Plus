@@ -14,12 +14,12 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
   pattern missed turbofish `collect::<…>()` spellings — match `collect`
   with AND without generic arguments in trailing-tail patterns).
 - Pre-flight [session 9]: R3.2 executed on the green base `bfad483`
-  (run#334 green, all four lanes). R3.2 head rides this push — its CI
-  run is this session's tail gate; the addendum commit records the
-  evidence (standard pattern).
-- Session counter: 9 completing (R1 terminal; R2 stage TERMINAL; R3.1
-  terminal — run#332 green; R3.2 executed this session — CI row rides
-  this push).
+  (run#334 green, all four lanes). R3.2 head `5cc08fc` is CI-VERIFIED
+  GREEN — run#335 (id 43492961540), all four lanes success (addendum
+  commit below). Green base for R3.3: the addendum head's own
+  docs-only run (the standard next-session preflight gate).
+- Session counter: 9 completed (R1 terminal; R2 stage TERMINAL; R3.1
+  terminal — run#332 green; R3.2 TERMINAL — run#335 green on `5cc08fc`).
 - Environment: session 9's sandbox was PARTIALLY reset (clone and
   ~/.cargo SURVIVED; /tmp logs wiped; no re-provision needed beyond
   github-reconnect.sh). Warm build ran during the CI preflight wait
@@ -49,7 +49,7 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 | R2.4 unwrap/expect policy | terminal (session 6) | batch a: D-14 policy + B-class poison elimination + A-class normalization (CI run#322 green); batch b: class C resolved — 9 eliminated (incl. ALL 4 production unwraps), 8 kept with written D-14 justifications; scanner census 56 prod expects + 0 unwraps; battery green; CI row rides this push — see complete.md |
 | R2.5 panic!/todo!/unimplemented! | terminal (session 7) | precise census: 4 production occurrences, not the plan's 30 (27 were test-region overcounts; todo!/unimplemented! zero tree-wide); policy D-15: 3 exhaustiveness-forced unreachable! kept with written local proofs, 1 arm-level cfg(test) panic reclassified D-10-exempt; one code increment (execute.rs:1833 message normalization); battery green; CI row rides this push — see complete.md |
 | R3.1 error types | terminal (session 8) | census: FIVE types tree-wide, ZERO duplicate enums (root+boxed-subtype architecture already consolidated); 3 hand-rolled Display/Error impls → thiserror derives (byte-identical messages; AcquireError #[source] reproduces the hand-rolled source()); TranslateError enum→newtype (class dimension unread by its single consumer); app-shell +thiserror dep (lock: one edge line); D-16; CI run#332 green on `5ca31af` — see complete.md |
-| R3.2 SQL plumbing | done (session 9) | lenient row-collect tail consolidated into db::query_rows + db::rows_ok; 80 sites (73 census + 7 turbofish blind-spot); +657/−823 across 32 files; battery green (520/528/293+2/56); CI row rides this push — see complete.md |
+| R3.2 SQL plumbing | terminal (session 9) | lenient row-collect tail consolidated into db::query_rows + db::rows_ok; 80 sites (73 census + 7 turbofish blind-spot); +657/−823 across 32 files; battery green (520/528/293+2/56); CI run#335 green on `5cc08fc` — see complete.md |
 | R3.3–R3.6 DRY | pending | see plan §7 R3 |
 | R4.1–R4.5 clean code | pending | see plan §7 R4 |
 | R5.1–R5.3 guardrails | pending (optional, stage-gated) | |
@@ -183,10 +183,14 @@ Checks: cargo machete (v0.9.2, installed ad hoc) now reports only the 3 document
   Post-batch census scan: ZERO lenient tails remaining outside db.rs's
   own helper bodies (the 2 definitions); 77 query_rows call sites + 5
   rows_ok call sites + 0 collect_rows.
-- R3.2 done — the CI row rides this push; terminal confirmation + run
-  id at the addendum commit after the run goes green (standard
-  pattern). Pointer advances to R3.3 (HTTP/serde plumbing, census
-  first).
+- R3.2 done — CI closure: run#335 (id 43492961540) GREEN on `5cc08fc`
+  — all four jobs success, kittest drift gate green (the SQL plumbing
+  touches no rendered-page layout; the data paths feed the same
+  values). complete.md R3.2 row filled; task TERMINAL. Pointer advances
+  to R3.3 (HTTP/serde plumbing, census first).
+- Session closed: this closure line + the CI-verified rows ride the
+  addendum commit; its docs-only CI run is session 10's preflight
+  gate.
 
 ### Session 8 — 2026-11-13
 - Pre-flight: sandbox reset at the context boundary (clone + toolchain
