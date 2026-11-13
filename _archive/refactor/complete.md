@@ -35,6 +35,7 @@ CI evidence, date, notes.
 | R1.9 app-shell/pages-B + tests strip | `267da13` | CI run#311, 2026-11-12 | 2026-11-12 | 1011 whole + 1 inline; kittest goldens drift-locked green (pixel-neutral); whole tree comment-free (205/205) |
 | R1.10 comment closeout | `9b4aac5` | CI run#313 (id 43357073596), all 4 lanes success, 2026-11-13 | 2026-11-13 | redundant warn/allow missing_docs pairs deleted (catalog+core lib.rs); 12 attr lines; stage R1 TERMINAL: 3,174 whole comment lines + 6 inline removed by the stripper across R1.1–R1.9, + 12 attr lines in R1.10 |
 
+| R2.1 dead-code sweep | `f01ce18` | CI run#315 (id on file in progress.md), all 4 lanes success, 2026-11-13 | 2026-11-13 | zero active dead-code/unused warnings; 2 vestigial suppressions deleted (testsupport.rs allow(dead_code) — already cfg(test)-gated and fully used; issue_radar.rs allow(unused_mut) — nav mutated at 8 sites) |
 ## Final metrics (fill at close-out)
 
 - Comments removed (exact, from stripper): **3,174 whole comment lines +
