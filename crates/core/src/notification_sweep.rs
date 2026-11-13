@@ -157,12 +157,7 @@ fn sweep_conversation_events(
         events.truncate(EVENT_SWEEP_CAP);
     }
     let processed_to = if hit_cap {
-        Some(
-            events
-                .last()
-                .map(|(id, _)| *id)
-                .expect("hit_cap implies at least one row"),
-        )
+        events.last().map(|(id, _)| *id)
     } else {
         None
     };

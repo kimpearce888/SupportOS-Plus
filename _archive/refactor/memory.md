@@ -107,14 +107,54 @@ session ends by adding what the next session must not have to rediscover.
     `.expect("midnight is always a valid time")` — error-path-only
     change; under constraint 3 the expect message is the only in-code
     documentation a survivor may carry.
-  - **Class C — guarded post-conditions (17 after A/B): R2.4-b owns
-    these.** Each is guarded by an explicit same-function check
-    ("checked above", "hit_cap implies", is_none early-return, match-arm
-    length check, HMAC's any-key-length contract). Where a natural
-    Option-flow rewrite exists (e.g. notification_sweep's
-    `last().map(...)` inside `Some(...)`), eliminate; where elimination
-    means restructuring control flow for a provably-unreachable branch,
-    keep the expect (same family as R2.5's unreachable arms).
+  - **Class C — guarded post-conditions (17 after A/B): RESOLVED in
+    R2.4-b — 9 eliminated, 8 kept.** Each was guarded by an explicit
+    same-function check; the batch rule was "eliminate where a natural
+    Option/Result-flow rewrite exists, keep where elimination would
+    restructure control flow for a provably-unreachable branch."
+    ELIMINATED (9): live_chats 349 (is_some_and+expect →
+    `if let Some(cache)` over `.filter(...)` — edition-2024 if-let
+    temporary scope makes the borrow end before the else arm's cache
+    write); notification_sweep 164 (`Some(last().map(...).expect(...))`
+    → plain `events.last().map(...)` — hit_cap implies non-empty, the
+    Option-flow IS the shape); coaching 461+485
+    (`unwrap_or("").is_empty() { } else { .unwrap() }` →
+    `match as_str() { Some(s) if !s.is_empty() => ..., _ => "(see
+    reasoning)" }`); inert 644 (is_none early-return + `wf.unwrap()` →
+    `let Some(wf) = ... else { return Err }`; the two not-found errors
+    are byte-identical `not_found_remote("POST")` values, so moving the
+    wf check ahead of the conv lookup is unobservable); quality 629
+    (`json!` literal + `as_object_mut().unwrap()` → build a
+    `serde_json::Map` directly, `Value::Object` wrap once at the end —
+    identical Map type and insert order); embeddings 690+744 (bool
+    `qdrant_connected` + two far-below expects → single
+    `qdrant.filter(|q| q.health().connected)` rebind + `if let Some(q)`
+    gates — health() still called exactly once at the same point);
+    settings 19 (`bytes.len() == KEY_LEN` guard +
+    `try_into().expect("length checked")` → nested match on
+    `<[u8; KEY_LEN]>::try_from(bytes.as_slice())` whose Err arm carries
+    the same wrong-length Error::Config — one length check instead of
+    two). KEPT (8): live_chats 111 (page-model contract; the expect sits
+    inside an egui layout closure — unwinding it risks pixel drift
+    against the kittest goldens, D-05); ai_pipeline 1116 (the draft row
+    was just inserted by this same function — a Result propagation
+    needs get_draft to return Result<Option<_>>, signature churn that
+    collides with R3); ai_pipeline 1747+1751 (facts JSON and digest row
+    are both written by this same pipeline — same-code post-conditions);
+    support_graph 294 (static 12-kinds node_specs table ↔
+    GraphNodeKind::ALL correspondence; a filter_map rewrite would
+    silently DROP a node on an unrepresentable mismatch instead of
+    failing loudly); workers/execute 675 (the trigger decision returns
+    Some only with a thread id — the type-shape fix, returning the id
+    inside the decision, is R3.4 parameter-object territory, noted
+    there); webhook 29 (HMAC's `new_from_slice` Result exists for API
+    symmetry only — the hmac crate contract accepts any key length);
+    embeddings 813 (the json! object-literal post-condition — the
+    alternative is duplicating the 8-field literal or bloating it into
+    imperative Map inserts; the expect message states the invariant
+    honestly, an `if let` would imply a reachable skip). Post-batch
+    scanner census: 56 production occurrences, ALL expects, ZERO
+    unwraps — D-14's tree-wide end state reached.
   - **Class D — runtime/bootstrap infrastructure (3): KEEP.**
     workers/mod.rs tokio runtime build, task_bridge.rs thread spawn,
     design/mod.rs egui default font family — one-time infra construction
@@ -215,11 +255,13 @@ session ends by adding what the next session must not have to rediscover.
   pedantic subset) — stage-gated, owner's call.
 - **Q-02.** Whether the close-out (R6.2) should bump the version and cut a
   tagged release (v1.10.0) — out of scope unless the owner asks.
-- **Q-03 (session 5, D-14).** R2.4 keeps 65 production expects on D-14
-  grounds (45 constant-input constructors, 17 guarded post-conditions,
-  3 bootstrap-equivalent infra sites) instead of the plan's letter
-  ("eliminate all production ones"). If the owner wants the strict
-  reading anyway, the work is: class A → Result propagation across ~45
-  call sites (do it AFTER R3 to avoid double churn), class C → control-
-  flow restructures, class D → startup error handling in app bootstrap.
-  Default (standing unless overridden): D-14's keeps.
+- **Q-03 (session 5, D-14; count updated at R2.4-b close).** R2.4 ends
+  with 56 production expects kept on D-14 grounds (45 constant-input
+  constructors, 8 guarded post-conditions with written class-C
+  justifications, 3 bootstrap-equivalent infra sites) instead of the
+  plan's letter ("eliminate all production ones"). If the owner wants
+  the strict reading anyway, the work is: class A → Result propagation
+  across ~45 call sites (do it AFTER R3 to avoid double churn), the 8
+  class-C keeps → per-site control-flow restructures (see D-14 for why
+  each was judged unnatural), class D → startup error handling in app
+  bootstrap. Default (standing unless overridden): D-14's keeps.

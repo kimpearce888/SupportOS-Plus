@@ -38,6 +38,8 @@ CI evidence, date, notes.
 | R2.1 dead-code sweep | `f01ce18` | CI run#315 (id on file in progress.md), all 4 lanes success, 2026-11-13 | 2026-11-13 | zero active dead-code/unused warnings; 2 vestigial suppressions deleted (testsupport.rs allow(dead_code) — already cfg(test)-gated and fully used; issue_radar.rs allow(unused_mut) — nav mutated at 8 sites) |
 | R2.2 #[allow] audit | `f06e1ba` | CI run#317 (id 43368539603), all 4 lanes success, 2026-11-13 | 2026-11-13 | 37 instances audited (28 in-src + 9 in-test); verdict table in progress.md, survivor policy memory D-13; 1 vestigial deleted (search/lanes.rs ref_option); 34 kept with written justifications; R2.1+R2.2 together: 3 deletions, 0 unjustified suppressions remain |
 | R2.3 dependency hygiene | `981f2a0` | CI run#319 (id 43377764840), all 4 lanes success, 2026-11-13 | 2026-11-13 | machete: 1 real unused dep (scrypt) removed — lock dropped exactly scrypt+salsa20+pbkdf2 (747 bytes); 3 false positives kept (custom lib names); cargo deny: advisories/bans/licenses/sources ok; battery green |
+| R2.4 unwrap/expect policy | `<this push>` | CI run rides the push — run id recorded in progress.md at next poll | 2026-11-15 | 86 production occurrences triaged under D-14: batch a eliminated the 21 mutex-poison sites (into_inner recovery) and normalized 20 unwraps→expects; batch b resolved the 17 class-C guarded sites — 9 eliminated (incl. ALL 4 production unwraps), 8 kept with written justifications; end state 56 production occurrences, all expects, zero unwraps; +32/−33 across 7 source files; battery green (520/528/293+2/56, clippy x2, gate, strip-check 205/205) |
+
 ## Final metrics (fill at close-out)
 
 - Comments removed (exact, from stripper): **3,174 whole comment lines +
@@ -45,5 +47,11 @@ CI evidence, date, notes.
   — stage R1 terminal; the whole-refactor close-out (R6.2) fills the rest.
 - LOC delta: —
 - Deps removed: —
-- `unwrap`/`expect`/`panic` eliminated: —
+- `unwrap`/`expect`/`panic` eliminated: **R2.4 terminal — 30 production
+  occurrences eliminated (86→56: 21 mutex-poison in batch a, 9 guarded
+  post-conditions in batch b incl. all 4 remaining production unwraps),
+  20 message-less unwraps normalized to justified expects; end state 56
+  production occurrences (45 class-A + 8 class-C + 3 class-D), all
+  expects, each with a written D-14 justification, zero production
+  unwraps.** The panic!/todo!/unimplemented! family is R2.5 (pending).
 - Files split: —

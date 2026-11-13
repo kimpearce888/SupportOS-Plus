@@ -650,7 +650,7 @@ fn embed_pending_chunks(
         return Ok(0);
     };
 
-    let qdrant_connected = qdrant.is_some_and(|q| q.health().connected);
+    let qdrant = qdrant.filter(|q| q.health().connected);
 
     let texts: Vec<String> = pending
         .iter()
@@ -673,7 +673,7 @@ fn embed_pending_chunks(
     };
 
     if table == "knowledge_chunks" {
-        if qdrant_connected {
+        if let Some(q) = qdrant {
             let mut points: Vec<crate::vectorstore_sqlitevec::VectorPoint> = Vec::new();
             let mut indexed_ids: Vec<i64> = Vec::new();
             let mut failed_ids: Vec<i64> = Vec::new();
@@ -687,7 +687,6 @@ fn embed_pending_chunks(
                 }
             }
             if !points.is_empty() {
-                let q = qdrant.expect("checked is_some above");
                 let _ = q.ensure_collection(points[0].vector.len());
                 let ok = q.upsert(&points);
                 let state = if ok { "indexed" } else { "failed" };
@@ -728,7 +727,7 @@ fn embed_pending_chunks(
             _ => mark_chunk_failed(conn, table, chunk.id)?,
         }
     }
-    if qdrant_connected {
+    if let Some(q) = qdrant {
         let points: Vec<crate::vectorstore_sqlitevec::VectorPoint> = pending
             .iter()
             .enumerate()
@@ -741,7 +740,6 @@ fn embed_pending_chunks(
             })
             .collect::<Result<Vec<_>>>()?;
         if !points.is_empty() {
-            let q = qdrant.expect("checked is_some above");
             let _ = q.ensure_collection(points[0].vector.len());
             let _ = q.upsert(&points);
         }

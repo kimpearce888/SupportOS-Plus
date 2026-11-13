@@ -1,26 +1,25 @@
 # Refactor Progress — Live State
 
-Last updated: session 5 (2026-11-14). Update rule: every session updates
+Last updated: session 6 (2026-11-15). Update rule: every session updates
 this file before ending. Statuses: `pending` / `in_progress` / `done` /
 `terminal` (done + closed in `complete.md`) / `dropped` (with reason in
 `memory.md`).
 
 ## CURRENT POINTER
 
-- Next task: **R2.4-b — class-C post-condition expects** (17 guarded
-  sites; eliminate where a natural Option-flow rewrite exists, keep the
-  provably-unreachable restructures; policy D-14 class C). R2.4-a
-  (mutex-poison elimination + class-A normalization) is DONE this
-  session — see task table + session log. Then R2.5 (panic!/todo!/
-  unimplemented!, 30 instances + the 3 unreachable! arms noted in the
-  session-4 survey).
-- Pre-flight: confirm CI green on the session-5 final head (run id in
+- Next task: **R2.5 — panic!/todo!/unimplemented!** (30 instances +
+  the 3 unreachable! arms noted in the session-4 survey); a
+  D-14-shaped policy is expected (precise cfg(test)-aware census first
+  via the G-08 scanner — needs a panic/todo/unimplemented/unreachable
+  pattern set added to r24_triage.py — then per-family verdicts with
+  written justifications for every keep).
+- Pre-flight: confirm CI green on the session-6 final head (run id in
   session log). If the session ended mid-CI, the run may still be in
   flight — next session must wait for it.
-- Session counter: 5 completed (R1 terminal; R2.1-R2.3 terminal; R2.4
-  batch a done, batch b pending).
+- Session counter: 6 completed (R1 terminal; R2.1-R2.4 terminal; R2.5
+  next).
 - Environment: toolchain reinstalled this session (cold target/); G-05
-  managed preemptively (incremental rm between lanes; peak 93%); ONE
+  managed preemptively (incremental rm between lanes; peak 94%); ONE
   lane per tool call. Triage tooling: see G-08 — cross-line string
   state machine required, scanner at tool-results/r24_triage.py.
 
@@ -43,7 +42,7 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 | R2.1 dead-code sweep | terminal (session 4) | ZERO active warnings (clippy -D warnings already green); 2 vestigial suppressions deleted (testsupport.rs allow(dead_code) — module already cfg(test)-gated, all helpers used; issue_radar.rs allow(unused_mut) — nav mutated at 8 sites); battery green; CI run#315 green — see complete.md |
 | R2.2 #[allow] audit | terminal (session 4) | 37 instances audited (28 in-src + 9 in-test): verdict table in progress.md, survivor policy memory D-13; 1 vestigial deleted (search/lanes.rs ref_option — signature already Option<&str>); 34 kept with written justifications (FFI islands, constraint-3-unsatisfiable style pairs, R3.4/R4.5-owned clusters, D-10 test regions); battery green; CI run#317 green — see complete.md |
 | R2.3 dependency hygiene | terminal (session 4) | machete v0.9.2: 4 candidates = 1 real unused (scrypt — zero source occurrences; removed from workspace+core manifests; lock dropped exactly scrypt+salsa20+pbkdf2, 747 bytes) + 3 false positives (custom lib names spp_core/spp_catalog defeat machete's string matcher); cargo-deny v0.20.2: advisories/bans/licenses/sources all ok; battery green; CI run#319 green — see complete.md |
-| R2.4 unwrap/expect policy | in_progress (session 5) | batch a DONE: D-14 policy written (G-08 census 86 prod = A45/B21/C17/D3); B-class 21 mutex-poison ELIMINATED (into_inner recovery; 5 inert sites collapsed into lock_world()); A-class 20 unwraps normalized to expect("static regex"); prod 86→65, unwrap 24→4; battery green; CI run#322 green (id 43391137472) — batch b (class C, 17 sites) next |
+| R2.4 unwrap/expect policy | terminal (session 6) | batch a: D-14 policy + B-class poison elimination + A-class normalization (CI run#322 green); batch b: class C resolved — 9 eliminated (incl. ALL 4 production unwraps), 8 kept with written D-14 justifications; scanner census 56 prod expects + 0 unwraps; battery green; CI row rides this push — see complete.md |
 | R2.5 panic!/todo!/unimplemented! | pending | 30 instances + 3 unreachable! arms (session-4 survey); same D-14-shaped policy expected |
 | R3.1–R3.6 DRY | pending | see plan §7 R3 |
 | R4.1–R4.5 clean code | pending | see plan §7 R4 |
@@ -78,19 +77,61 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 
 Checks: cargo machete (v0.9.2, installed ad hoc) now reports only the 3 documented false positives; cargo deny (v0.20.2, installed ad hoc) — advisories ok, bans ok, licenses ok, sources ok.
 
-### R2.4 — `unwrap`/`expect` policy (session 5; precise census 86 production occurrences)
+### R2.4 — `unwrap`/`expect` policy (sessions 5-6; precise census 86 production occurrences)
 
 | class | sites | verdict | outcome |
 |---|---|---|---|
 | B — mutex/rwlock poison (vectorstore_sqlitevec 12, helpscout/inert 5, settings 4) | 21 | eliminate | `.lock().expect(...)` → `.lock().unwrap_or_else(\|p\| p.into_inner())` (std poison recovery; locks guard plain data, no poison-corruptible invariants); inert's 5 sites were inline duplicates of the existing `lock_world()` recovery helper — collapsed into it; happy path behavior-identical, the panic class is gone |
 | A — constant-input constructors (static Regex::new 40, seccomp const-args 4, chrono midnight 1) | 45 | keep as expect | input is compile-time constant — failure unrepresentable; Result propagation = ~45 signature churn colliding with R3 (session-4 note); the 20 message-less unwraps normalized to `.expect("static regex")` / `.expect("midnight is always a valid time")` (error-path-only; constraint 3 leaves the expect message as the only in-code doc a survivor may carry) |
-| C — guarded post-conditions (live_chats 2, embeddings 3, ai_pipeline 3, notification_sweep 1, support_graph 1, workers/execute 1, coaching 2, quality/mod 1, inert 1, webhook 1, settings 1) | 17 | R2.4-b | each guarded by an explicit same-function check; eliminate where a natural Option-flow rewrite exists, keep where elimination restructures control flow for a provably-unreachable branch (R2.5's unreachable-arm family) |
+| C — guarded post-conditions (live_chats 2, embeddings 3, ai_pipeline 3, notification_sweep 1, support_graph 1, workers/execute 1, coaching 2, quality/mod 1, inert 1, webhook 1, settings 1) | 17 | eliminate-if-natural (R2.4-b) | RESOLVED: 9 eliminated (live_chats 349 if-let/filter; notification_sweep 164 last().map; coaching 461+485 match as_str; inert 644 let-else; quality 629 Map build; embeddings 690+744 qdrant.filter rebind + if-let gates; settings 19 nested try_from match) incl. ALL 4 production unwraps; 8 kept with written D-14 justifications (live_chats 111, ai_pipeline 1116/1747/1751, support_graph 294, workers/execute 675→R3.4 note, webhook 29, embeddings 813) |
 | D — runtime/bootstrap infra (workers/mod tokio runtime, task_bridge thread spawn, design font family) | 3 | keep | one-time infra construction, no recovery path; bootstrap-equivalent (plan exempts main.rs bootstrap — same nature outside main.rs) |
 | xtask + bench machinery | 43 + bench.rs | exempt | dev-invoked build machinery; bench.rs is cfg(test)-gated at declaration — D-10 exemption |
 
 **R2.4-a verdict summary:** 86 production occurrences triaged by the precise (G-08) scanner — 21 ELIMINATED (class B), 20 normalized unwrap→expect (class A), 45 kept-under-D-14 (A + D), 17 deferred to R2.4-b (class C). Net tree after batch a: 65 production expects + 4 guarded unwraps; zero mutex-poison panics. Q-03 records the plan-letter deviation for owner override.
 
+**R2.4-b verdict summary (session 6):** the 17 class-C sites resolved — 9 ELIMINATED (the 6 prep-note clean rewrites + all 3 if-natural studies resolved to eliminate: embeddings' qdrant rebind, settings' nested try_from), 8 KEPT, every keep carrying an active written justification in memory D-14 class C. Net tree after batch b: 56 production occurrences, ALL expects, ZERO unwraps; 8 file diff, +32/−33 after fmt. The 3 settings/embeddings deviations from the session-5 prep note's borderline leanings were resolved in favor of elimination after flow study (rationale in D-14); no keep was left unjustified.
+
 ## Session log
+
+### Session 6 — 2026-11-15
+- Pre-flight: sandbox reset AGAIN (clone + toolchain gone) — re-provisioned
+  per handover §2 (re-clone via tool-results/github-reconnect.sh +
+  rustup 1.29.3 + toolchain 1.99.1). CI run#324 (id 43397843971)
+  GREEN on the session-5 closure head `9585089` confirmed before work
+  began — the preflight gate the session-5 closeout line predicted.
+- Repo state matched the ledger exactly: 6 commits since the session-4
+  summary (R2.2 terminal f06e1ba→run#317, R2.3 981f2a0→run#319, R2.4-a
+  d8cbb9c→run#322, triage adbb390→run#321, ledger addenda 68a06e5/9585089
+  →runs #323/#324).
+- R2.4-b executed (the CURRENT POINTER batch): the 17 class-C sites
+  resolved per the session-5 prep notes. 9 ELIMINATED across 7 files
+  (live_chats 349, notification_sweep 164, coaching 461+485, inert
+  641-644, quality 629, embeddings 690+744 via the single
+  `qdrant.filter(...)` rebind + two if-let gates, settings 19) —
+  including ALL 4 remaining production unwraps; 8 KEPT with written
+  D-14 justifications (see the class-C closure in memory.md).
+  Notable mechanics: the live_chats rewrite leans on edition-2024
+  if-let temporary scoping (the scrutinee borrow ends before the else
+  arm's cache write — verified by compile); inert's two not-found
+  arms produce byte-identical `not_found_remote("POST")` errors so the
+  let-else reorder is unobservable; quality's Map build keeps the same
+  serde_json::Map type and insert order as the json! literal.
+- One fmt write pass needed (inert.rs chain reflow) — fmt --check green
+  after it; net diff +32/−33 over 8 files (7 source + this ledger).
+- Battery: gate clean, fmt --check clean, clippy workspace (52s) +
+  sandbox (29s) clean, core 520 (469s), core-sandbox 528 (455s),
+  app-shell 293+2 (285s; kittest binaries all linked, 0 run — no
+  Vulkan, F-06), catalog+xtask 56, verify-icons verified, strip-check
+  205/205 — all green. G-05 managed preemptively (rm incremental
+  between lanes; peak 94% during app-shell link, then back to 77%).
+- Post-batch scanner (G-08) census: production 65→56, unwraps 4→0,
+  expects 61→56 — D-14's tree-wide end state reached (56 production
+  occurrences, all expects, each with a written justification; zero
+  production unwraps for the first time in the program's history).
+- R2.4 TERMINAL (both batches). Terminal row written to complete.md;
+  the R2.4 CI row rides this push — final confirmation next poll.
+  Pointer advanced to R2.5 (panic!/todo!/unimplemented!, 30 + 3
+  unreachable arms per the session-4 survey).
 
 ### Session 5 — 2026-11-14
 - Pre-flight: sandbox reset AGAIN (clone + toolchain gone) — re-provisioned

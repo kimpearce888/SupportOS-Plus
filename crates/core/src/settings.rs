@@ -16,13 +16,15 @@ pub fn init_master_key(path: &Path) -> Result<()> {
         return Ok(());
     }
     let key = match std::fs::read(path) {
-        Ok(bytes) if bytes.len() == KEY_LEN => bytes.try_into().expect("length checked"),
-        Ok(_) => {
-            return Err(Error::Config(format!(
-                "secrets master key at {} has the wrong length; refusing to overwrite it",
-                path.display()
-            )));
-        }
+        Ok(bytes) => match <[u8; KEY_LEN]>::try_from(bytes.as_slice()) {
+            Ok(key) => key,
+            Err(_) => {
+                return Err(Error::Config(format!(
+                    "secrets master key at {} has the wrong length; refusing to overwrite it",
+                    path.display()
+                )));
+            }
+        },
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             let mut key = [0u8; KEY_LEN];
             rand::fill(&mut key);

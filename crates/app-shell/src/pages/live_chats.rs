@@ -341,12 +341,11 @@ impl LiveChatsPage {
         db: &DbHandle,
         chat: MirrorChat,
     ) -> Option<NavRequest> {
-        let (guard, messages) = if self
+        let (guard, messages) = if let Some(cache) = self
             .detail_cache
             .as_ref()
-            .is_some_and(|c| c.chat_id == chat.chat_id && c.at.elapsed() < DETAIL_TTL)
+            .filter(|c| c.chat_id == chat.chat_id && c.at.elapsed() < DETAIL_TTL)
         {
-            let cache = self.detail_cache.as_ref().expect("checked above");
             (cache.guard.clone(), cache.messages.clone())
         } else {
             let guard = db.with_read(|conn| chats::send_block(conn, &chat.chat_id, None));

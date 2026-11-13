@@ -618,18 +618,18 @@ fn gap_candidate_json(
     created_at: String,
     updated_at: String,
 ) -> Value {
-    let mut detail_obj = json!({ "explanation": "", "method": "" });
+    let mut detail_map = serde_json::Map::new();
+    detail_map.insert("explanation".into(), json!(""));
+    detail_map.insert("method".into(), json!(""));
     if let Some(d) = detail.as_deref()
         && let Ok(parsed) = serde_json::from_str::<Value>(d)
         && let Some(map) = parsed.as_object()
     {
         for (k, v) in map {
-            detail_obj
-                .as_object_mut()
-                .unwrap()
-                .insert(k.clone(), v.clone());
+            detail_map.insert(k.clone(), v.clone());
         }
     }
+    let detail_obj = Value::Object(detail_map);
     json!({
         "id": id,
         "kind": kind,

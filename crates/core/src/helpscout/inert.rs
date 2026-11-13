@@ -630,7 +630,9 @@ impl HelpScoutProvider for EmptyHelpScoutProvider {
     async fn run_workflow(&self, workflow_id: i64, conversation_id: i64) -> Result<bool> {
         let mut guard = self.lock_world();
         let world: &mut InertWorld = &mut guard;
-        let wf = world.workflows.iter().find(|w| w.remote_id == workflow_id);
+        let Some(wf) = world.workflows.iter().find(|w| w.remote_id == workflow_id) else {
+            return Err(not_found_remote("POST"));
+        };
         let Some(conv) = world
             .conversations
             .iter_mut()
@@ -638,10 +640,7 @@ impl HelpScoutProvider for EmptyHelpScoutProvider {
         else {
             return Err(not_found_remote("POST"));
         };
-        if wf.is_none() {
-            return Err(not_found_remote("POST"));
-        }
-        if wf.unwrap().name.contains("Tier 1") {
+        if wf.name.contains("Tier 1") {
             conv.assignee_id = Some(1001);
             conv.assignee_type = Some("user".into());
         }

@@ -458,7 +458,10 @@ fn ai_checks(layer: &Value) -> Vec<Value> {
                     vec![]
                 } else {
                     vec![json!({
-                        "draft_excerpt": if c["excerpt"].as_str().unwrap_or("").is_empty() { "(see reasoning)".to_string() } else { c["excerpt"].as_str().unwrap().to_string() },
+                        "draft_excerpt": match c["excerpt"].as_str() {
+                            Some(s) if !s.is_empty() => s.to_string(),
+                            _ => "(see reasoning)".to_string(),
+                        },
                         "evidence": [evidence("local model reasoning", c["reasoning"].as_str().unwrap_or(""), None, None, None)],
                         "advice": "Verify the claim against conversation or knowledge evidence, or soften it (\"typically\", \"in most cases\")."
                     })]
@@ -482,7 +485,10 @@ fn ai_checks(layer: &Value) -> Vec<Value> {
                     vec![]
                 } else {
                     vec![json!({
-                        "draft_excerpt": if c["excerpt"].as_str().unwrap_or("").is_empty() { "(see reasoning)".to_string() } else { c["excerpt"].as_str().unwrap().to_string() },
+                        "draft_excerpt": match c["excerpt"].as_str() {
+                            Some(s) if !s.is_empty() => s.to_string(),
+                            _ => "(see reasoning)".to_string(),
+                        },
                         "evidence": [evidence("local model reasoning", c["reasoning"].as_str().unwrap_or(""), None, None, None)],
                         "advice": "Re-read the customer's last message - the draft may be answering a different question than the one asked."
                     })]
