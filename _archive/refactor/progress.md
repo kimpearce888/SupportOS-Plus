@@ -7,12 +7,15 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 
 ## CURRENT POINTER
 
-- Next task: **R2.5 — panic!/todo!/unimplemented!** (30 instances +
-  the 3 unreachable! arms noted in the session-4 survey); a
-  D-14-shaped policy is expected (precise cfg(test)-aware census first
-  via the G-08 scanner — needs a panic/todo/unimplemented/unreachable
-  pattern set added to r24_triage.py — then per-family verdicts with
-  written justifications for every keep).
+- Next task: **R2.5 — panic!/todo!/unimplemented!** (the session-6
+  precise census is DONE and recorded in the session-6 log's R2.5 prep:
+  FOUR production occurrences, not the plan's 30 — 3 exhaustiveness-
+  forced unreachable! keeps (app/mod.rs:891, oauth_state.rs:95,
+  execute.rs:1833) + 1 arm-level-cfg(test) test panic (execute.rs:468,
+  D-10 exempt); scanner extension at tool-results/r25_triage.py).
+  Execute per the prep notes: policy D-15 (D-14-shaped), the 1833
+  message normalization as the one code increment, census correction
+  vs the plan's letter, then R3.1.
 - Pre-flight: confirm CI green on the session-6 final head (run id in
   session log). If the session ended mid-CI, the run may still be in
   flight — next session must wait for it.
