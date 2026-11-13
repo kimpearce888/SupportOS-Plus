@@ -1651,18 +1651,16 @@ fn audp0_malformed_sync_job_payloads_fail_loudly() {
     runtime().block_on(async { manager.tick().await });
 
     let outcomes: Vec<(String, String, Option<String>)> = db.with_read(|conn| {
-        let mut stmt = conn
-            .prepare(
-                "SELECT type, status, error FROM jobs
+        crate::db::query_rows(
+            conn,
+            "SELECT type, status, error FROM jobs
                       WHERE type IN ('sync_conversation','delete_conversation',
                                     'sync_customer','delete_customer')
                       ORDER BY id ASC",
-            )
-            .expect("jobs query");
-        let rows = stmt
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
-            .expect("map");
-        rows.filter_map(|x| x.ok()).collect()
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .expect("jobs query")
     });
     assert_eq!(outcomes.len(), 4, "all four jobs ran: {outcomes:?}");
     for (kind, status, error) in &outcomes {

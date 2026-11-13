@@ -191,17 +191,14 @@ pub fn list_state_transitions(
     conversation_remote_id: i64,
     limit: u32,
 ) -> Vec<StateTransitionRow> {
-    let Ok(mut stmt) = conn.prepare(
+    crate::db::query_rows(
+        conn,
         "SELECT from_state, to_state, from_priority, to_priority,
                 actor_type, actor_id, transitioned_at
            FROM ticket_state_transitions
           WHERE conversation_remote_id = ?1
           ORDER BY transitioned_at DESC, id DESC
           LIMIT ?2",
-    ) else {
-        return Vec::new();
-    };
-    match stmt.query_map(
         params![conversation_remote_id, i64::from(limit.clamp(1, 100))],
         |r| {
             Ok(StateTransitionRow {
@@ -214,10 +211,8 @@ pub fn list_state_transitions(
                 transitioned_at: r.get(6)?,
             })
         },
-    ) {
-        Ok(rows) => rows.filter_map(|x| x.ok()).collect(),
-        Err(_) => Vec::new(),
-    }
+    )
+    .unwrap_or_default()
 }
 
 pub(crate) fn apply_m032(conn: &Connection) -> Result<()> {
@@ -255,13 +250,9 @@ pub(crate) fn apply_m032(conn: &Connection) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_state_transitions_conv
             ON state_transitions(conversation_id, occurred_at);",
     )?;
-    let cols: Vec<String> = conn
-        .prepare("PRAGMA table_info(conversations)")
-        .ok()
-        .and_then(|mut stmt| {
-            stmt.query_map([], |r| r.get::<_, String>(1))
-                .map(|rows| rows.filter_map(|x| x.ok()).collect())
-                .ok()
+    let cols: Vec<String> =
+        crate::db::query_rows(conn, "PRAGMA table_info(conversations)", [], |r| {
+            r.get::<_, String>(1)
         })
         .unwrap_or_default();
     if !cols.iter().any(|c| c == "supportos_state_id") {

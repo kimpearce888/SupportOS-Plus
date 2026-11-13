@@ -1135,15 +1135,16 @@ impl SyncEngine {
         let resource = "threads".to_string();
         let candidates: Vec<(i64, i64)> = {
             let conn = self.lock();
-            let mut stmt = conn.prepare(
+            crate::db::query_rows(
+                &conn,
                 "SELECT id, remote_id FROM conversations
                   WHERE deleted_at IS NULL AND merged_into_conversation_id IS NULL
                     AND NOT EXISTS (SELECT 1 FROM conversation_threads t
                                      WHERE t.conversation_id = conversations.id)
                   ORDER BY id ASC LIMIT 200",
-            )?;
-            let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
-            rows.filter_map(|r| r.ok()).collect()
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )?
         };
         tracing::info!(
             candidates = candidates.len(),

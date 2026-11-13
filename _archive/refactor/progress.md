@@ -1,32 +1,31 @@
 # Refactor Progress — Live State
 
-Last updated: session 8 (2026-11-13). Update rule: every session updates
+Last updated: session 9 (2026-11-13). Update rule: every session updates
 this file before ending. Statuses: `pending` / `in_progress` / `done` /
 `terminal` (done + closed in `complete.md`) / `dropped` (with reason in
 `memory.md`).
 
 ## CURRENT POINTER
 
-- Next task: **R3.2 — SQL plumbing** (rusqlite row-mapping/statement
-  boilerplate → shared helpers in the storage modules; see plan §7 R3).
-  CENSUS FIRST — the standing R2.5 lesson (precise scan before sizing a
-  plan batch; three consecutive census corrections came from skipping it).
-- Pre-flight [session 8]: R3.1 executed on the green base `17a3ff6`
-  (run#331); R3.1 head `5ca31af` is CI-VERIFIED GREEN — run#332
-  (id 43476466581), all four lanes success (addendum commit below).
-  Green base for R3.2: the addendum head's own docs-only run (the
-  standard next-session preflight gate).
-- Session counter: 8 completed (R1 terminal; R2 stage TERMINAL — R2.1
-  through R2.5; R3.1 TERMINAL — run#332 green on `5ca31af`).
-- Environment: session 8 began with a sandbox reset at the context boundary
-  (standard §2 re-provision: re-clone + rustup 1.29.3 + pinned 1.99.1).
-  Cold target/; G-05 managed preemptively (incremental rm between lanes,
-  peak 94% after the app-shell link). NEW: G-10 — backgrounded builds DIE
-  at tool-call end (nohup does not survive); the working pattern is
-  repeated foreground 10-min windows (cargo artifacts persist between
-  killed runs). Triage tooling: see G-08 — scanners at
-  tool-results/r24_triage.py (unwrap/expect) and r25_triage.py (panic
-  family).
+- Next task: **R3.3 — HTTP/serde plumbing** (reqwest response parsing +
+  JSON mapping duplication → shared client-side helpers; see plan §7 R3).
+  CENSUS FIRST — the standing R2.5 lesson (three consecutive census
+  corrections came from skipping it; R3.2 added the fifth: the census
+  pattern missed turbofish `collect::<…>()` spellings — match `collect`
+  with AND without generic arguments in trailing-tail patterns).
+- Pre-flight [session 9]: R3.2 executed on the green base `bfad483`
+  (run#334 green, all four lanes). R3.2 head rides this push — its CI
+  run is this session's tail gate; the addendum commit records the
+  evidence (standard pattern).
+- Session counter: 9 completing (R1 terminal; R2 stage TERMINAL; R3.1
+  terminal — run#332 green; R3.2 executed this session — CI row rides
+  this push).
+- Environment: session 9's sandbox was PARTIALLY reset (clone and
+  ~/.cargo SURVIVED; /tmp logs wiped; no re-provision needed beyond
+  github-reconnect.sh). Warm build ran during the CI preflight wait
+  (subshell-detached form, G-10) — the battery lanes then ran
+  incremental. G-05 hit twice mid-battery (89% before the app-shell
+  link, 86% after) — incremental rm between lanes held.
 
 ## Task states
 
@@ -50,7 +49,8 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 | R2.4 unwrap/expect policy | terminal (session 6) | batch a: D-14 policy + B-class poison elimination + A-class normalization (CI run#322 green); batch b: class C resolved — 9 eliminated (incl. ALL 4 production unwraps), 8 kept with written D-14 justifications; scanner census 56 prod expects + 0 unwraps; battery green; CI row rides this push — see complete.md |
 | R2.5 panic!/todo!/unimplemented! | terminal (session 7) | precise census: 4 production occurrences, not the plan's 30 (27 were test-region overcounts; todo!/unimplemented! zero tree-wide); policy D-15: 3 exhaustiveness-forced unreachable! kept with written local proofs, 1 arm-level cfg(test) panic reclassified D-10-exempt; one code increment (execute.rs:1833 message normalization); battery green; CI row rides this push — see complete.md |
 | R3.1 error types | terminal (session 8) | census: FIVE types tree-wide, ZERO duplicate enums (root+boxed-subtype architecture already consolidated); 3 hand-rolled Display/Error impls → thiserror derives (byte-identical messages; AcquireError #[source] reproduces the hand-rolled source()); TranslateError enum→newtype (class dimension unread by its single consumer); app-shell +thiserror dep (lock: one edge line); D-16; CI run#332 green on `5ca31af` — see complete.md |
-| R3.2–R3.6 DRY | pending | see plan §7 R3 |
+| R3.2 SQL plumbing | done (session 9) | lenient row-collect tail consolidated into db::query_rows + db::rows_ok; 80 sites (73 census + 7 turbofish blind-spot); +657/−823 across 32 files; battery green (520/528/293+2/56); CI row rides this push — see complete.md |
+| R3.3–R3.6 DRY | pending | see plan §7 R3 |
 | R4.1–R4.5 clean code | pending | see plan §7 R4 |
 | R5.1–R5.3 guardrails | pending (optional, stage-gated) | |
 | R6.1–R6.2 polish + close | pending | |
@@ -122,7 +122,71 @@ Checks: cargo machete (v0.9.2, installed ad hoc) now reports only the 3 document
 
 **R3.1 verdict summary:** census-first again — the plan's "no duplicate error enums" prong found ZERO duplicates (fourth consecutive batch where the precise census beat the plan's sizing assumptions, though this time the correction is favorable: less to do, not more). Actionable set: exactly the 3 hand-rolled Display/Error impls (→ thiserror derives, byte-identical messages) + 1 class-dead enum (→ newtype). End state: every named production error type either derives thiserror or is Display-less by design (D-16). Net source diff +19/−62 across 6 files + 1 manifest line + 1 lock edge.
 
+### R3.2 — SQL plumbing (session 9; census 73 lenient tails + 7 turbofish blind-spot = 80)
+
+| class | sites | verdict | outcome |
+|---|---|---|---|
+| full-fold → `crate::db::query_rows` | 75 | consolidate | prepare+query_map+lenient-collect collapse to one call; the site's own outer fallback (`?` / `.unwrap_or_default()` / `.ok()` chains / same-fallback matches / let-else-default / is_empty-guarded blocks) kept verbatim — error-path behavior byte-equivalent; non-Vec targets (HashSet/HashMap: analytics bad_ids, outreach dnc, segment def_names) add `.into_iter().collect()` |
+| tail-only → `crate::db::rows_ok` | 5 | consolidate tail, keep prepare structure | sites whose prepare-error and query-error fallbacks DIFFER: embeddings ~613 (prepare-Err aborts the vacuum fn), workers/execute 537+569 (prepare-Err early-return vs query-Err empty-continue), workload 495 (prepare-Err skips the team via `continue`), segment/mod 731 (distinct prepare/query warn messages preserved) |
+| local helper absorption | 1 fn + 2 calls | delete | ai_tools/execute.rs `collect_rows` (Value-only module-private pre-existing one-off) deleted; call sites ride `query_rows`; standing rule D-17: ONE lenient-collect definition tree-wide |
+| turbofish census blind-spot | 7 | convert (same rules) | `collect::<Vec<_>>()` / `collect::<Vec<i64>>()` / `collect::<HashMap<_,_>>()` spellings the census pattern missed: segment/eval ×2, segment/mod ×2, ai_evidence ×1, copilot ×2 — fifth consecutive census correction; lesson recorded in D-17 |
+| strict collects `collect::<rusqlite::Result<Vec<_>>>()` | 60 | keep | OPPOSITE semantics (row errors propagate); the canonical one-expression idiom — converting them would be a behavior change smuggled into a DRY batch |
+| scalar `\|r\| r.get(0)` mappers | 362 | keep | canonical rusqlite idiom; nothing to consolidate without obscuring |
+| JSON column defaults | ~15–20 | keep | four semantic shapes (json!({}) / Value::Null / Default / "{}" string); a helper per shape = 4 micro-helpers, net complexity UP |
+| per-module named row mappers | digest_from_row et al. | keep | the established GOOD pattern — each maps its own table's columns; zero cross-module duplication found |
+| incidental SQL literal repeats | 3–5 | keep | short test/seed textual coincidences; coupling unrelated code would be anti-DRY |
+| `.optional()` | 9 | keep | idiomatic rusqlite extension |
+
+**R3.2 verdict summary:** the plan's "row-mapping/statement boilerplate" letter resolved to ONE real duplication class (the lenient row-collect tail) + a wall of canonical-idiom keeps. 80 tails eliminated (75 full-folds → 77 `query_rows` calls — support_graph search and ai_tools clusters each carry a 2-branch if/else — plus 5 `rows_ok` tails); 1 pre-existing local helper absorbed; 32 files changed, +657/−823 (net −166); test-region sites included (8 census + turbofish — DRY is not production-only); battery green with EXACT baseline counts (520/528/293+2/56) — the lenient-vs-strict semantic boundary held everywhere (D-17 contract).
+
 ## Session log
+
+### Session 9 — 2026-11-13
+- Pre-flight: sandbox PARTIALLY reset (clone + ~/.cargo survived; /tmp
+  wiped; github-reconnect.sh re-applied credentials). Head `bfad483`
+  (the G-10 refinement ledger commit) in sync with origin; run#334
+  in_progress at session start — polled to GREEN (all four lanes)
+  before any source edit, per D-08. Repo state was AHEAD of the
+  session-8 handover narrative: session 8's tail had pushed the G-10
+  refinement (`bfad483`), cancelling run#333.
+- R3.2 executed (the CURRENT POINTER batch; census + helper design
+  from session 8's read-only prep, regenerated and re-verified at
+  session start — 73 sites, exact match):
+  - db.rs gained `pub(crate) fn query_rows<T>(conn, sql, params: impl
+    rusqlite::Params, map: impl FnMut(&Row<'_>) -> rusqlite::Result<T>)
+    -> Result<Vec<T>>` (prepare `?` + query_map `?` + lenient collect;
+    mirrors rusqlite's own query_map bound shape so every existing
+    argument form — `[]`, `[x]`, `params![…]`, `params_from_iter`,
+    `&[&dyn ToSql]` — passes unchanged) and `pub(crate) fn
+    rows_ok<T, F>(MappedRows<'_, F>) -> Vec<T>` (the tail-only form,
+    generalizing ai_tools' Value-only local `collect_rows`, which was
+    deleted).
+  - 80 sites converted (75 full-folds + 5 tail-only + 7 turbofish
+    census blind-spot + the absorbed helper's 2 call sites; verdict
+    table above). Fold discipline per D-17: one-call collapse ONLY
+    where prepare/query fallbacks are observably identical; the 5
+    differing-fallback sites keep their prepare structure and convert
+    the tail via `rows_ok`.
+  - Interim compile checks after each ~10-file tranche caught nothing;
+    two MultiEdit application gotchas en route (a mismatched indent on
+    workers/execute's block form; a candidate_kinds fn duplicated
+    across two test mods needing replace_all) — both fixed before the
+    fmt pass.
+- Battery (incremental after a subshell-detached warm build that ran
+  during the run#334 wait): gate clean, fmt --check clean, clippy
+  workspace + sandbox clean, core 520 (468s), core-sandbox 528 (453s),
+  app-shell 293+2 (256s), catalog+xtask 56, verify-icons verified,
+  strip-check 205/205 — ALL GREEN, counts EXACTLY at baseline.
+  G-05 discipline: incremental rm between lanes (peaked 89% before the
+  app-shell link, 86% after; never hit a link failure).
+- Net diff: 32 files (db.rs + 31 site files), +657/−823 (net −166).
+  Post-batch census scan: ZERO lenient tails remaining outside db.rs's
+  own helper bodies (the 2 definitions); 77 query_rows call sites + 5
+  rows_ok call sites + 0 collect_rows.
+- R3.2 done — the CI row rides this push; terminal confirmation + run
+  id at the addendum commit after the run goes green (standard
+  pattern). Pointer advances to R3.3 (HTTP/serde plumbing, census
+  first).
 
 ### Session 8 — 2026-11-13
 - Pre-flight: sandbox reset at the context boundary (clone + toolchain

@@ -533,10 +533,10 @@ impl WorkerManager {
                     Ok(s) => s,
                     Err(_) => return,
                 };
-                let ids: Vec<i64> = match stmt.query_map([], |r| r.get::<_, i64>(0)) {
-                    Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
-                    Err(_) => Vec::new(),
-                };
+                let ids: Vec<i64> = stmt
+                    .query_map([], |r| r.get::<_, i64>(0))
+                    .map(crate::db::rows_ok)
+                    .unwrap_or_default();
                 ids
             };
             for id in fresh {
@@ -565,10 +565,10 @@ impl WorkerManager {
                 Ok(s) => s,
                 Err(_) => return,
             };
-            let ids: Vec<i64> = match stmt.query_map([], |r| r.get::<_, i64>(0)) {
-                Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
-                Err(_) => Vec::new(),
-            };
+            let ids: Vec<i64> = stmt
+                .query_map([], |r| r.get::<_, i64>(0))
+                .map(crate::db::rows_ok)
+                .unwrap_or_default();
             drop(stmt);
             for id in ids {
                 let _ = jobs::enqueue_on(
@@ -2386,19 +2386,18 @@ impl WorkerManager {
     pub(super) async fn run_attachment_downloads(&self) {
         let rows: Vec<(i64, i64, Option<i64>, Option<i64>)> = {
             let conn = self.lock();
-            let Ok(mut stmt) = conn.prepare(
+            crate::db::query_rows(
+                &conn,
                 "SELECT a.id, a.conversation_id, a.thread_id, a.remote_id
                    FROM attachments a
                    JOIN conversations c ON c.id = a.conversation_id
                   WHERE (a.state IS NULL OR a.state NOT IN ('downloaded'))
                     AND c.deleted_at IS NULL
                   ORDER BY a.id DESC LIMIT 100",
-            ) else {
-                return;
-            };
-            stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
-                .map(|rows| rows.filter_map(|r| r.ok()).collect())
-                .unwrap_or_default()
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap_or_default()
         };
         if rows.is_empty() {
             return;

@@ -213,28 +213,26 @@ pub struct GoldenRunRow {
 }
 
 pub fn latest_golden_runs(conn: &Connection, limit: usize) -> Vec<GoldenRunRow> {
-    let mut stmt = match conn.prepare(
+    crate::db::query_rows(
+        conn,
         "SELECT id, started_at, finished_at, backend, passed, failed, results
            FROM golden_test_runs ORDER BY id DESC LIMIT ?1",
-    ) {
-        Ok(stmt) => stmt,
-        Err(_) => return Vec::new(),
-    };
-    stmt.query_map(params![limit as i64], |r| {
-        Ok(GoldenRunRow {
-            id: r.get(0)?,
-            started_at: r.get(1)?,
-            finished_at: r.get(2)?,
-            backend: r.get(3)?,
-            passed: r.get(4)?,
-            failed: r.get(5)?,
-            results: r
-                .get::<_, Option<String>>(6)?
-                .and_then(|s| serde_json::from_str(&s).ok())
-                .unwrap_or(Value::Null),
-        })
-    })
-    .map(|rows| rows.filter_map(|r| r.ok()).collect())
+        params![limit as i64],
+        |r| {
+            Ok(GoldenRunRow {
+                id: r.get(0)?,
+                started_at: r.get(1)?,
+                finished_at: r.get(2)?,
+                backend: r.get(3)?,
+                passed: r.get(4)?,
+                failed: r.get(5)?,
+                results: r
+                    .get::<_, Option<String>>(6)?
+                    .and_then(|s| serde_json::from_str(&s).ok())
+                    .unwrap_or(Value::Null),
+            })
+        },
+    )
     .unwrap_or_default()
 }
 

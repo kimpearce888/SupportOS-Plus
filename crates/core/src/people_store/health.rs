@@ -16,14 +16,10 @@ fn evidence_ids(
     );
     let mut params: Vec<rusqlite::types::Value> = vec![rusqlite::types::Value::Integer(subject_id)];
     params.extend_from_slice(extra_params);
-    conn.prepare(&sql)
-        .and_then(|mut stmt| {
-            stmt.query_map(rusqlite::params_from_iter(params.iter()), |r| {
-                r.get::<_, i64>(0)
-            })
-            .map(|rows| rows.filter_map(|r| r.ok()).collect())
-        })
-        .unwrap_or_default()
+    crate::db::query_rows(conn, &sql, rusqlite::params_from_iter(params.iter()), |r| {
+        r.get::<_, i64>(0)
+    })
+    .unwrap_or_default()
 }
 
 pub(super) fn health_metric(
@@ -248,18 +244,18 @@ pub(super) fn build_support_health_report(
             |r| r.get(0),
         )
         .unwrap_or(0);
-    let bad_evidence: Vec<i64> = conn
-        .prepare(&format!(
+    let bad_evidence: Vec<i64> = crate::db::query_rows(
+        conn,
+        &format!(
             "SELECT r.conversation_id FROM ratings r
              WHERE r.rating = 'not-good' AND {rating_scope} AND r.conversation_id IS NOT NULL
                AND julianday(r.remote_created_at) >= julianday('now', '-90 days')
              LIMIT {EVIDENCE_LIMIT}"
-        ))
-        .and_then(|mut stmt| {
-            stmt.query_map(params![subject_id], |r| r.get::<_, i64>(0))
-                .map(|rows| rows.filter_map(|r| r.ok()).collect())
-        })
-        .unwrap_or_default();
+        ),
+        params![subject_id],
+        |r| r.get::<_, i64>(0),
+    )
+    .unwrap_or_default();
     metrics.push(health_metric(
         "negative_outcomes_90d",
         "Negative ratings (90d)",
@@ -441,8 +437,9 @@ pub(super) fn build_support_health_report(
         status: String,
         conversations: i64,
     }
-    let incidents: Vec<IncidentRow> = conn
-        .prepare(&format!(
+    let incidents: Vec<IncidentRow> = crate::db::query_rows(
+        conn,
+        &format!(
             "SELECT DISTINCT i.id, i.code, i.title, i.severity, i.status, COUNT(DISTINCT c.id) AS conversations
              FROM incidents i
              JOIN incident_conversations ic ON ic.incident_id = i.id
@@ -450,21 +447,20 @@ pub(super) fn build_support_health_report(
              WHERE i.status != 'resolved' AND c.deleted_at IS NULL AND {incident_scope}
              GROUP BY i.id
              ORDER BY CASE i.severity WHEN 'sev1' THEN 1 WHEN 'sev2' THEN 2 WHEN 'sev3' THEN 3 ELSE 4 END"
-        ))
-        .and_then(|mut stmt| {
-            stmt.query_map(params![subject_id], |r| {
-                Ok(IncidentRow {
-                    incident_id: r.get(0)?,
-                    code: r.get(1)?,
-                    title: r.get(2)?,
-                    severity: r.get(3)?,
-                    status: r.get(4)?,
-                    conversations: r.get(5)?,
-                })
+        ),
+        params![subject_id],
+        |r| {
+            Ok(IncidentRow {
+                incident_id: r.get(0)?,
+                code: r.get(1)?,
+                title: r.get(2)?,
+                severity: r.get(3)?,
+                status: r.get(4)?,
+                conversations: r.get(5)?,
             })
-            .map(|rows| rows.filter_map(|r| r.ok()).collect())
-        })
-        .unwrap_or_default();
+        },
+    )
+    .unwrap_or_default();
     let incident_evidence = ev(
         "AND EXISTS (SELECT 1 FROM incident_conversations ic JOIN incidents i ON i.id = ic.incident_id WHERE ic.conversation_id = c.id AND i.status != 'resolved')",
         &[],

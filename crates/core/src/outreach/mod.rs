@@ -407,15 +407,13 @@ pub(crate) fn campaign_validate(conn: &Connection, campaign_id: i64) -> serde_js
             }
         }
     }
-    let dnc: std::collections::HashSet<i64> = conn
-        .prepare("SELECT customer_id FROM do_not_contact")
-        .ok()
-        .and_then(|mut stmt| {
-            stmt.query_map([], |r| r.get::<_, i64>(0))
-                .map(|rows| rows.filter_map(|x| x.ok()).collect())
-                .ok()
+    let dnc: std::collections::HashSet<i64> =
+        crate::db::query_rows(conn, "SELECT customer_id FROM do_not_contact", [], |r| {
+            r.get::<_, i64>(0)
         })
-        .unwrap_or_default();
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
     let email_ok = |e: &str| {
         let parts: Vec<&str> = e.split('@').collect();
         parts.len() == 2
@@ -433,15 +431,13 @@ pub(crate) fn campaign_validate(conn: &Connection, campaign_id: i64) -> serde_js
     let mut already_sent = 0i64;
     let mut on_dnc = 0i64;
     let mut no_email = 0i64;
-    let rows: Vec<(i64, Option<String>, String)> = conn
-        .prepare("SELECT customer_local_id, email, state FROM outreach_recipients WHERE campaign_id = ?1")
-        .ok()
-        .and_then(|mut stmt| {
-            stmt.query_map([campaign_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
-                .map(|rows| rows.filter_map(|x| x.ok()).collect())
-                .ok()
-        })
-        .unwrap_or_default();
+    let rows: Vec<(i64, Option<String>, String)> = crate::db::query_rows(
+        conn,
+        "SELECT customer_local_id, email, state FROM outreach_recipients WHERE campaign_id = ?1",
+        [campaign_id],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+    )
+    .unwrap_or_default();
     for (cid, email, state) in &rows {
         if state == "sent" {
             already_sent += 1;
@@ -480,18 +476,14 @@ pub(crate) fn campaign_validate(conn: &Connection, campaign_id: i64) -> serde_js
     if ready == 0 {
         errors.push("No recipients are ready to send.".into());
     }
-    let sample: Vec<(i64, String)> = conn
-        .prepare(
-            "SELECT customer_local_id, snapshot FROM outreach_recipients
+    let sample: Vec<(i64, String)> = crate::db::query_rows(
+        conn,
+        "SELECT customer_local_id, snapshot FROM outreach_recipients
               WHERE campaign_id = ?1 ORDER BY id LIMIT 25",
-        )
-        .ok()
-        .and_then(|mut stmt| {
-            stmt.query_map([campaign_id], |r| Ok((r.get(0)?, r.get(1)?)))
-                .map(|rows| rows.filter_map(|x| x.ok()).collect())
-                .ok()
-        })
-        .unwrap_or_default();
+        [campaign_id],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )
+    .unwrap_or_default();
     let mut unresolved_vars: Vec<String> = Vec::new();
     for (cid, snapshot) in &sample {
         let tickets: Vec<serde_json::Value> = serde_json::from_str::<serde_json::Value>(snapshot)
@@ -672,22 +664,16 @@ fn reconcile_recipient_states(conn: &Connection, campaign_id: i64) -> (i64, i64,
         );
     }
     type UnknownRow = (i64, Option<i64>, Option<String>, Option<String>);
-    let unknowns: Vec<UnknownRow> = conn
-        .prepare(
-            "SELECT r.id, r.customer_remote_id, r.email, oc.subject
+    let unknowns: Vec<UnknownRow> = crate::db::query_rows(
+        conn,
+        "SELECT r.id, r.customer_remote_id, r.email, oc.subject
                FROM outreach_recipients r
                JOIN outreach_campaigns oc ON oc.id = r.campaign_id
               WHERE r.campaign_id = ?1 AND r.state = 'unknown'",
-        )
-        .ok()
-        .and_then(|mut stmt| {
-            stmt.query_map([campaign_id], |r| {
-                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
-            })
-            .map(|rows| rows.filter_map(|x| x.ok()).collect())
-            .ok()
-        })
-        .unwrap_or_default();
+        [campaign_id],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+    )
+    .unwrap_or_default();
     let mut resolved_sent = 0i64;
     let mut returned = 0i64;
     let mut still_unknown = 0i64;
@@ -780,19 +766,15 @@ fn reconcile_recipient_states(conn: &Connection, campaign_id: i64) -> (i64, i64,
             |r| r.get(0),
         )
         .ok();
-    let stale_sending: Vec<(i64, Option<i64>)> = conn
-        .prepare(
-            "SELECT id, customer_remote_id FROM outreach_recipients
+    let stale_sending: Vec<(i64, Option<i64>)> = crate::db::query_rows(
+        conn,
+        "SELECT id, customer_remote_id FROM outreach_recipients
               WHERE campaign_id = ?1 AND state = 'sending'
                 AND updated_at < datetime('now', '-10 minutes')",
-        )
-        .ok()
-        .and_then(|mut stmt| {
-            stmt.query_map([campaign_id], |r| Ok((r.get(0)?, r.get(1)?)))
-                .map(|rows| rows.filter_map(|x| x.ok()).collect())
-                .ok()
-        })
-        .unwrap_or_default();
+        [campaign_id],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )
+    .unwrap_or_default();
     let mut stale_requeued: i64 = 0;
     let mut stale_resolved_sent: i64 = 0;
     for (rid, customer_remote) in stale_sending {

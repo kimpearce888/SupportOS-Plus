@@ -1,16 +1,13 @@
 use super::*;
 fn pick_batch(conn: &Connection, campaign_id: i64) -> Vec<BatchRow> {
-    let mut stmt = match conn.prepare(
+    let picked: Vec<BatchRow> = crate::db::query_rows(
+        conn,
         "SELECT id, customer_local_id, customer_remote_id, snapshot, attempts
            FROM outreach_recipients
           WHERE campaign_id = ?1 AND state IN ('selected','queued')
           ORDER BY id ASC LIMIT ?2",
-    ) {
-        Ok(s) => s,
-        Err(_) => return Vec::new(),
-    };
-    let rows = stmt
-        .query_map(params![campaign_id, SEND_BATCH_SIZE], |r| {
+        params![campaign_id, SEND_BATCH_SIZE],
+        |r| {
             Ok(BatchRow {
                 recipient_id: r.get(0)?,
                 customer_local_id: r.get(1)?,
@@ -18,11 +15,9 @@ fn pick_batch(conn: &Connection, campaign_id: i64) -> Vec<BatchRow> {
                 snapshot: r.get(3)?,
                 attempts: r.get(4)?,
             })
-        })
-        .ok();
-    let picked: Vec<BatchRow> = rows
-        .map(|rows| rows.filter_map(|r| r.ok()).collect())
-        .unwrap_or_default();
+        },
+    )
+    .unwrap_or_default();
     let mut claimed = Vec::with_capacity(picked.len());
     for row in picked {
         let claimed_now = conn

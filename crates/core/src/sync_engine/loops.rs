@@ -116,13 +116,12 @@ impl SyncEngine {
 
             let locals: Vec<(i64, i64, i64)> = {
                 let conn = self.lock();
-                let mut stmt = conn.prepare(
+                crate::db::query_rows(
+                    &conn,
                     "SELECT id, remote_id, number FROM conversations WHERE deleted_at IS NULL",
-                )?;
-                let rows = stmt.query_map([], |r| {
-                    Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?))
-                })?;
-                rows.filter_map(|r| r.ok()).collect()
+                    [],
+                    |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?)),
+                )?
             };
             for (local_id, remote_id, number) in locals {
                 result.checked += 1;
@@ -567,9 +566,12 @@ impl SyncEngine {
                 let mut processed = 0;
                 let collections: Vec<String> = {
                     let conn = self.lock();
-                    let mut stmt = conn.prepare("SELECT remote_id FROM docs_collections")?;
-                    let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
-                    rows.filter_map(|r| r.ok()).collect()
+                    crate::db::query_rows(
+                        &conn,
+                        "SELECT remote_id FROM docs_collections",
+                        [],
+                        |r| r.get::<_, String>(0),
+                    )?
                 };
                 for col_remote in collections {
                     let articles = self.provider.list_doc_articles(col_remote.clone()).await?;
@@ -610,10 +612,9 @@ impl SyncEngine {
             "user_statuses" => {
                 let users: Vec<(i64, i64)> = {
                     let conn = self.lock();
-                    let mut stmt = conn.prepare("SELECT id, remote_id FROM users")?;
-                    let rows =
-                        stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)))?;
-                    rows.filter_map(|r| r.ok()).collect()
+                    crate::db::query_rows(&conn, "SELECT id, remote_id FROM users", [], |r| {
+                        Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
+                    })?
                 };
                 let mut processed = 0;
                 for (local, remote) in users {

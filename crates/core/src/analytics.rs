@@ -1,7 +1,8 @@
 use serde_json::{Value, json};
 
 pub fn why_contacting_impl(conn: &rusqlite::Connection, days: i64) -> Vec<Value> {
-    let Ok(mut stmt) = conn.prepare(
+    let rows: Vec<(String, i64)> = crate::db::query_rows(
+        conn,
         "SELECT json_extract(a.response_json, '$.issue_cluster_candidate') AS category,
                 a.conversation_id
            FROM ai_runs a
@@ -12,15 +13,10 @@ pub fn why_contacting_impl(conn: &rusqlite::Connection, days: i64) -> Vec<Value>
                          GROUP BY conversation_id)
             AND json_extract(a.response_json, '$.issue_cluster_candidate') IS NOT NULL
             AND a.created_at >= datetime('now', '-' || ?1 || ' days')",
-    ) else {
-        return Vec::new();
-    };
-    let rows: Vec<(String, i64)> = stmt
-        .query_map([days], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
-        })
-        .map(|rows| rows.filter_map(|r| r.ok()).collect())
-        .unwrap_or_default();
+        [days],
+        |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)),
+    )
+    .unwrap_or_default();
     let mut by_category: std::collections::HashMap<String, Vec<i64>> =
         std::collections::HashMap::new();
     for (category, conversation_id) in rows {
@@ -54,7 +50,8 @@ pub fn top_questions_impl(conn: &rusqlite::Connection, days: i64) -> Vec<Value> 
 }
 
 fn grouped_questions(conn: &rusqlite::Connection, days: i64) -> Vec<(String, Vec<i64>)> {
-    let Ok(mut stmt) = conn.prepare(
+    let rows: Vec<(String, i64)> = crate::db::query_rows(
+        conn,
         "SELECT LOWER(TRIM(json_extract(a.response_json, '$.primary_question'))) AS question,
                 a.conversation_id
            FROM ai_runs a
@@ -65,15 +62,10 @@ fn grouped_questions(conn: &rusqlite::Connection, days: i64) -> Vec<(String, Vec
                          GROUP BY conversation_id)
             AND json_extract(a.response_json, '$.primary_question') IS NOT NULL
             AND a.created_at >= datetime('now', '-' || ?1 || ' days')",
-    ) else {
-        return Vec::new();
-    };
-    let rows: Vec<(String, i64)> = stmt
-        .query_map([days], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
-        })
-        .map(|rows| rows.filter_map(|r| r.ok()).collect())
-        .unwrap_or_default();
+        [days],
+        |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)),
+    )
+    .unwrap_or_default();
     let mut by_question: std::collections::HashMap<String, Vec<i64>> =
         std::collections::HashMap::new();
     for (question, conversation_id) in rows {
@@ -195,20 +187,17 @@ pub fn issue_radar_impl(conn: &rusqlite::Connection) -> Vec<Value> {
         }
     }
 
-    let escalated: Vec<i64> = conn
-        .prepare(
-            "SELECT c.id FROM conversations c
-               JOIN conversation_tags ct ON ct.conversation_id = c.id
-               JOIN tags t ON t.id = ct.tag_id
-              WHERE t.name = 'escalated'
-                AND julianday(c.created_at) >= julianday('now', '-30 days')",
-        )
-        .map(|mut stmt| {
-            stmt.query_map([], |r| r.get::<_, i64>(0))
-                .map(|rows| rows.filter_map(|r| r.ok()).collect())
-                .unwrap_or_default()
-        })
-        .unwrap_or_default();
+    let escalated: Vec<i64> = crate::db::query_rows(
+        conn,
+        "SELECT c.id FROM conversations c
+           JOIN conversation_tags ct ON ct.conversation_id = c.id
+           JOIN tags t ON t.id = ct.tag_id
+          WHERE t.name = 'escalated'
+            AND julianday(c.created_at) >= julianday('now', '-30 days')",
+        [],
+        |r| r.get::<_, i64>(0),
+    )
+    .unwrap_or_default();
     if escalated.len() >= 2 {
         alerts.push(radar_alert(
             "escalation_heavy",
@@ -223,17 +212,16 @@ pub fn issue_radar_impl(conn: &rusqlite::Connection) -> Vec<Value> {
         ));
     }
 
-    let bad_ids: std::collections::HashSet<i64> = conn
-        .prepare(
-            "SELECT r.conversation_id FROM ratings r
+    let bad_ids: std::collections::HashSet<i64> = crate::db::query_rows(
+        conn,
+        "SELECT r.conversation_id FROM ratings r
               WHERE r.rating = 'not-good' AND r.conversation_id IS NOT NULL",
-        )
-        .map(|mut stmt| {
-            stmt.query_map([], |r| r.get::<_, i64>(0))
-                .map(|rows| rows.filter_map(|r| r.ok()).collect())
-                .unwrap_or_default()
-        })
-        .unwrap_or_default();
+        [],
+        |r| r.get::<_, i64>(0),
+    )
+    .unwrap_or_default()
+    .into_iter()
+    .collect();
     if !bad_ids.is_empty() {
         for c in &clusters {
             let overlap: Vec<i64> = c
@@ -263,14 +251,13 @@ pub fn issue_radar_impl(conn: &rusqlite::Connection) -> Vec<Value> {
 }
 
 fn radar_clusters(conn: &rusqlite::Connection) -> Vec<RadarCluster> {
-    let cluster_rows: Vec<(i64, String)> = conn
-        .prepare("SELECT id, name FROM issue_clusters ORDER BY conversation_count DESC")
-        .map(|mut stmt| {
-            stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))
-                .map(|rows| rows.filter_map(|r| r.ok()).collect())
-                .unwrap_or_default()
-        })
-        .unwrap_or_default();
+    let cluster_rows: Vec<(i64, String)> = crate::db::query_rows(
+        conn,
+        "SELECT id, name FROM issue_clusters ORDER BY conversation_count DESC",
+        [],
+        |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)),
+    )
+    .unwrap_or_default();
     if cluster_rows.is_empty() {
         return Vec::new();
     }
@@ -652,18 +639,15 @@ fn radar_extensions(conn: &rusqlite::Connection, clusters: &[RadarCluster]) -> V
         )
         .unwrap_or(0);
     if recent7 >= 10 && prev7 > 0 && recent7 as f64 / prev7 as f64 >= 1.4 {
-        let sample: Vec<i64> = conn
-            .prepare(
-                "SELECT id FROM conversations
+        let sample: Vec<i64> = crate::db::query_rows(
+            conn,
+            "SELECT id FROM conversations
                   WHERE julianday(created_at) >= julianday('now', '-7 days')
                   ORDER BY created_at DESC LIMIT 10",
-            )
-            .map(|mut stmt| {
-                stmt.query_map([], |r| r.get::<_, i64>(0))
-                    .map(|rows| rows.filter_map(|r| r.ok()).collect())
-                    .unwrap_or_default()
-            })
-            .unwrap_or_default();
+            [],
+            |r| r.get::<_, i64>(0),
+        )
+        .unwrap_or_default();
         alerts.push(radar_alert(
             "volume_spike",
             format!("Unusual support volume: {recent7} conversations in the last 7 days"),

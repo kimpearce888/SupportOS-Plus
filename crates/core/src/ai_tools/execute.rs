@@ -416,18 +416,10 @@ pub fn execute(
                 limit,
             );
             let rows: Vec<Value> = if q.is_empty() {
-                conn.prepare(&sql)
-                    .and_then(|mut stmt| {
-                        stmt.query_map([], |r| map_cluster_row(conn, r))
-                            .map(collect_rows)
-                    })
+                crate::db::query_rows(conn, &sql, [], |r| map_cluster_row(conn, r))
                     .unwrap_or_default()
             } else {
-                conn.prepare(&sql)
-                    .and_then(|mut stmt| {
-                        stmt.query_map(params![like], |r| map_cluster_row(conn, r))
-                            .map(collect_rows)
-                    })
+                crate::db::query_rows(conn, &sql, params![like], |r| map_cluster_row(conn, r))
                     .unwrap_or_default()
             };
             json!(rows)
@@ -1116,12 +1108,6 @@ fn map_cluster_row(conn: &Connection, r: &rusqlite::Row<'_>) -> rusqlite::Result
         "conversation_numbers": conversation_numbers,
         "ai_generated": r.get::<_, Option<i64>>(6)? == Some(1),
     }))
-}
-
-fn collect_rows(
-    rows: rusqlite::MappedRows<'_, impl FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<Value>>,
-) -> Vec<Value> {
-    rows.filter_map(|r| r.ok()).collect()
 }
 
 #[cfg(test)]

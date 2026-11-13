@@ -229,6 +229,54 @@ session ends by adding what the next session must not have to rediscover.
   DESIGN with the no-consumer-displays proof recorded here; hand-rolled
   Display/Error impls are construction debt (constraint 2).
 
+- **D-17 (session 9, R3.2).** SQL plumbing end state — the lenient
+  row-collect tail (prepare → query_map → `filter_map ok`-collect) is
+  consolidated into two db.rs helpers and the duplicated tail is GONE
+  tree-wide (80 sites: the census's 73 + 7 turbofish spellings the
+  pattern missed). THE CONTRACT (invariant 3; must survive future
+  edits): `crate::db::query_rows(conn, sql, params, map)` = prepare `?`
+  + query_map `?` + LENIENT row collect — prepare Err and query_map Err
+  propagate as `crate::Error::Sqlite`; individual ROW mapper errors are
+  SILENTLY SKIPPED. The lenient semantics predate the batch and are a
+  load-bearing site contract, not an accident — do NOT "improve" the
+  helper to strict collection; the 60 strict
+  `collect::<rusqlite::Result<Vec<_>>>()` sites are a deliberate
+  OPPOSITE semantic and stay as written (census keep).
+  - **Fold rule (the batch's behavior-safety discipline):** a site
+    collapses to ONE `query_rows` call only where its prepare-error and
+    query-error fallbacks produce identical observable outcomes —
+    `.unwrap_or_default()`/`.ok()`-chains, `?`-propagation,
+    same-fallback matches, let-else whose else equals the tail's
+    default, or an `is_empty` guard immediately after the block. Where
+    the two error paths differ, the site keeps its prepare structure
+    and converts only the query_map tail via `crate::db::rows_ok`
+    (5 sites: embeddings ~613 vacuum abort-on-prepare, workers/execute
+    537+569 early-return vs empty-continue, workload 495 team-skip
+    `continue`, segment/mod 731 distinct prepare/query warn messages).
+  - **Non-Vec collect targets** (HashSet/HashMap) re-add
+    `.into_iter().collect()` after the fold (analytics bad_ids, outreach
+    dnc, segment def_names) — same collection semantics, one re-step.
+  - **Census correction (fifth consecutive):** the census pattern
+    `…collect()` missed turbofish spellings — 7 same-class sites
+    (segment/eval ×2, segment/mod ×2 incl. a HashMap target, ai_evidence
+    ×1, copilot ×2) surfaced during execution and were converted under
+    the same rules. Lesson: trailing-tail patterns must match `collect`
+    WITH and WITHOUT generic arguments.
+  - **ai_tools' local `collect_rows`** (Value-only, module-private) was
+    a pre-existing one-off of the same shape — deleted; its 2 call sites
+    ride `query_rows`. Standing rule: ONE lenient-collect definition
+    tree-wide (db.rs); a new module-local one is construction debt.
+  - **Keeps (census-recorded, no action):** strict collects (60), scalar
+    `|r| r.get(0)` mappers (362), JSON column defaults (~15-20 across
+    four semantic shapes), per-module named row mappers
+    (digest_from_row et al.), incidental SQL literal repeats,
+    `.optional()` (9).
+  - Test-region sites converted too (8 census sites: quality ×4,
+    knowledge_store ×1, automation ×2, it_helpscout ×1) — DRY is not a
+    production-only policy; the automation/it_helpscout test helpers'
+    paired `.expect("…")` messages merged into the prepare-side message
+    (test-only observability, D-10 region).
+
 ## Facts (F-xx)
 
 - **F-01.** Baseline (session 1): 204 .rs files, 141,107 LOC — core

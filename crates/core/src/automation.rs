@@ -1221,15 +1221,15 @@ mod batch19_tests {
             "one malformed rule must not abort the engine: {runs:?}"
         );
         let names: Vec<String> = db.with_read(|c| {
-            let mut stmt = c
-                .prepare(
-                    "SELECT name FROM automation_runs r
+            crate::db::query_rows(
+                c,
+                "SELECT name FROM automation_runs r
                           JOIN automation_rules ar ON ar.id = r.rule_id
                           WHERE ar.name = 'healthy'",
-                )
-                .expect("runs query");
-            let rows = stmt.query_map([], |r| r.get::<_, String>(0)).expect("map");
-            rows.filter_map(|x| x.ok()).collect()
+                [],
+                |r| r.get::<_, String>(0),
+            )
+            .expect("runs query")
         });
         assert_eq!(names.len(), 1, "the healthy rule was evaluated: {names:?}");
     }
@@ -1496,13 +1496,13 @@ mod audp0_tests {
     }
 
     fn runs_for(conn: &Connection, rule_id: i64) -> Vec<(String, String)> {
-        let mut stmt = conn
-            .prepare("SELECT outcome, detail FROM automation_runs WHERE rule_id = ?1")
-            .expect("runs query");
-        let rows = stmt
-            .query_map(params![rule_id], |r| Ok((r.get(0)?, r.get(1)?)))
-            .expect("map");
-        rows.filter_map(|x| x.ok()).collect()
+        crate::db::query_rows(
+            conn,
+            "SELECT outcome, detail FROM automation_runs WHERE rule_id = ?1",
+            params![rule_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .expect("runs query")
     }
 
     #[test]

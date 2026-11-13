@@ -263,22 +263,21 @@ pub(crate) fn update_derived_columns_by_local_id(conn: &Connection, conv_local: 
 pub(crate) fn rebuild_all(conn: &Connection) -> Result<RebuildSummary> {
     let mut summary = RebuildSummary::default();
 
-    let conversations: Vec<i64> = {
-        let mut stmt = conn.prepare("SELECT id FROM conversations")?;
-        let rows = stmt.query_map([], |r| r.get::<_, i64>(0))?;
-        rows.filter_map(|r| r.ok()).collect()
-    };
+    let conversations: Vec<i64> =
+        crate::db::query_rows(conn, "SELECT id FROM conversations", [], |r| {
+            r.get::<_, i64>(0)
+        })?;
     summary.conversations = conversations.len() as i64;
 
     for conv_local in conversations {
-        let threads: Vec<MirrorThread> = {
-            let mut stmt = conn.prepare(
-                "SELECT id, remote_id, type, state, body_text, from_type,
+        let threads: Vec<MirrorThread> = crate::db::query_rows(
+            conn,
+            "SELECT id, remote_id, type, state, body_text, from_type,
                         created_by_user_id, created_by_customer_id, created_at
                  FROM conversation_threads
                  WHERE conversation_id = ?1 AND deleted_at IS NULL",
-            )?;
-            let rows = stmt.query_map(params![conv_local], |r| {
+            params![conv_local],
+            |r| {
                 Ok(MirrorThread {
                     id: r.get(0)?,
                     remote_id: r.get(1)?,
@@ -290,9 +289,8 @@ pub(crate) fn rebuild_all(conn: &Connection) -> Result<RebuildSummary> {
                     created_by_customer_id: r.get(7)?,
                     created_at: r.get(8)?,
                 })
-            })?;
-            rows.filter_map(|r| r.ok()).collect()
-        };
+            },
+        )?;
 
         for t in &threads {
             let Some((event_type, actor_type, actor_id)) = derive_mirror_event(t) else {

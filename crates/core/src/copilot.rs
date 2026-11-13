@@ -525,14 +525,14 @@ pub(crate) fn get_session(conn: &Connection, id: i64) -> Option<Value> {
 }
 
 pub fn list_sessions(conn: &Connection, limit: i64) -> Vec<Value> {
-    conn.prepare(
+    crate::db::query_rows(
+        conn,
         "SELECT s.id, s.title, s.conversation_id, s.created_at, s.updated_at, c.number,
                 (SELECT COUNT(*) FROM copilot_messages m WHERE m.session_id = s.id)
            FROM copilot_sessions s LEFT JOIN conversations c ON c.id = s.conversation_id
           ORDER BY s.updated_at DESC LIMIT ?1",
-    )
-    .and_then(|mut stmt| {
-        stmt.query_map(params![limit.clamp(1, 200)], |r| {
+        params![limit.clamp(1, 200)],
+        |r| {
             Ok(json!({
                 "id": r.get::<_, i64>(0)?,
                 "title": r.get::<_, String>(1)?,
@@ -542,19 +542,18 @@ pub fn list_sessions(conn: &Connection, limit: i64) -> Vec<Value> {
                 "created_at": r.get::<_, String>(3)?,
                 "updated_at": r.get::<_, String>(4)?,
             }))
-        })
-        .map(|rows| rows.filter_map(|r| r.ok()).collect::<Vec<_>>())
-    })
+        },
+    )
     .unwrap_or_default()
 }
 
 pub fn list_messages(conn: &Connection, session_id: i64) -> Vec<Value> {
-    conn.prepare(
+    crate::db::query_rows(
+        conn,
         "SELECT id, session_id, role, content, citations, tool_name, tool_calls, latency_ms, created_at
            FROM copilot_messages WHERE session_id = ?1 ORDER BY id ASC",
-    )
-    .and_then(|mut stmt| {
-        stmt.query_map(params![session_id], |r| {
+        params![session_id],
+        |r| {
             let citations: Option<String> = r.get(4)?;
             let citations: Vec<Value> = citations
                 .and_then(|c| serde_json::from_str::<Value>(&c).ok())
@@ -571,9 +570,8 @@ pub fn list_messages(conn: &Connection, session_id: i64) -> Vec<Value> {
                 "latency_ms": r.get::<_, Option<i64>>(7)?,
                 "created_at": r.get::<_, String>(8)?,
             }))
-        })
-        .map(|rows| rows.filter_map(|r| r.ok()).collect::<Vec<_>>())
-    })
+        },
+    )
     .unwrap_or_default()
 }
 

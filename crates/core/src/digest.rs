@@ -85,17 +85,18 @@ pub(crate) fn store_digest(conn: &Connection, draft: &NewDraft<'_>) -> Result<i6
 }
 
 pub fn list_digests(conn: &Connection, query: Option<&str>, limit: i64) -> Vec<DigestRow> {
-    conn.prepare(&format!(
-        "SELECT {DIGEST_COLUMNS} FROM ai_digests
-          WHERE (?1 IS NULL
-                 OR narrative LIKE '%' || ?1 || '%'
-                 OR facts LIKE '%' || ?1 || '%')
-          ORDER BY id DESC LIMIT ?2"
-    ))
-    .and_then(|mut stmt| {
-        stmt.query_map(params![query, limit], digest_from_row)
-            .map(|rows| rows.filter_map(|r| r.ok()).collect())
-    })
+    crate::db::query_rows(
+        conn,
+        &format!(
+            "SELECT {DIGEST_COLUMNS} FROM ai_digests
+              WHERE (?1 IS NULL
+                     OR narrative LIKE '%' || ?1 || '%'
+                     OR facts LIKE '%' || ?1 || '%')
+              ORDER BY id DESC LIMIT ?2"
+        ),
+        params![query, limit],
+        digest_from_row,
+    )
     .unwrap_or_default()
 }
 
@@ -143,20 +144,16 @@ fn volume_facts(conn: &Connection, start: &str, end: &str, prev_start: &str) -> 
             |r| r.get(0),
         )
         .unwrap_or(0);
-    let per_day: Vec<(String, i64)> = conn
-        .prepare(
-            "SELECT substr(remote_created_at, 1, 10) AS d, COUNT(*)
+    let per_day: Vec<(String, i64)> = crate::db::query_rows(
+        conn,
+        "SELECT substr(remote_created_at, 1, 10) AS d, COUNT(*)
                FROM conversations
               WHERE remote_created_at >= ?1 AND remote_created_at < ?2 AND deleted_at IS NULL
               GROUP BY d ORDER BY d",
-        )
-        .and_then(|mut stmt| {
-            stmt.query_map(params![start, end], |r| {
-                Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
-            })
-            .map(|rows| rows.filter_map(|r| r.ok()).collect())
-        })
-        .unwrap_or_default();
+        params![start, end],
+        |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)),
+    )
+    .unwrap_or_default();
     let backlog: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM conversations
@@ -176,20 +173,16 @@ fn volume_facts(conn: &Connection, start: &str, end: &str, prev_start: &str) -> 
 }
 
 fn anomaly_facts(conn: &Connection, start: &str, end: &str) -> Value {
-    let per_day: Vec<(String, i64)> = conn
-        .prepare(
-            "SELECT substr(remote_created_at, 1, 10) AS d, COUNT(*)
+    let per_day: Vec<(String, i64)> = crate::db::query_rows(
+        conn,
+        "SELECT substr(remote_created_at, 1, 10) AS d, COUNT(*)
                FROM conversations
               WHERE remote_created_at >= ?1 AND remote_created_at < ?2 AND deleted_at IS NULL
               GROUP BY d ORDER BY d",
-        )
-        .and_then(|mut stmt| {
-            stmt.query_map(params![start, end], |r| {
-                Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
-            })
-            .map(|rows| rows.filter_map(|r| r.ok()).collect())
-        })
-        .unwrap_or_default();
+        params![start, end],
+        |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)),
+    )
+    .unwrap_or_default();
     let mut anomalies: Vec<Value> = Vec::new();
     if per_day.len() >= 4 {
         let values: Vec<f64> = per_day.iter().map(|(_, n)| *n as f64).collect();
@@ -248,38 +241,34 @@ fn anomaly_facts(conn: &Connection, start: &str, end: &str) -> Value {
 }
 
 fn topic_facts(conn: &Connection) -> Value {
-    let clusters: Vec<Value> = conn
-        .prepare(
-            "SELECT name, conversation_count FROM issue_clusters
+    let clusters: Vec<Value> = crate::db::query_rows(
+        conn,
+        "SELECT name, conversation_count FROM issue_clusters
               ORDER BY conversation_count DESC, id DESC LIMIT 5",
-        )
-        .and_then(|mut stmt| {
-            stmt.query_map([], |r| {
-                Ok(json!({
-                    "label": r.get::<_, String>(0)?,
-                    "conversations": r.get::<_, i64>(1)?,
-                }))
-            })
-            .map(|rows| rows.filter_map(|r| r.ok()).collect())
-        })
-        .unwrap_or_default();
-    let tags: Vec<Value> = conn
-        .prepare(
-            "SELECT t.name AS tag, COUNT(*) AS uses
+        [],
+        |r| {
+            Ok(json!({
+                "label": r.get::<_, String>(0)?,
+                "conversations": r.get::<_, i64>(1)?,
+            }))
+        },
+    )
+    .unwrap_or_default();
+    let tags: Vec<Value> = crate::db::query_rows(
+        conn,
+        "SELECT t.name AS tag, COUNT(*) AS uses
                FROM conversation_tags ct
                JOIN tags t ON t.id = ct.tag_id
               GROUP BY t.name ORDER BY uses DESC LIMIT 8",
-        )
-        .and_then(|mut stmt| {
-            stmt.query_map([], |r| {
-                Ok(json!({
-                    "tag": r.get::<_, String>(0)?,
-                    "conversations": r.get::<_, i64>(1)?,
-                }))
-            })
-            .map(|rows| rows.filter_map(|r| r.ok()).collect())
-        })
-        .unwrap_or_default();
+        [],
+        |r| {
+            Ok(json!({
+                "tag": r.get::<_, String>(0)?,
+                "conversations": r.get::<_, i64>(1)?,
+            }))
+        },
+    )
+    .unwrap_or_default();
     json!({ "top_issue_clusters": clusters, "top_tags": tags })
 }
 
@@ -325,26 +314,22 @@ fn sentiment_facts(conn: &Connection, start: &str, end: &str) -> Value {
 }
 
 fn workload_facts(conn: &Connection, start: &str, end: &str) -> Value {
-    let replies_per_user: Vec<Value> = conn
-        .prepare(
-            "SELECT COALESCE(NULLIF(TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')), ''), th.from_name, 'Unknown'),
-                    COUNT(*) AS replies
-               FROM conversation_threads th
-               LEFT JOIN users u ON u.email = th.from_email AND th.from_email IS NOT NULL
-              WHERE th.type IN ('message','chat','phone')
-                AND th.from_type IN ('user','agent')
-                AND th.state = 'published'
-                AND th.deleted_at IS NULL
-                AND th.remote_created_at >= ?1 AND th.remote_created_at < ?2
-              GROUP BY u.id, th.from_name ORDER BY replies DESC LIMIT 8",
-        )
-        .and_then(|mut stmt| {
-            stmt.query_map(params![start, end], |r| {
-                Ok(json!({ "user": r.get::<_, String>(0)?, "replies": r.get::<_, i64>(1)? }))
-            })
-            .map(|rows| rows.filter_map(|r| r.ok()).collect())
-        })
-        .unwrap_or_default();
+    let replies_per_user: Vec<Value> = crate::db::query_rows(
+        conn,
+        "SELECT COALESCE(NULLIF(TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')), ''), th.from_name, 'Unknown'),
+                COUNT(*) AS replies
+           FROM conversation_threads th
+           LEFT JOIN users u ON u.email = th.from_email AND th.from_email IS NOT NULL
+          WHERE th.type IN ('message','chat','phone')
+            AND th.from_type IN ('user','agent')
+            AND th.state = 'published'
+            AND th.deleted_at IS NULL
+            AND th.remote_created_at >= ?1 AND th.remote_created_at < ?2
+          GROUP BY u.id, th.from_name ORDER BY replies DESC LIMIT 8",
+        params![start, end],
+        |r| Ok(json!({ "user": r.get::<_, String>(0)?, "replies": r.get::<_, i64>(1)? })),
+    )
+    .unwrap_or_default();
     let busiest: Option<(String, i64)> = conn
         .prepare(
             "SELECT substr(remote_created_at, 1, 13) AS hour, COUNT(*)
@@ -390,39 +375,35 @@ fn happiness_facts(conn: &Connection, start: &str, end: &str) -> Value {
 
 fn change_facts(conn: &Connection, start: &str) -> Value {
     let since = latest_digest_created_at(conn).unwrap_or_else(|| start.to_string());
-    let new_gaps: Vec<Value> = conn
-        .prepare(
-            "SELECT kind, query_text, created_at FROM knowledge_gap_candidates
+    let new_gaps: Vec<Value> = crate::db::query_rows(
+        conn,
+        "SELECT kind, query_text, created_at FROM knowledge_gap_candidates
               WHERE datetime(created_at) >= datetime(?1) ORDER BY id DESC LIMIT 12",
-        )
-        .and_then(|mut stmt| {
-            stmt.query_map(params![since], |r| {
-                Ok(json!({
-                    "kind": r.get::<_, Option<String>>(0)?,
-                    "question": r.get::<_, String>(1)?,
-                    "created_at": r.get::<_, String>(2)?,
-                }))
-            })
-            .map(|rows| rows.filter_map(|r| r.ok()).collect())
-        })
-        .unwrap_or_default();
-    let new_articles: Vec<Value> = conn
-        .prepare(
-            "SELECT name, status, remote_updated_at FROM docs_articles
+        params![since],
+        |r| {
+            Ok(json!({
+                "kind": r.get::<_, Option<String>>(0)?,
+                "question": r.get::<_, String>(1)?,
+                "created_at": r.get::<_, String>(2)?,
+            }))
+        },
+    )
+    .unwrap_or_default();
+    let new_articles: Vec<Value> = crate::db::query_rows(
+        conn,
+        "SELECT name, status, remote_updated_at FROM docs_articles
               WHERE datetime(remote_updated_at) >= datetime(?1)
               ORDER BY datetime(remote_updated_at) DESC LIMIT 12",
-        )
-        .and_then(|mut stmt| {
-            stmt.query_map(params![since], |r| {
-                Ok(json!({
-                    "name": r.get::<_, String>(0)?,
-                    "status": r.get::<_, Option<String>>(1)?,
-                    "updated_at": r.get::<_, Option<String>>(2)?,
-                }))
-            })
-            .map(|rows| rows.filter_map(|r| r.ok()).collect())
-        })
-        .unwrap_or_default();
+        params![since],
+        |r| {
+            Ok(json!({
+                "name": r.get::<_, String>(0)?,
+                "status": r.get::<_, Option<String>>(1)?,
+                "updated_at": r.get::<_, Option<String>>(2)?,
+            }))
+        },
+    )
+    .unwrap_or_default();
     let new_documents: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM knowledge_documents WHERE datetime(updated_at) >= datetime(?1)",

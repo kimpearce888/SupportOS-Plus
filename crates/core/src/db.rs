@@ -52,6 +52,24 @@ pub fn apply_migration(conn: &mut Connection, version: u32, label: &str, sql: &s
     Ok(())
 }
 
+pub(crate) fn query_rows<T>(
+    conn: &Connection,
+    sql: &str,
+    params: impl rusqlite::Params,
+    map: impl FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<T>,
+) -> Result<Vec<T>> {
+    let mut stmt = conn.prepare(sql)?;
+    let rows = stmt.query_map(params, map)?;
+    Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
+pub(crate) fn rows_ok<T, F>(rows: rusqlite::MappedRows<'_, F>) -> Vec<T>
+where
+    F: FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<T>,
+{
+    rows.filter_map(|r| r.ok()).collect()
+}
+
 #[must_use]
 pub fn db_file_path(conn: &Connection) -> Option<PathBuf> {
     let mut stmt = conn.prepare("PRAGMA database_list").ok()?;

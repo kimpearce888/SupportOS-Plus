@@ -1328,26 +1328,26 @@ pub(crate) async fn extract_memories(
     let Some((Some(customer_id), customer_name)) = conv else {
         return 0;
     };
-    let mut stmt = match conn.prepare(
+    let threads: Vec<(String, String)> = match crate::db::query_rows(
+        conn,
         "SELECT type, from_name, body_html, body_text FROM conversation_threads
           WHERE conversation_id = ?1 AND deleted_at IS NULL ORDER BY COALESCE(remote_created_at, created_at) ASC",
+        params![conversation_local_id],
+        |r| {
+            let kind: Option<String> = r.get(0)?;
+            let from_name: Option<String> = r.get(1)?;
+            let body_html: Option<String> = r.get(2)?;
+            let body: Option<String> = r.get(3)?;
+            let author = from_name.or(kind).unwrap_or_else(|| "unknown".into());
+            let text: String =
+                crate::textutil::html_to_text(&body_html.or(body).unwrap_or_default())
+                    .chars()
+                    .take(1200)
+                    .collect();
+            Ok((author, text))
+        },
     ) {
-        Ok(s) => s,
-        Err(_) => return 0,
-    };
-    let threads: Vec<(String, String)> = match stmt.query_map(params![conversation_local_id], |r| {
-        let kind: Option<String> = r.get(0)?;
-        let from_name: Option<String> = r.get(1)?;
-        let body_html: Option<String> = r.get(2)?;
-        let body: Option<String> = r.get(3)?;
-        let author = from_name.or(kind).unwrap_or_else(|| "unknown".into());
-        let text: String = crate::textutil::html_to_text(&body_html.or(body).unwrap_or_default())
-            .chars()
-            .take(1200)
-            .collect();
-        Ok((author, text))
-    }) {
-        Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+        Ok(threads) => threads,
         Err(_) => return 0,
     };
     let run_id = match start_run(

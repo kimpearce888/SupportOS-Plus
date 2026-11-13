@@ -43,25 +43,24 @@ pub(crate) struct ThreadLite {
 }
 
 pub(crate) fn published_threads(conn: &Connection, conversation_local: i64) -> Vec<ThreadLite> {
-    let Ok(mut stmt) = conn.prepare(
+    crate::db::query_rows(
+        conn,
         "SELECT id, thread_type, html_stripped, at FROM (
              SELECT id, type AS thread_type, COALESCE(body_html, body_text, '') AS html_stripped,
                     COALESCE(remote_created_at, created_at) AS at
              FROM conversation_threads
              WHERE conversation_id = ?1 AND state = 'published' AND deleted_at IS NULL
          ) ORDER BY at ASC",
-    ) else {
-        return Vec::new();
-    };
-    stmt.query_map(params![conversation_local], |r| {
-        Ok(ThreadLite {
-            thread_id: r.get(0)?,
-            kind: r.get(1)?,
-            text: crate::textutil::html_to_text(&r.get::<_, String>(2)?),
-            at: r.get(3)?,
-        })
-    })
-    .map(|rows| rows.filter_map(|r| r.ok()).collect())
+        params![conversation_local],
+        |r| {
+            Ok(ThreadLite {
+                thread_id: r.get(0)?,
+                kind: r.get(1)?,
+                text: crate::textutil::html_to_text(&r.get::<_, String>(2)?),
+                at: r.get(3)?,
+            })
+        },
+    )
     .unwrap_or_default()
 }
 
@@ -199,9 +198,9 @@ struct RepeatedQuestion {
 
 fn repeated_questions(conn: &Connection, days: i64) -> Vec<RepeatedQuestion> {
     let days = days.clamp(1, 3650);
-    let rows: Vec<(String, i64)> = {
-        let Ok(mut stmt) = conn.prepare(
-            "SELECT json_extract(response_json, '$.primary_question') AS question, conversation_id
+    let rows: Vec<(String, i64)> = crate::db::query_rows(
+        conn,
+        "SELECT json_extract(response_json, '$.primary_question') AS question, conversation_id
              FROM ai_runs
              WHERE type = 'ticket_analysis' AND status = 'completed' AND conversation_id IS NOT NULL
                AND id IN (SELECT MAX(id) FROM ai_runs
@@ -210,15 +209,10 @@ fn repeated_questions(conn: &Connection, days: i64) -> Vec<RepeatedQuestion> {
                            GROUP BY conversation_id)
                AND json_extract(response_json, '$.primary_question') IS NOT NULL
                AND created_at >= strftime('%Y-%m-%dT%H:%M:%fZ','now','-' || ?1 || ' days')",
-        ) else {
-            return Vec::new();
-        };
-        stmt.query_map(params![days], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
-        })
-        .map(|rows| rows.filter_map(|r| r.ok()).collect())
-        .unwrap_or_default()
-    };
+        params![days],
+        |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)),
+    )
+    .unwrap_or_default();
     let mut by_q: Vec<(String, Vec<i64>)> = Vec::new();
     let mut index: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     for (question, conversation) in rows {
@@ -464,11 +458,9 @@ pub fn rebuild_gaps(conn: &Connection, days: i64) -> (usize, usize) {
         }
     }
 
-    let docs: Vec<(i64, String)> = conn
-        .prepare("SELECT id, title FROM knowledge_documents")
-        .and_then(|mut stmt| {
-            stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))
-                .map(|rows| rows.filter_map(|r| r.ok()).collect())
+    let docs: Vec<(i64, String)> =
+        crate::db::query_rows(conn, "SELECT id, title FROM knowledge_documents", [], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
         })
         .unwrap_or_default();
     let tokens = |title: &str| -> std::collections::HashSet<String> {
@@ -540,39 +532,33 @@ pub fn rebuild_gaps(conn: &Connection, days: i64) -> (usize, usize) {
         }
     }
 
-    let cluster_rows: Vec<(i64, String, i64)> = conn
-        .prepare(
-            "SELECT c.id, c.title,
+    let cluster_rows: Vec<(i64, String, i64)> = crate::db::query_rows(
+        conn,
+        "SELECT c.id, c.title,
                     (SELECT COUNT(*) FROM issue_cluster_conversations m WHERE m.cluster_id = c.id) AS n
              FROM issue_clusters c
              WHERE (SELECT COUNT(*) FROM issue_cluster_conversations m WHERE m.cluster_id = c.id) >= 3
              ORDER BY n DESC LIMIT 30",
-        )
-        .and_then(|mut stmt| {
-            stmt.query_map([], |r| {
-                Ok((
-                    r.get::<_, i64>(0)?,
-                    r.get::<_, Option<String>>(1)?.unwrap_or_default(),
-                    r.get::<_, i64>(2)?,
-                ))
-            })
-            .map(|rows| rows.filter_map(|r| r.ok()).collect())
-        })
-        .unwrap_or_default();
+        [],
+        |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                r.get::<_, i64>(2)?,
+            ))
+        },
+    )
+    .unwrap_or_default();
     for (id, title, count) in cluster_rows {
         if knowledge_hits(conn, &title) == 0 {
-            let members: Vec<i64> = conn
-                .prepare(
-                    "SELECT conversation_id FROM issue_cluster_conversations
+            let members: Vec<i64> = crate::db::query_rows(
+                conn,
+                "SELECT conversation_id FROM issue_cluster_conversations
                      WHERE cluster_id = ?1 ORDER BY conversation_id DESC LIMIT 50",
-                )
-                .ok()
-                .and_then(|mut s| {
-                    s.query_map(params![id], |r| r.get(0))
-                        .map(|rows| rows.filter_map(|r| r.ok()).collect())
-                        .ok()
-                })
-                .unwrap_or_default();
+                params![id],
+                |r| r.get(0),
+            )
+            .unwrap_or_default();
             let (first_seen, last_seen) = seen_bounds(conn, &members);
             let newly = insert_gap_candidate(
                 conn,
@@ -677,36 +663,34 @@ pub(crate) fn gap_by_id(conn: &Connection, id: i64) -> Option<Value> {
 }
 
 pub fn gap_report(conn: &Connection) -> Value {
-    let rows: Vec<Value> = conn
-        .prepare(
-            "SELECT id, kind, query_text, occurrence_count, evidence_conversation_ids,
-                    related_document_ids, detail, status, decided_at, decision_note,
-                    created_at, updated_at
-             FROM knowledge_gap_candidates
-             ORDER BY CASE status WHEN 'open' THEN 0 WHEN 'approved' THEN 1 ELSE 2 END,
-                      occurrence_count DESC, updated_at DESC
-             LIMIT 500",
-        )
-        .and_then(|mut stmt| {
-            stmt.query_map([], |r| {
-                Ok(gap_candidate_json(
-                    r.get(0)?,
-                    r.get(1)?,
-                    r.get(2)?,
-                    r.get(3)?,
-                    r.get(4)?,
-                    r.get(5)?,
-                    r.get(6)?,
-                    r.get(7)?,
-                    r.get(8)?,
-                    r.get(9)?,
-                    r.get(10)?,
-                    r.get(11)?,
-                ))
-            })
-            .map(|rows| rows.filter_map(|r| r.ok()).collect())
-        })
-        .unwrap_or_default();
+    let rows: Vec<Value> = crate::db::query_rows(
+        conn,
+        "SELECT id, kind, query_text, occurrence_count, evidence_conversation_ids,
+                related_document_ids, detail, status, decided_at, decision_note,
+                created_at, updated_at
+         FROM knowledge_gap_candidates
+         ORDER BY CASE status WHEN 'open' THEN 0 WHEN 'approved' THEN 1 ELSE 2 END,
+                  occurrence_count DESC, updated_at DESC
+         LIMIT 500",
+        [],
+        |r| {
+            Ok(gap_candidate_json(
+                r.get(0)?,
+                r.get(1)?,
+                r.get(2)?,
+                r.get(3)?,
+                r.get(4)?,
+                r.get(5)?,
+                r.get(6)?,
+                r.get(7)?,
+                r.get(8)?,
+                r.get(9)?,
+                r.get(10)?,
+                r.get(11)?,
+            ))
+        },
+    )
+    .unwrap_or_default();
     let totals: (i64, i64, i64) = conn
         .query_row(
             "SELECT (SELECT COUNT(*) FROM knowledge_gap_candidates WHERE status = 'open'),
@@ -936,17 +920,15 @@ pub(crate) fn analyze_friction(conn: &Connection, conversation_id: i64) -> Vec<V
         );
     }
 
-    let handoffs: Vec<(Option<String>, Option<String>)> = conn
-        .prepare(
-            "SELECT occurred_at, metadata FROM activity_events
+    let handoffs: Vec<(Option<String>, Option<String>)> = crate::db::query_rows(
+        conn,
+        "SELECT occurred_at, metadata FROM activity_events
              WHERE conversation_id = ?1 AND event_type = 'assignment_changed'
              ORDER BY occurred_at ASC",
-        )
-        .and_then(|mut stmt| {
-            stmt.query_map(params![conversation_id], |r| Ok((r.get(0)?, r.get(1)?)))
-                .map(|rows| rows.filter_map(|r| r.ok()).collect())
-        })
-        .unwrap_or_default();
+        params![conversation_id],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )
+    .unwrap_or_default();
     let history_complete: bool = conn
         .query_row(
             "SELECT activity_history_complete FROM conversations WHERE id = ?1",
@@ -992,10 +974,10 @@ pub(crate) fn analyze_friction(conn: &Connection, conversation_id: i64) -> Vec<V
     }
 
     if let Some(customer_local) = customer_local_id {
-        let related: Vec<RelatedConversation> = conn
-            .prepare(
-                "SELECT c2.id, c2.number, c2.subject, c2.status,
-                        COALESCE(c2.remote_created_at, c2.created_at)
+        let related: Vec<RelatedConversation> = crate::db::query_rows(
+            conn,
+            "SELECT c2.id, c2.number, c2.subject, c2.status,
+                    COALESCE(c2.remote_created_at, c2.created_at)
                  FROM conversations c2
                  WHERE c2.customer_local_id = ?1 AND c2.deleted_at IS NULL AND c2.id <> ?2
                    AND COALESCE(c2.remote_created_at, c2.created_at) >= strftime('%Y-%m-%dT%H:%M:%fZ','now','-90 days')
@@ -1004,14 +986,10 @@ pub(crate) fn analyze_friction(conn: &Connection, conversation_id: i64) -> Vec<V
                                JOIN tags tg ON tg.id = ct1.tag_id AND tg.id = ct2.tag_id
                                WHERE ct1.conversation_id = ?2)
                  ORDER BY c2.created_at DESC LIMIT 10",
-            )
-            .and_then(|mut stmt| {
-                stmt.query_map(params![customer_local, conversation_id], |r| {
-                    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
-                })
-                .map(|rows| rows.filter_map(|r| r.ok()).collect())
-            })
-            .unwrap_or_default();
+            params![customer_local, conversation_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+        )
+        .unwrap_or_default();
         if related.len() >= 2 {
             let shared_tag: Option<String> = conn
                 .query_row(
@@ -1201,18 +1179,15 @@ pub(crate) fn analyze_friction(conn: &Connection, conversation_id: i64) -> Vec<V
 }
 
 pub(crate) fn rebuild_friction(conn: &Connection) -> (usize, usize) {
-    let ids: Vec<i64> = {
-        let Ok(mut stmt) = conn.prepare(
-            "SELECT DISTINCT c.id FROM conversations c
+    let ids: Vec<i64> = crate::db::query_rows(
+        conn,
+        "SELECT DISTINCT c.id FROM conversations c
              JOIN conversation_threads t ON t.conversation_id = c.id AND t.type = 'customer'
              WHERE c.deleted_at IS NULL",
-        ) else {
-            return (0, 0);
-        };
-        stmt.query_map([], |r| r.get(0))
-            .map(|rows| rows.filter_map(|r| r.ok()).collect())
-            .unwrap_or_default()
-    };
+        [],
+        |r| r.get(0),
+    )
+    .unwrap_or_default();
     let mut findings = 0usize;
     for id in &ids {
         findings += analyze_friction(conn, *id).len();
@@ -1427,13 +1402,13 @@ pub fn get_qa(conn: &Connection, conversation_id: i64, ai_available: bool) -> Op
 }
 
 pub(crate) fn rebuild_qa(conn: &Connection) -> usize {
-    let ids: Vec<i64> = conn
-        .prepare("SELECT id FROM conversations WHERE deleted_at IS NULL AND status = 'closed'")
-        .and_then(|mut stmt| {
-            stmt.query_map([], |r| r.get(0))
-                .map(|rows| rows.filter_map(|r| r.ok()).collect())
-        })
-        .unwrap_or_default();
+    let ids: Vec<i64> = crate::db::query_rows(
+        conn,
+        "SELECT id FROM conversations WHERE deleted_at IS NULL AND status = 'closed'",
+        [],
+        |r| r.get(0),
+    )
+    .unwrap_or_default();
     let count = ids.len();
     for id in ids {
         compute_qa_deterministic(conn, id);
@@ -1493,12 +1468,10 @@ mod batch13_k1_tests {
     }
 
     fn candidate_kinds(conn: &Connection) -> Vec<String> {
-        conn.prepare("SELECT kind FROM knowledge_gap_candidates")
-            .and_then(|mut stmt| {
-                stmt.query_map([], |r| r.get::<_, String>(0))
-                    .map(|rows| rows.filter_map(|r| r.ok()).collect())
-            })
-            .unwrap_or_default()
+        crate::db::query_rows(conn, "SELECT kind FROM knowledge_gap_candidates", [], |r| {
+            r.get::<_, String>(0)
+        })
+        .unwrap_or_default()
     }
 
     #[test]
@@ -1609,26 +1582,26 @@ pub(crate) fn best_resolutions(
         return Vec::new();
     }
     let placeholders = vec!["?"; conversation_ids.len()].join(",");
-    let rows: Vec<(i64, i64, Option<String>, Option<String>)> = conn
-        .prepare(&format!(
+    let rows: Vec<(i64, i64, Option<String>, Option<String>)> = crate::db::query_rows(
+        conn,
+        &format!(
             "SELECT c.id, c.number, c.subject, c.closed_at
                FROM conversations c
               WHERE c.id IN ({placeholders}) AND c.deleted_at IS NULL
                 AND c.status = 'closed' AND c.closed_at IS NOT NULL
               ORDER BY c.closed_at DESC"
-        ))
-        .and_then(|mut stmt| {
-            stmt.query_map(rusqlite::params_from_iter(conversation_ids.iter()), |r| {
-                Ok((
-                    r.get::<_, i64>(0)?,
-                    r.get::<_, i64>(1)?,
-                    r.get::<_, Option<String>>(2)?,
-                    r.get::<_, Option<String>>(3)?,
-                ))
-            })
-            .map(|rows| rows.filter_map(|r| r.ok()).collect())
-        })
-        .unwrap_or_default();
+        ),
+        rusqlite::params_from_iter(conversation_ids.iter()),
+        |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, Option<String>>(2)?,
+                r.get::<_, Option<String>>(3)?,
+            ))
+        },
+    )
+    .unwrap_or_default();
     let mut out: Vec<ResolutionCitation> = Vec::new();
     for (id, number, subject, closed_at) in rows {
         if out.len() >= limit {
@@ -1848,21 +1821,17 @@ mod batch18_tests {
     }
 
     fn conversation_ids(conn: &Connection) -> Vec<i64> {
-        conn.prepare("SELECT id FROM conversations ORDER BY id")
-            .and_then(|mut stmt| {
-                stmt.query_map([], |r| r.get::<_, i64>(0))
-                    .map(|rows| rows.filter_map(|r| r.ok()).collect())
-            })
-            .unwrap_or_default()
+        crate::db::query_rows(conn, "SELECT id FROM conversations ORDER BY id", [], |r| {
+            r.get::<_, i64>(0)
+        })
+        .unwrap_or_default()
     }
 
     fn candidate_kinds(conn: &Connection) -> Vec<String> {
-        conn.prepare("SELECT kind FROM knowledge_gap_candidates")
-            .and_then(|mut stmt| {
-                stmt.query_map([], |r| r.get::<_, String>(0))
-                    .map(|rows| rows.filter_map(|r| r.ok()).collect())
-            })
-            .unwrap_or_default()
+        crate::db::query_rows(conn, "SELECT kind FROM knowledge_gap_candidates", [], |r| {
+            r.get::<_, String>(0)
+        })
+        .unwrap_or_default()
     }
 
     fn seed_knowledge_hit(conn: &Connection) {

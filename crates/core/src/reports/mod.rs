@@ -1518,30 +1518,28 @@ pub fn happiness_overview(conn: &Connection, days: i64) -> serde_json::Value {
     } else {
         0
     };
-    let recent: Vec<serde_json::Value> = conn
-        .prepare(
-            "SELECT r.rating, r.comments, r.remote_created_at,
-                    c.number, COALESCE(cu.first_name || ' ' || cu.last_name, ''), c.id
-               FROM ratings r
-               LEFT JOIN conversations c ON c.id = r.conversation_id
-               LEFT JOIN customers cu ON cu.id = r.customer_local_id
-              WHERE r.remote_created_at >= ?1
-              ORDER BY r.remote_created_at DESC LIMIT 25",
-        )
-        .and_then(|mut stmt| {
-            stmt.query_map(params![since], |r| {
-                Ok(serde_json::json!({
-                    "rating": r.get::<_, Option<String>>(0)?,
-                    "comments": r.get::<_, Option<String>>(1)?,
-                    "created_at": r.get::<_, Option<String>>(2)?,
-                    "conversation_number": r.get::<_, Option<i64>>(3)?,
-                    "customer": r.get::<_, Option<String>>(4)?.filter(|s| !s.is_empty()),
-                    "conversation_id": r.get::<_, Option<i64>>(5)?,
-                }))
-            })
-            .map(|rows| rows.filter_map(|r| r.ok()).collect())
-        })
-        .unwrap_or_default();
+    let recent: Vec<serde_json::Value> = crate::db::query_rows(
+        conn,
+        "SELECT r.rating, r.comments, r.remote_created_at,
+                c.number, COALESCE(cu.first_name || ' ' || cu.last_name, ''), c.id
+           FROM ratings r
+           LEFT JOIN conversations c ON c.id = r.conversation_id
+           LEFT JOIN customers cu ON cu.id = r.customer_local_id
+          WHERE r.remote_created_at >= ?1
+          ORDER BY r.remote_created_at DESC LIMIT 25",
+        params![since],
+        |r| {
+            Ok(serde_json::json!({
+                "rating": r.get::<_, Option<String>>(0)?,
+                "comments": r.get::<_, Option<String>>(1)?,
+                "created_at": r.get::<_, Option<String>>(2)?,
+                "conversation_number": r.get::<_, Option<i64>>(3)?,
+                "customer": r.get::<_, Option<String>>(4)?.filter(|s| !s.is_empty()),
+                "conversation_id": r.get::<_, Option<i64>>(5)?,
+            }))
+        },
+    )
+    .unwrap_or_default();
     serde_json::json!({
         "range_days": days,
         "great": great,

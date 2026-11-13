@@ -144,14 +144,13 @@ pub(crate) fn recover_stale_webhook_events(conn: &Connection) -> Result<usize> {
     let cutoff = (chrono::Utc::now() - chrono::Duration::minutes(LEASE_MINUTES))
         .format("%Y-%m-%dT%H:%M:%S%.3fZ")
         .to_string();
-    let stranded: Vec<i64> = {
-        let mut stmt = conn.prepare(
-            "SELECT id FROM webhook_events
+    let stranded: Vec<i64> = crate::db::query_rows(
+        conn,
+        "SELECT id FROM webhook_events
               WHERE processing_state = 'processing' AND received_at < ?1",
-        )?;
-        let rows = stmt.query_map(params![cutoff], |r| r.get::<_, i64>(0))?;
-        rows.filter_map(|r| r.ok()).collect()
-    };
+        params![cutoff],
+        |r| r.get::<_, i64>(0),
+    )?;
     let mut recovered = 0usize;
     for id in stranded {
         let attempts: i64 = conn

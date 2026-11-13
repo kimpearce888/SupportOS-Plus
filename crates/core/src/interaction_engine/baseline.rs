@@ -609,16 +609,14 @@ fn subject_tokens(subject: &str) -> Vec<String> {
 }
 
 fn conversation_tags(conn: &Connection, conversation_id: i64) -> Vec<String> {
-    conn.prepare(
+    crate::db::query_rows(
+        conn,
         "SELECT t.name FROM conversation_tags ct
            JOIN tags t ON t.id = ct.tag_id
           WHERE ct.conversation_id = ?1",
+        params![conversation_id],
+        |r| r.get::<_, String>(0),
     )
-    .map(|mut stmt| {
-        stmt.query_map(params![conversation_id], |r| r.get::<_, String>(0))
-            .map(|rows| rows.filter_map(|r| r.ok()).collect())
-            .unwrap_or_default()
-    })
     .unwrap_or_default()
 }
 

@@ -580,31 +580,29 @@ pub fn freshness_report(conn: &Connection) -> Value {
         .filter(|r| r.get("freshness_status").and_then(|v| v.as_str()) == Some("stale"))
         .count() as i64;
     let fresh = rows.len() as i64 - stale;
-    let help_center: Vec<Value> = conn
-        .prepare(
-            "SELECT a.id, a.name, a.status, a.remote_updated_at, c.name
-               FROM docs_articles a
-               LEFT JOIN docs_collections c ON c.id = a.collection_local_id
-              ORDER BY a.remote_updated_at DESC LIMIT 200",
-        )
-        .and_then(|mut stmt| {
-            stmt.query_map([], |r| {
-                let updated: Option<String> = r.get(3)?;
-                let days_old = updated.as_deref().and_then(days_since);
-                let stale = days_old.is_some_and(|d| d > stale_days);
-                Ok(json!({
-                    "id": r.get::<_, i64>(0)?,
-                    "title": r.get::<_, String>(1)?,
-                    "status": r.get::<_, Option<String>>(2)?,
-                    "updated_at": updated,
-                    "collection": r.get::<_, Option<String>>(4)?,
-                    "days_since_update": days_old,
-                    "freshness_status": if stale { "stale" } else { "fresh" },
-                }))
-            })
-            .map(|rows| rows.filter_map(|r| r.ok()).collect())
-        })
-        .unwrap_or_default();
+    let help_center: Vec<Value> = crate::db::query_rows(
+        conn,
+        "SELECT a.id, a.name, a.status, a.remote_updated_at, c.name
+           FROM docs_articles a
+           LEFT JOIN docs_collections c ON c.id = a.collection_local_id
+          ORDER BY a.remote_updated_at DESC LIMIT 200",
+        [],
+        |r| {
+            let updated: Option<String> = r.get(3)?;
+            let days_old = updated.as_deref().and_then(days_since);
+            let stale = days_old.is_some_and(|d| d > stale_days);
+            Ok(json!({
+                "id": r.get::<_, i64>(0)?,
+                "title": r.get::<_, String>(1)?,
+                "status": r.get::<_, Option<String>>(2)?,
+                "updated_at": updated,
+                "collection": r.get::<_, Option<String>>(4)?,
+                "days_since_update": days_old,
+                "freshness_status": if stale { "stale" } else { "fresh" },
+            }))
+        },
+    )
+    .unwrap_or_default();
     let help_center_stale = help_center
         .iter()
         .filter(|r| r.get("freshness_status").and_then(|v| v.as_str()) == Some("stale"))
@@ -1429,12 +1427,7 @@ pub fn list_article_drafts(conn: &Connection, status: Option<&str>) -> Vec<Artic
          WHERE (?1 IS NULL OR status = ?1)
          ORDER BY id DESC LIMIT 200"
     );
-    conn.prepare(&sql)
-        .and_then(|mut stmt| {
-            stmt.query_map(params![status], article_draft_from_row)
-                .map(|rows| rows.filter_map(|r| r.ok()).collect())
-        })
-        .unwrap_or_default()
+    crate::db::query_rows(conn, &sql, params![status], article_draft_from_row).unwrap_or_default()
 }
 
 #[must_use]

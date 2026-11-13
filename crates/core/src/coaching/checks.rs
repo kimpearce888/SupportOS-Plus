@@ -165,23 +165,21 @@ pub(super) fn check_duplicated_questions(threads: &[ThreadRow], draft: &str) -> 
 
 pub(super) fn check_timeframe(conn: &Connection, conv: &ConvRow, draft: &str) -> Value {
     let kind = "unsupported_timeframe";
-    let active_incidents: Vec<(String, String, String)> = match conn.prepare(
+    let active_incidents: Vec<(String, String, String)> = crate::db::query_rows(
+        conn,
         "SELECT i.code, i.status, i.title FROM incident_conversations ic
             JOIN incidents i ON i.id = ic.incident_id
          WHERE ic.conversation_id = ?1 AND i.status != 'resolved'",
-    ) {
-        Ok(mut stmt) => stmt
-            .query_map(params![conv.id], |r| {
-                Ok((
-                    r.get::<_, Option<String>>(0)?.unwrap_or_default(),
-                    r.get::<_, Option<String>>(1)?.unwrap_or_default(),
-                    r.get::<_, Option<String>>(2)?.unwrap_or_default(),
-                ))
-            })
-            .map(|rows| rows.filter_map(|r| r.ok()).collect())
-            .unwrap_or_default(),
-        Err(_) => Vec::new(),
-    };
+        params![conv.id],
+        |r| {
+            Ok((
+                r.get::<_, Option<String>>(0)?.unwrap_or_default(),
+                r.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                r.get::<_, Option<String>>(2)?.unwrap_or_default(),
+            ))
+        },
+    )
+    .unwrap_or_default();
     let mut promises: Vec<(String, &str)> = Vec::new();
     for sentence in split_sentences(draft) {
         for (re, label) in timeframe_patterns() {
@@ -457,21 +455,20 @@ pub(super) fn check_internal_leakage(
     let collect_internal =
         |sql: &str, describe: &dyn Fn(&str, &str, &str) -> String| -> Vec<(String, String)> {
             let mut out = Vec::new();
-            if let Ok(mut stmt) = conn.prepare(sql) {
-                let rows: Vec<(String, Option<String>, Option<String>)> = stmt
-                    .query_map(params![conv.id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
-                    .map(|rows| rows.filter_map(|r| r.ok()).collect())
-                    .unwrap_or_default();
-                for (name, internal_explanation, known_cause) in rows {
-                    for (field, value) in [
-                        ("internal_explanation", internal_explanation),
-                        ("known_cause", known_cause),
-                    ] {
-                        if let Some(v) = value
-                            && !v.trim().is_empty()
-                        {
-                            out.push((describe(&name, field, &v), v));
-                        }
+            let rows: Vec<(String, Option<String>, Option<String>)> =
+                crate::db::query_rows(conn, sql, params![conv.id], |r| {
+                    Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+                })
+                .unwrap_or_default();
+            for (name, internal_explanation, known_cause) in rows {
+                for (field, value) in [
+                    ("internal_explanation", internal_explanation),
+                    ("known_cause", known_cause),
+                ] {
+                    if let Some(v) = value
+                        && !v.trim().is_empty()
+                    {
+                        out.push((describe(&name, field, &v), v));
                     }
                 }
             }
@@ -488,18 +485,16 @@ pub(super) fn check_internal_leakage(
         &|title, field, _| format!("known issue \"{title}\" {field} (internal)"),
     ));
     {
-        let docs: Vec<(String, Option<String>)> = match conn.prepare(
+        let docs: Vec<(String, Option<String>)> = crate::db::query_rows(
+            conn,
             "SELECT DISTINCT kd.title, kd.content FROM ai_sources s
                 JOIN ai_runs r ON r.id = s.run_id
                 JOIN knowledge_documents kd ON kd.id = s.source_id
              WHERE r.conversation_id = ?1 AND s.source_type = 'knowledge_document' AND kd.visibility = 'internal_only'",
-        ) {
-            Ok(mut stmt) => stmt
-                .query_map(params![conv.id], |r| Ok((r.get(0)?, r.get(1)?)))
-                .map(|rows| rows.filter_map(|r| r.ok()).collect())
-                .unwrap_or_default(),
-            Err(_) => Vec::new(),
-        };
+            params![conv.id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap_or_default();
         for (title, content) in docs.into_iter().take(10) {
             if let Some(content) = content
                 && !content.trim().is_empty()
@@ -512,21 +507,17 @@ pub(super) fn check_internal_leakage(
         }
     }
     {
-        let articles: Vec<(String, String)> = match conn.prepare(
+        let articles: Vec<(String, String)> = crate::db::query_rows(
+            conn,
             "SELECT DISTINCT da.name, COALESCE(da.text, '') FROM ai_sources s
                 JOIN ai_runs r ON r.id = s.run_id
                 JOIN docs_articles da ON da.id = s.source_id
              WHERE r.conversation_id = ?1 AND s.source_type = 'help_center_article'
                AND COALESCE(da.status, 'draft') != 'published'",
-        ) {
-            Ok(mut stmt) => stmt
-                .query_map(params![conv.id], |r| {
-                    Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
-                })
-                .map(|rows| rows.filter_map(|r| r.ok()).collect())
-                .unwrap_or_default(),
-            Err(_) => Vec::new(),
-        };
+            params![conv.id],
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+        )
+        .unwrap_or_default();
         for (title, content) in articles.into_iter().take(10) {
             if !content.trim().is_empty() {
                 corpus.push((

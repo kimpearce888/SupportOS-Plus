@@ -24,14 +24,7 @@ pub(super) fn derived_edges_touching(
         conn.query_row(sql, p, |r| r.get(0)).ok()
     };
     let many_i64 = |sql: &str, p: &[&dyn rusqlite::ToSql]| -> Vec<i64> {
-        conn.prepare(sql)
-            .ok()
-            .and_then(|mut stmt| {
-                stmt.query_map(p, |r| r.get::<_, i64>(0))
-                    .map(|rows| rows.filter_map(|r| r.ok()).collect())
-                    .ok()
-            })
-            .unwrap_or_default()
+        crate::db::query_rows(conn, sql, p, |r| r.get::<_, i64>(0)).unwrap_or_default()
     };
     let product_id_by_name = |name: &str| -> Option<i64> {
         conn.query_row(

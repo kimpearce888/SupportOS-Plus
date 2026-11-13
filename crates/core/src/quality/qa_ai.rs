@@ -82,23 +82,21 @@ pub(crate) async fn compute_qa_ai_layer(
             ),
         };
     }
-    let threads: Vec<(i64, String, String)> = conn
-        .prepare(
-            "SELECT id, type, COALESCE(body_html, body_text, '') FROM conversation_threads
+    let threads: Vec<(i64, String, String)> = crate::db::query_rows(
+        conn,
+        "SELECT id, type, COALESCE(body_html, body_text, '') FROM conversation_threads
              WHERE conversation_id = ?1 AND deleted_at IS NULL AND state = 'published'
              ORDER BY COALESCE(remote_created_at, created_at) ASC LIMIT 40",
-        )
-        .and_then(|mut stmt| {
-            stmt.query_map(params![conversation_id], |r| {
-                Ok((
-                    r.get::<_, i64>(0)?,
-                    r.get::<_, String>(1)?,
-                    r.get::<_, String>(2)?,
-                ))
-            })
-            .map(|rows| rows.filter_map(|r| r.ok()).collect())
-        })
-        .unwrap_or_default();
+        params![conversation_id],
+        |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        },
+    )
+    .unwrap_or_default();
     let transcript: String = {
         let lines: Vec<String> = threads
             .iter()

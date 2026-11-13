@@ -87,23 +87,18 @@ impl<'a> SegmentEngine<'a> {
             where_clauses.join(" AND "),
         );
         let sql = renumber_placeholders(&sql, &mut 0);
-        let Ok(mut stmt) = self.conn.prepare(&sql) else {
-            return Vec::new();
-        };
         let refs: Vec<&dyn rusqlite::ToSql> = p.iter().map(|v| v as &dyn rusqlite::ToSql).collect();
-        let rows = stmt
-            .query_map(refs.as_slice(), |r| {
-                Ok((
-                    r.get::<_, i64>(0)?,
-                    r.get::<_, i64>(1)?,
-                    r.get::<_, Option<String>>(2)?,
-                    r.get::<_, String>(3)?,
-                    r.get::<_, Option<String>>(4)?,
-                    r.get::<_, Option<String>>(5)?,
-                ))
-            })
-            .map(|rows| rows.filter_map(|x| x.ok()).collect::<Vec<_>>())
-            .unwrap_or_default();
+        let rows = crate::db::query_rows(self.conn, &sql, refs.as_slice(), |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, Option<String>>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, Option<String>>(4)?,
+                r.get::<_, Option<String>>(5)?,
+            ))
+        })
+        .unwrap_or_default();
         rows.into_iter()
             .map(|(id, number, subject, status, created_at, tags)| json!({
                 "conversationId": id,
@@ -1275,15 +1270,14 @@ impl<'a> SegmentEngine<'a> {
             "avg_effort_score" | "first_response_resolution_rate" | "high_friction_rate" => {
                 let effort = metric == "avg_effort_score";
                 let resolved = metric == "first_response_resolution_rate";
-                let convs: Vec<(i64, String)> = self
-                    .conn
-                    .prepare("SELECT c.id, c.status FROM conversations c
-                               WHERE c.deleted_at IS NULL AND c.customer_local_id IS NOT NULL")
-                    .and_then(|mut s| {
-                        let rows = s.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?;
-                        Ok(rows.filter_map(|x| x.ok()).collect::<Vec<_>>())
-                    })
-                    .unwrap_or_default();
+                let convs: Vec<(i64, String)> = crate::db::query_rows(
+                    self.conn,
+                    "SELECT c.id, c.status FROM conversations c
+                               WHERE c.deleted_at IS NULL AND c.customer_local_id IS NOT NULL",
+                    [],
+                    |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)),
+                )
+                .unwrap_or_default();
                 let mut acc: HashMap<i64, (f64, usize)> = HashMap::new();
                 for (conv_id, status) in convs {
                     let threads = crate::quality::published_threads(self.conn, conv_id);

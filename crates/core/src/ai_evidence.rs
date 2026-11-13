@@ -563,13 +563,12 @@ fn help_center_entries(
     if fts == "\"\"" || limit == 0 {
         return Vec::new();
     }
-    let Ok(ids) = conn
-        .prepare("SELECT article_id FROM docs_fts WHERE docs_fts MATCH ?1 ORDER BY rank LIMIT ?2")
-        .and_then(|mut stmt| {
-            stmt.query_map(params![fts, limit as i64], |r| r.get::<_, i64>(0))
-                .map(|rows| rows.filter_map(|r| r.ok()).collect::<Vec<i64>>())
-        })
-    else {
+    let Ok(ids) = crate::db::query_rows(
+        conn,
+        "SELECT article_id FROM docs_fts WHERE docs_fts MATCH ?1 ORDER BY rank LIMIT ?2",
+        params![fts, limit as i64],
+        |r| r.get::<_, i64>(0),
+    ) else {
         return Vec::new();
     };
     let mut out: Vec<KnowledgeEntry> = Vec::new();

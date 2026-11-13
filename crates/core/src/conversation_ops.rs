@@ -97,18 +97,16 @@ pub(crate) fn conv_exists(conn: &Connection, id: i64) -> bool {
 }
 
 pub fn read_conversation_tags(conn: &Connection, conversation_id: i64) -> Vec<String> {
-    let mut stmt = match conn.prepare(
+    crate::db::query_rows(
+        conn,
         "SELECT t.name FROM conversation_tags ct
             JOIN tags t ON t.id = ct.tag_id
            WHERE ct.conversation_id = ?1
            ORDER BY t.name",
-    ) {
-        Ok(s) => s,
-        Err(_) => return Vec::new(),
-    };
-    stmt.query_map(params![conversation_id], |r| r.get::<_, String>(0))
-        .map(|rows| rows.filter_map(|r| r.ok()).collect())
-        .unwrap_or_default()
+        params![conversation_id],
+        |r| r.get::<_, String>(0),
+    )
+    .unwrap_or_default()
 }
 
 pub fn write_conversation_tags(conn: &Connection, conversation_id: i64, tags: &[String]) {

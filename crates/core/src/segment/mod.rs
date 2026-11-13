@@ -728,7 +728,7 @@ impl<'a> SegmentEngine<'a> {
         let refs: Vec<&dyn rusqlite::ToSql> =
             params.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
         stmt.query_map(refs.as_slice(), |r| r.get::<_, i64>(0))
-            .map(|rows| rows.filter_map(|x| x.ok()).collect())
+            .map(crate::db::rows_ok)
             .unwrap_or_else(|e| {
                 tracing::warn!(
                     error = %e,
@@ -768,36 +768,32 @@ impl<'a> SegmentEngine<'a> {
             .take(page_size.max(0) as usize)
             .copied()
             .collect();
-        let def_names: HashMap<i64, String> = self
-            .conn
-            .prepare("SELECT id, name FROM customer_property_definitions")
-            .and_then(|mut s| {
-                let rows =
-                    s.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?;
-                Ok(rows.filter_map(|x| x.ok()).collect::<HashMap<_, _>>())
-            })
-            .unwrap_or_default();
+        let def_names: HashMap<i64, String> = crate::db::query_rows(
+            self.conn,
+            "SELECT id, name FROM customer_property_definitions",
+            [],
+            |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)),
+        )
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
         slice
             .iter()
             .map(|&cid| {
-                let emails: Vec<String> = self
-                    .conn
-                    .prepare("SELECT value FROM customer_emails WHERE customer_id = ?1 AND value IS NOT NULL ORDER BY id")
-                    .and_then(|mut s| {
-                        let rows = s.query_map(params![cid], |r| r.get::<_, String>(0))?;
-                        Ok(rows.filter_map(|x| x.ok()).collect())
-                    })
-                    .unwrap_or_default();
-                let properties: Vec<Value> = self
-                    .conn
-                    .prepare("SELECT definition_id, value FROM customer_properties WHERE customer_id = ?1")
-                    .and_then(|mut s| {
-                        let rows = s.query_map(params![cid], |r| {
-                            Ok((r.get::<_, i64>(0)?, r.get::<_, Option<String>>(1)?))
-                        })?;
-                        Ok(rows.filter_map(|x| x.ok()).collect::<Vec<(i64, Option<String>)>>())
-                    })
-                    .unwrap_or_default()
+                let emails: Vec<String> = crate::db::query_rows(
+                    self.conn,
+                    "SELECT value FROM customer_emails WHERE customer_id = ?1 AND value IS NOT NULL ORDER BY id",
+                    params![cid],
+                    |r| r.get::<_, String>(0),
+                )
+                .unwrap_or_default();
+                let properties: Vec<Value> = crate::db::query_rows(
+                    self.conn,
+                    "SELECT definition_id, value FROM customer_properties WHERE customer_id = ?1",
+                    params![cid],
+                    |r| Ok((r.get::<_, i64>(0)?, r.get::<_, Option<String>>(1)?)),
+                )
+                .unwrap_or_default()
                     .into_iter()
                     .filter_map(|(did, v)| {
                         let v = v?;

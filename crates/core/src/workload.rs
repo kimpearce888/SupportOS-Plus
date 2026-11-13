@@ -380,20 +380,16 @@ fn weighted_load(
     sla_conversation_ids: &[i64],
 ) -> f64 {
     let sla: std::collections::HashSet<i64> = sla_conversation_ids.iter().copied().collect();
-    let mut stmt = match conn.prepare(
+    let rows: Vec<(i64, Option<String>, String, Option<String>)> = match crate::db::query_rows(
+        conn,
         "SELECT c.id, c.supportos_priority, c.status, c.customer_waiting_since
            FROM conversations c
           WHERE c.deleted_at IS NULL AND c.merged_into_conversation_id IS NULL
             AND c.assignee_local_id = ?1 AND c.status IN ('active','pending')",
+        params![user_id],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
     ) {
-        Ok(stmt) => stmt,
-        Err(_) => return 0.0,
-    };
-    let rows: Vec<(i64, Option<String>, String, Option<String>)> = match stmt
-        .query_map(params![user_id], |r| {
-            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
-        }) {
-        Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+        Ok(rows) => rows,
         Err(_) => return 0.0,
     };
     let total: f64 = rows
@@ -470,18 +466,13 @@ fn team_snapshots(
 ) -> Vec<TeamSnapshot> {
     let by_user: std::collections::HashMap<i64, &AgentSnapshot> =
         agents.iter().map(|a| (a.user_local_id, a)).collect();
-    let teams: Vec<(i64, String)> = {
-        let Ok(mut stmt) =
-            conn.prepare("SELECT id, name FROM teams WHERE deleted_at IS NULL ORDER BY name")
-        else {
-            return Vec::new();
-        };
-        let rows: Vec<(i64, String)> = stmt
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
-            .map(|rows| rows.filter_map(|r| r.ok()).collect())
-            .unwrap_or_default();
-        rows
-    };
+    let teams: Vec<(i64, String)> = crate::db::query_rows(
+        conn,
+        "SELECT id, name FROM teams WHERE deleted_at IS NULL ORDER BY name",
+        [],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )
+    .unwrap_or_default();
     let mut out = Vec::new();
     for (team_id, name) in teams {
         let member_ids: Vec<i64> = {
@@ -490,11 +481,9 @@ fn team_snapshots(
             else {
                 continue;
             };
-            let rows: Vec<i64> = stmt
-                .query_map(params![team_id], |r| r.get(0))
-                .map(|rows| rows.filter_map(|r| r.ok()).collect())
-                .unwrap_or_default();
-            rows
+            stmt.query_map(params![team_id], |r| r.get(0))
+                .map(crate::db::rows_ok)
+                .unwrap_or_default()
         };
         let members: Vec<&AgentSnapshot> = member_ids
             .iter()

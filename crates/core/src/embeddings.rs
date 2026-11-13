@@ -615,7 +615,7 @@ fn prune_orphaned_vectors(
             return;
         };
         stmt.query_map([], |r| r.get::<_, i64>(0))
-            .map(|rows| rows.filter_map(|r| r.ok()).collect())
+            .map(crate::db::rows_ok)
             .unwrap_or_default()
     };
     let live_point_ids: Vec<i64> = live_chunk_ids

@@ -517,19 +517,12 @@ pub fn graph_search(
                 false,
             ),
         };
-        let rows: Vec<Value> = conn
-            .prepare(&sql)
-            .and_then(|mut stmt| {
-                let rows: Vec<rusqlite::Result<Value>> = if number_bound {
-                    stmt.query_map(params![number, like], map_search_row(kind))?
-                        .collect()
-                } else {
-                    stmt.query_map(params![like], map_search_row(kind))?
-                        .collect()
-                };
-                Ok(rows.into_iter().filter_map(|r| r.ok()).collect())
-            })
-            .unwrap_or_default();
+        let rows: Vec<Value> = if number_bound {
+            crate::db::query_rows(conn, &sql, params![number, like], map_search_row(kind))
+        } else {
+            crate::db::query_rows(conn, &sql, params![like], map_search_row(kind))
+        }
+        .unwrap_or_default();
         results.extend(rows);
     }
     Ok(results)
