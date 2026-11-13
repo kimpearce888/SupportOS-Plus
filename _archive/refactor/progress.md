@@ -136,8 +136,11 @@ Checks: cargo machete (v0.9.2, installed ad hoc) now reports only the 3 document
   complete.md; the R2.5 CI row rides this push. Pointer advanced to
   R3.1 (DRY pass, first batch — read plan §7 R3 next session start).
 - Session closed: this log + pointer + D-15/Q-04/G-09 ride the R2.5
-  commit per D-08; CI monitored to green before close where time
-  allows (else the run id is the next session's preflight gate).
+  commit `0984936` per D-08; CI run#330 (id 43451237165) verified
+  GREEN on it before close (all four jobs success — kittest drift gate
+  green with the execute.rs message edit). This closure line rides
+  `0984936`+1 — its own docs-only run is the next session's preflight
+  gate. STAGE R2 TERMINAL.
 
 ### Session 6 — 2026-11-15
 - Pre-flight: sandbox reset AGAIN (clone + toolchain gone) — re-provisioned
