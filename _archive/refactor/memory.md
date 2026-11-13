@@ -49,6 +49,40 @@ session ends by adding what the next session must not have to rediscover.
 - **D-12 (session 2).** Battery order matters for the strip batches:
   strip → `cargo fmt --all` → battery. fmt runs in WRITE mode between strip
   and the battery; the battery's fmt item is the --check verification.
+- **D-13 (session 4, R2.2).** `#[allow]` survivor policy — the active
+  justifications for every allow that stays (R2.2's mandate; constraint 3
+  says no comment may carry it, so it lives here). Three vestigial allows
+  were deleted in R2.1/R2.2 (testsupport dead_code, issue_radar
+  unused_mut, search/lanes ref_option — each had outlived its reason).
+  Survivors, by class:
+  - **unsafe_code (3):** `core/vectorstore_sqlitevec.rs` (sqlite-vec C
+    API FFI — the crate is otherwise `deny(unsafe_code)`; this is the one
+    confined unsafe island), `core/sandbox.rs:153` (test-region FFI for
+    the sandbox feature — D-10 exempts tests), `app-shell/src/lib.rs:14`
+    (gates `pub mod single_instance` — the OS single-instance lock FFI;
+    crate-level deny elsewhere). All three are minimal, single-purpose
+    FFI boundaries — exactly what `allow(unsafe_code)` exists for.
+  - **crate-level style pairs (3: app-shell/catalog/core lib.rs):**
+    `missing_errors_doc` is UNSATISFIABLE under constraint 3 (its remedy
+    is `///` doc comments, which are deleted everywhere); renaming to
+    satisfy `module_name_repetitions` would churn the idiomatic
+    self-named-module pattern (people_store::PeopleStore et al.) across
+    23 routes for zero gain. Deliberate crate-wide style policy.
+  - **too_many_arguments (15 in-src + 9 in-test):** parameter-object
+    consolidation is R3.4's job — the DRY pass determines WHICH argument
+    clusters repeat enough to become shared structs; fixing them ad-hoc
+    now would mint one-off structs that R3 must then re-merge. The in-test
+    nine (fixture/constructor helpers) additionally ride D-10's test-region
+    exemption. Sites (in-src): core event_bus, ai_pipeline/mod, connectors
+    x2, copilot, events, interaction_engine/mod x4, jobs x2, outreach/mod,
+    quality/mod, app-shell testsupport (seed_conversation). In-test
+    (9): kittest_inbox_copilot x2, kittest_list_pages x2,
+    kittest_operations_page, kittest_inbox_page x2, kittest_reports_page,
+    kittest_dashboard_page — all fixture/seed constructors.
+  - **too_many_lines (4):** inbox.rs x3 (the page's ui() T-composition
+    branches) + design/mod.rs — all are F-04/R4.5 split candidates; the
+    split is a deliberate R4.5 batch (behavior risk without golden
+    verification in-sandbox; kittest is CI-only per F-06).
 
 ## Facts (F-xx)
 

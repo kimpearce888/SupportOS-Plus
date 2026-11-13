@@ -7,11 +7,9 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 
 ## CURRENT POINTER
 
-- Next task: **R2.2 — `#[allow]` audit** (26 in-src instances: 15
-  too_many_arguments, 4 too_many_lines, 3 unsafe_code, 3 crate-level
-  style pairs, 1 ref_option — plus 9 in-test too_many_arguments;
-  resolve by fixing/deleting; survivors listed in memory.md with active
-  justification; see `plan.md` §7 R2.2).
+- Next task: **R2.3 — dependency hygiene** (`cargo machete` install ad
+  hoc; remove every unused declared dependency; `cargo deny check bans`
+  stays green; Cargo.lock diff reviewed; see `plan.md` §7 R2.3).
 - Pre-flight: confirm CI green on the session-4 final head (run id in
   session log). If the session ended mid-CI, the run may still be in
   flight — next session must wait for it.
@@ -38,7 +36,7 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 | R1.9 app-shell/pages-B strip | done (session 3) | 1011 whole lines + 1 inline comment removed from 44 of 51 scanned (16 pages + mod.rs + queries.rs + json_fields.rs + all 26 tests files); NO G-07 hits; whole-tree check crates 205/205 clean — the entire Rust source tree is comment-free; battery green (app-shell lane re-linked all 26 stripped kittest binaries); CI run#311 green |
 | R1.10 comment closeout | terminal (session 4) | redundant warn+allow missing_docs pairs deleted from catalog/core lib.rs (12 attr lines, 4 insertions after fmt); crate lint headers now match app-shell's clean form; whole-tree check crates 205/205 green; battery green; CI run#313 green — see complete.md |
 | R2.1 dead-code sweep | terminal (session 4) | ZERO active warnings (clippy -D warnings already green); 2 vestigial suppressions deleted (testsupport.rs allow(dead_code) — module already cfg(test)-gated, all helpers used; issue_radar.rs allow(unused_mut) — nav mutated at 8 sites); battery green; CI run#315 green — see complete.md |
-| R2.2–R2.5 unnecessary code | pending | R2.2 census: 26 in-src allows + 9 in-test; R2.3 machete; R2.4 unwrap policy; see plan §7 R2 |
+| R2.2–R2.5 unnecessary code | pending | R2.2 done in-session (see log + verdict tables + memory D-13); R2.3 machete; R2.4 unwrap policy; see plan §7 R2 |
 | R3.1–R3.6 DRY | pending | see plan §7 R3 |
 | R4.1–R4.5 clean code | pending | see plan §7 R4 |
 | R5.1–R5.3 guardrails | pending (optional, stage-gated) | |
@@ -46,8 +44,22 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 
 ## Review verdict tables (R2–R4 passes)
 
-*(empty — first entries arrive with the first review batch; format:
-`module → construct → verdict(keep/merge/delete/rename) → outcome`)*
+*(format: `module → construct → verdict(keep/merge/delete/rename) → outcome`)*
+
+### R2.2 — `#[allow]` audit (session 4; 25 in-src + 9 in-test instances after R2.1's deletions)
+
+| module | construct | verdict | outcome |
+|---|---|---|---|
+| core/search/lanes.rs | `#[allow(clippy::ref_option)]` on search_knowledge_raw | delete | VESTIGIAL — signature already `Option<&str>` (the recommended form); allow outlived an earlier signature; deleted, clippy green without it |
+| core/vectorstore_sqlitevec.rs | `#![allow(unsafe_code)]` (crate-level for this module) | keep | sqlite-vec C-API FFI — the one confined unsafe island in an otherwise `deny(unsafe_code)` crate; D-13 |
+| core/sandbox.rs:153 | `#![allow(unsafe_code)]` inside `#[cfg(test)] mod tests` | keep | test-region FFI (sandbox feature); D-10 exempts test regions; D-13 |
+| app-shell/src/lib.rs:14 | `#[allow(unsafe_code)]` gating `pub mod single_instance` | keep | OS single-instance lock FFI; module-scoped allow over crate-level deny; D-13 |
+| app-shell/catalog/core lib.rs (x3) | `#![allow(module_name_repetitions, missing_errors_doc)]` crate-level pairs | keep | missing_errors_doc unsatisfiable under constraint 3 (remedy is doc comments — deleted); module_name_repetitions = idiomatic self-named modules; D-13 |
+| core (event_bus, ai_pipeline, connectors x2, copilot, events, interaction_engine x4, jobs x2, outreach, quality) + app-shell/testsupport | 15 `#[allow(clippy::too_many_arguments)]` | keep | parameter-object consolidation is R3.4's DRY decision (ad-hoc structs now would be re-merged by R3); testsupport's seed_conversation rides the test-support exemption; D-13 |
+| app-shell/pages/inbox.rs x3 + app-shell/design/mod.rs | 4 `#[allow(clippy::too_many_lines)]` | keep | F-04/R4.5 split candidates; the split is R4.5's deliberate batch (needs CI golden verification; kittest is CI-only F-06); D-13 |
+| app-shell/tests (inbox_copilot x2, list_pages x2, inbox_page x2, operations, reports, dashboard) | 9 `#[allow(clippy::too_many_arguments)]` on kittest fixture/seed constructors | keep | test region (D-10); fixture constructors read better with explicit seeds than nested struct literals; D-13 |
+
+**R2.2 verdict summary (whole audit incl. R2.1's findings):** 37 instances received verdicts (28 in-src + 9 in-test at audit start) — 3 DELETED (all vestigial: dead_code, unused_mut in R2.1; ref_option in R2.2), 34 KEPT, every keep carrying an active written justification in memory D-13. No keep is unjustified; no delete was load-bearing.
 
 ## Session log
 
@@ -104,6 +116,25 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
   (module_name_repetitions + missing_errors_doc) + 1 ref_option
   (search/lanes.rs); in-tests 9 too_many_arguments. The plan's "31"
   was the all-crates count at session 1.
+- R2.2 executed (same session, after run#315 went green on the R2.1
+  head): full audit of all 37 instances (28 in-src + 9 in-test) —
+  verdict table written above; survivor justifications written to
+  memory D-13 (unsafe FFI islands, unsatisfiable-under-constraint-3
+  style pairs, R3.4-owned argument clusters, R4.5-owned file splits,
+  D-10 test regions). ONE additional deletion found: search/lanes.rs
+  `#[allow(clippy::ref_option)]` was vestigial — the signature is
+  already `Option<&str>` (the lint's recommended form); empirical
+  delete + clippy -D warnings green confirmed. Net tree: 34 allows,
+  all justified (R2.2's bar: every allow either gone or carrying an
+  active written justification).
+- Battery (R2.2): gate, fmt --check, clippy workspace (26s) + sandbox
+  (22s), app-shell 293+2 (282s), core 520 (477s), core-sandbox 528
+  (474s), catalog+xtask 56, verify-icons, whole-tree strip check
+  205/205 — all green. (Battery was split across a mid-run
+  communication interruption — disk freed 2.1G incremental between
+  segments; no test was run twice-unclean.)
+- CI note: run#316 (docs-only head `5c8dc5c`) was still in flight at
+  R2.2 battery end; the R2.2 push stacks on it.
 
 ### Session 3 — 2026-11-12
 - Pre-flight: sandbox reset AGAIN (clone + toolchain gone) — re-provisioned

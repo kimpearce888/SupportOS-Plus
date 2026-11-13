@@ -226,7 +226,6 @@ pub(crate) fn search_customers(
     Ok(rows)
 }
 
-#[allow(clippy::ref_option)]
 pub(crate) fn search_knowledge_raw(
     conn: &Connection,
     query: &str,
