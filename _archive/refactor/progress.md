@@ -16,9 +16,12 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
   Execute per the prep notes: policy D-15 (D-14-shaped), the 1833
   message normalization as the one code increment, census correction
   vs the plan's letter, then R3.1.
-- Pre-flight: confirm CI green on the session-6 final head (run id in
-  session log). If the session ended mid-CI, the run may still be in
-  flight — next session must wait for it.
+- Pre-flight: the CURRENT head `cdc38ee` is RED (run#328 — RUSTSEC-
+  2026-0533, ammonia; see the post-close incident entry + G-09). The
+  lock-only fix commit (ammonia 4.2.5) rides on top; its CI run is
+  THIS session's real preflight gate — do not start R2.5 until it is
+  green. (General rule stands: if the head run is still in flight,
+  wait for it.)
 - Session counter: 6 completed (R1 terminal; R2.1-R2.4 terminal; R2.5
   next).
 - Environment: toolchain reinstalled this session (cold target/); G-05
@@ -181,6 +184,23 @@ Checks: cargo machete (v0.9.2, installed ad hoc) now reports only the 3 document
   run#326 (id 43420872242) verified GREEN before close (all four jobs
   success). This final closure line rides commit `0941fb3`+1 — its own
   docs-only run is the next session's preflight gate.
+- POST-CLOSE INCIDENT (recorded under G-09): after the closure push, a
+  final pointer-refresh commit `cdc38ee` went out (pointer updated from
+  the stale "needs census" wording to the done-census state — the
+  census itself was done pre-close and recorded in the R2.5 prep
+  above). Its docs-only run#328 (id 43426662490) came back RED —
+  not from the ledger edit but from RUSTSEC-2026-0533 (ammonia 4.2.4
+  mutation-XSS), a fresh advisory that landed in the live DB between
+  runs #327 and #328 on the SAME dependency tree. Diagnosed via the
+  job log (handover §7 step 3); fix = lock-only bump `cargo update -p
+  ammonia` → 4.2.5 (manifest "4.2" already covers it; core's usage:
+  richtext.rs sanitize_html — genuinely reachable, patched not
+  ignored). Full battery re-run green (gate, fmt, clippy x2, core 520,
+  sandbox 528, app-shell 293+2, catalog+xtask 56, verify-icons,
+  strip-check 205/205) PLUS local `cargo deny check advisories bans
+  licenses sources` green (cargo-deny 0.20.2 installed ad hoc) — the
+  deny lane verified BEFORE the push this time. Fix commit rides the
+  next push; its CI run is the new preflight gate for R2.5.
 
 ### Session 5 — 2026-11-14
 - Pre-flight: sandbox reset AGAIN (clone + toolchain gone) — re-provisioned

@@ -256,6 +256,22 @@ session ends by adding what the next session must not have to rediscover.
   in the census notes; a scanner re-write is not warranted at this
   density. The panic-family census extension lives alongside at
   `r25_triage.py` (r24 kept intact as the unwrap/expect census).
+- **G-09 (session 6, post-close incident).** CI's deny step checks the
+  LIVE RUSTSEC advisory DB — a docs-only push can go RED between two
+  runs minutes apart when a new advisory lands: run#327 green, run#328
+  red ~20 min later on the SAME dependency tree (RUSTSEC-2026-0533,
+  ammonia 4.2.4 mutation-XSS via MathML/SVG integration points). This
+  is not a code regression — diagnose via the failing job's log before
+  touching anything. Fix protocol (proven): minimal lock-only bump
+  (`cargo update -p ammonia` → 4.2.5; manifest "4.2" already covered
+  it), FULL battery re-run (the lock change re-links everything), PLUS
+  a local `cargo deny check advisories bans licenses sources`
+  (cargo-deny 0.20.2 installed ad hoc per §3) so the deny lane itself
+  is verified before the push, not just after. Expect this class of
+  break to recur on any long-lived branch — the advisory DB never
+  freezes. Ammonia usage here: core/src/richtext.rs one Builder for
+  sanitize_html (customer-visible rich text), so the advisory is
+  genuinely reachable — patch, never ignore.
 
 ## Open questions / deferred owner decisions
 
