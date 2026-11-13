@@ -136,7 +136,7 @@ impl SqliteVecStore {
         entity_type: &str,
         live_point_ids: &[i64],
     ) -> Result<u64> {
-        let mut conn = self.conn.lock().expect("sqlite-vec store mutex poisoned");
+        let mut conn = self.conn.lock().unwrap_or_else(|p| p.into_inner());
         let table = vec_table_for(collection);
         let all_point_ids: Vec<i64> = {
             let mut stmt = conn.prepare(
@@ -200,7 +200,7 @@ impl SqliteVecStore {
     }
 
     fn dim_for(&self, collection: &str) -> Result<Option<usize>> {
-        let conn = self.conn.lock().expect("sqlite-vec store mutex poisoned");
+        let conn = self.conn.lock().unwrap_or_else(|p| p.into_inner());
         let dim: Option<i64> = conn
             .query_row(
                 "SELECT dim FROM vec_meta WHERE collection = ?1",
@@ -213,7 +213,7 @@ impl SqliteVecStore {
     }
 
     fn create_vec_table(&self, collection: &str, dim: usize) -> Result<()> {
-        let conn = self.conn.lock().expect("sqlite-vec store mutex poisoned");
+        let conn = self.conn.lock().unwrap_or_else(|p| p.into_inner());
         let table = vec_table_for(collection);
         conn.execute_batch(&format!(
             "DROP TABLE IF EXISTS {table};
@@ -234,7 +234,7 @@ impl SqliteVecStore {
         if self.dim_for(collection)?.is_none() {
             return Ok(None);
         }
-        let conn = self.conn.lock().expect("sqlite-vec store mutex poisoned");
+        let conn = self.conn.lock().unwrap_or_else(|p| p.into_inner());
         let count: i64 = conn.query_row(
             "SELECT COUNT(*) FROM vec_payload WHERE collection = ?1",
             params![collection],
@@ -244,7 +244,7 @@ impl SqliteVecStore {
     }
 
     fn payload_of(&self, collection: &str, point_id: &PointId) -> Result<serde_json::Value> {
-        let conn = self.conn.lock().expect("sqlite-vec store mutex poisoned");
+        let conn = self.conn.lock().unwrap_or_else(|p| p.into_inner());
         let json: Option<String> = conn
             .query_row(
                 "SELECT payload_json FROM vec_payload WHERE collection = ?1 AND point_id = ?2",
@@ -291,7 +291,7 @@ impl VectorStore for SqliteVecStore {
     }
 
     fn drop_collection(&self, name: &str) -> Result<()> {
-        let conn = self.conn.lock().expect("sqlite-vec store mutex poisoned");
+        let conn = self.conn.lock().unwrap_or_else(|p| p.into_inner());
         conn.execute_batch(&format!("DROP TABLE IF EXISTS {};", vec_table_for(name)))?;
         conn.execute(
             "DELETE FROM vec_payload WHERE collection = ?1",
@@ -333,7 +333,7 @@ impl VectorStore for SqliteVecStore {
         let payload_json = serde_json::to_string(&point.payload)
             .map_err(|e| Error::Config(format!("payload serialization failed: {e}")))?;
 
-        let mut conn = self.conn.lock().expect("sqlite-vec store mutex poisoned");
+        let mut conn = self.conn.lock().unwrap_or_else(|p| p.into_inner());
         let tx = conn.transaction()?;
         let table = vec_table_for(collection);
         if let Some(new_family) = entity_type.as_ref() {
@@ -389,7 +389,7 @@ impl VectorStore for SqliteVecStore {
         }
         let overfetch = top_k.saturating_mul(8).max(top_k);
         let raw: Vec<(i64, f32)> = {
-            let conn = self.conn.lock().expect("sqlite-vec store mutex poisoned");
+            let conn = self.conn.lock().unwrap_or_else(|p| p.into_inner());
             let mut stmt = conn.prepare(&format!(
                 "SELECT point_id, distance FROM {} WHERE embedding MATCH ?1 AND k = ?2",
                 vec_table_for(collection)
@@ -485,7 +485,7 @@ impl VectorIndex {
     }
 
     fn store_handle(&self) -> Option<Arc<SqliteVecStore>> {
-        let mut inner = self.inner.lock().expect("VectorIndex mutex poisoned");
+        let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
         if !inner.enabled {
             return None;
         }
@@ -518,7 +518,7 @@ impl VectorIndex {
             };
         }
         let Some(store) = self.store_handle() else {
-            let inner = self.inner.lock().expect("VectorIndex mutex poisoned");
+            let inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
             return Health {
                 connected: false,
                 url,
@@ -548,7 +548,7 @@ impl VectorIndex {
             return Err(Error::Config(
                 self.inner
                     .lock()
-                    .expect("VectorIndex mutex poisoned")
+                    .unwrap_or_else(|p| p.into_inner())
                     .last_error
                     .clone()
                     .unwrap_or_else(|| "vector index disabled".to_string()),
@@ -626,10 +626,7 @@ impl VectorIndex {
     }
 
     pub fn enabled(&self) -> bool {
-        self.inner
-            .lock()
-            .expect("VectorIndex mutex poisoned")
-            .enabled
+        self.inner.lock().unwrap_or_else(|p| p.into_inner()).enabled
     }
 }
 

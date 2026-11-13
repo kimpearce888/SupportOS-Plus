@@ -62,42 +62,27 @@ impl HelpScoutProvider for EmptyHelpScoutProvider {
     }
 
     async fn get_me(&self) -> Result<HsUser> {
-        let world = self
-            .world
-            .lock()
-            .expect("EmptyHelpScoutProvider mutex poisoned");
+        let world = self.lock_world();
         Ok(world.me.clone())
     }
 
     async fn list_mailboxes(&self) -> Result<Vec<HsMailbox>> {
-        let world = self
-            .world
-            .lock()
-            .expect("EmptyHelpScoutProvider mutex poisoned");
+        let world = self.lock_world();
         Ok(world.mailboxes.clone())
     }
 
     async fn list_users(&self) -> Result<Vec<HsUser>> {
-        let world = self
-            .world
-            .lock()
-            .expect("EmptyHelpScoutProvider mutex poisoned");
+        let world = self.lock_world();
         Ok(world.users.clone())
     }
 
     async fn list_teams(&self) -> Result<Vec<HsTeam>> {
-        let world = self
-            .world
-            .lock()
-            .expect("EmptyHelpScoutProvider mutex poisoned");
+        let world = self.lock_world();
         Ok(world.teams.clone())
     }
 
     async fn list_tags(&self) -> Result<Vec<HsTag>> {
-        let world = self
-            .world
-            .lock()
-            .expect("EmptyHelpScoutProvider mutex poisoned");
+        let world = self.lock_world();
         Ok(world.tags.clone())
     }
 

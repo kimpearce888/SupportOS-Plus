@@ -83,6 +83,51 @@ session ends by adding what the next session must not have to rediscover.
     branches) + design/mod.rs — all are F-04/R4.5 split candidates; the
     split is a deliberate R4.5 batch (behavior risk without golden
     verification in-sandbox; kittest is CI-only per F-06).
+- **D-14 (session 5, R2.4).** `unwrap`/`expect` production policy — the
+  per-class refinement of D-10's blanket "eliminate all production ones"
+  (the plan's letter). Precise census at pass start (cfg(test)-aware
+  scanner, G-08): 86 production occurrences in 4 classes.
+  - **Class B — mutex/rwlock poison (21): ELIMINATED in R2.4-a.** Every
+    lock in the tree guards plain data (sqlite connections, vec-index
+    state, key slot, cloned inert-world snapshots) with no invariant a
+    panicking holder could corrupt, so `.lock().expect("...")` became
+    `.lock().unwrap_or_else(|p| p.into_inner())` (the std poison-recovery
+    idiom — which `inert.rs::lock_world()` already used; the 5 inert
+    sites collapsed INTO that helper instead of duplicating it). Happy
+    path is behavior-identical; the panic class no longer exists.
+  - **Class A — constant-input constructors (45): KEEP as
+    `.expect(...)`.** 40 static `Regex::new(CONST)` compiles (+ 4 seccomp
+    `SeccompRule/Condition::new(const-args)` in sandbox.rs, + 1 chrono
+    `and_hms_opt(0,0,0)`). The input is a compile-time constant: failure
+    is unrepresentable in a correct build, so fail-fast-at-first-use is
+    the correct semantics; propagating an unrepresentable error would
+    churn ~45 signatures for zero behavior gain and collide with R3's
+    DRY pass (session-4 note). R2.4-a normalized the 20 message-less
+    `.unwrap()`s of this class to `.expect("static regex")` /
+    `.expect("midnight is always a valid time")` — error-path-only
+    change; under constraint 3 the expect message is the only in-code
+    documentation a survivor may carry.
+  - **Class C — guarded post-conditions (17 after A/B): R2.4-b owns
+    these.** Each is guarded by an explicit same-function check
+    ("checked above", "hit_cap implies", is_none early-return, match-arm
+    length check, HMAC's any-key-length contract). Where a natural
+    Option-flow rewrite exists (e.g. notification_sweep's
+    `last().map(...)` inside `Some(...)`), eliminate; where elimination
+    means restructuring control flow for a provably-unreachable branch,
+    keep the expect (same family as R2.5's unreachable arms).
+  - **Class D — runtime/bootstrap infrastructure (3): KEEP.**
+    workers/mod.rs tokio runtime build, task_bridge.rs thread spawn,
+    design/mod.rs egui default font family — one-time infra construction
+    with no recovery path; bootstrap-equivalent (the plan exempts
+    main.rs bootstrap; these are the same nature outside main.rs).
+  - **xtask + benches are NOT production** (43 occurrences + bench.rs):
+    xtask is dev-invoked build machinery (`cargo run -p xtask`), bench.rs
+    is `#[cfg(test)]`-gated at its lib.rs declaration — both ride D-10's
+    exemption. This answers the session-4 survey's classification
+    question.
+  - Deviation from the plan's letter (A/C/D keeps) is recorded as Q-03
+    for owner override; the alternative was rejected on the R3-collision
+    and unrepresentable-error grounds above.
 
 ## Facts (F-xx)
 
@@ -149,6 +194,20 @@ session ends by adding what the next session must not have to rediscover.
   these in R1.8/R1.9 (app-shell pages carry the most comments); run the
   clippy lane right after `cargo fmt`, before the test lanes, to catch them
   early.
+- **G-08 (session 5).** cfg(test)-aware scanning of this tree needs a
+  CROSS-LINE string state machine, never a per-line stripper: the storage
+  modules carry multi-line SQL string literals (raw and `\`-continued),
+  and a line-based stripper treats their continuation lines as code —
+  brace counts drift, test regions get truncated, and production
+  occurrences are misattributed (session 4's crude tracker overcounted
+  production at 126; the precise count was 86). Also: string contents
+  must be blanked while PRESERVING newlines, or line numbers shift after
+  the first multi-line string. External test modules (`#[cfg(test)] mod
+  x;` semicolon form) resolve to whole FILES (bench.rs, it_*.rs,
+  mockserver.rs, testsupport.rs) — the file-level tag must come from the
+  declaration site, not the file itself. The session-5 scanner lives at
+  `/home/z/my-project/tool-results/r24_triage.py` (sandbox-local; not
+  committed — zero-repo-pollution policy for one-off triage tooling).
 
 ## Open questions / deferred owner decisions
 
@@ -156,3 +215,11 @@ session ends by adding what the next session must not have to rediscover.
   pedantic subset) — stage-gated, owner's call.
 - **Q-02.** Whether the close-out (R6.2) should bump the version and cut a
   tagged release (v1.10.0) — out of scope unless the owner asks.
+- **Q-03 (session 5, D-14).** R2.4 keeps 65 production expects on D-14
+  grounds (45 constant-input constructors, 17 guarded post-conditions,
+  3 bootstrap-equivalent infra sites) instead of the plan's letter
+  ("eliminate all production ones"). If the owner wants the strict
+  reading anyway, the work is: class A → Result propagation across ~45
+  call sites (do it AFTER R3 to avoid double churn), class C → control-
+  flow restructures, class D → startup error handling in app bootstrap.
+  Default (standing unless overridden): D-14's keeps.

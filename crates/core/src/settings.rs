@@ -8,7 +8,11 @@ use crate::error::{Error, Result};
 static MASTER_KEY: std::sync::RwLock<Option<[u8; KEY_LEN]>> = std::sync::RwLock::new(None);
 
 pub fn init_master_key(path: &Path) -> Result<()> {
-    if MASTER_KEY.read().expect("master key lock").is_some() {
+    if MASTER_KEY
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .is_some()
+    {
         return Ok(());
     }
     let key = match std::fs::read(path) {
@@ -27,7 +31,7 @@ pub fn init_master_key(path: &Path) -> Result<()> {
         }
         Err(e) => return Err(Error::Io(e)),
     };
-    let mut slot = MASTER_KEY.write().expect("master key lock");
+    let mut slot = MASTER_KEY.write().unwrap_or_else(|e| e.into_inner());
     slot.get_or_insert(key);
     Ok(())
 }
@@ -46,15 +50,22 @@ pub(crate) fn clear_master_key_for_tests() {
 pub(crate) static SECRETS_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 pub(crate) fn master_key_available() -> bool {
-    MASTER_KEY.read().expect("master key lock").is_some()
+    MASTER_KEY
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .is_some()
 }
 
 fn master_key() -> Result<[u8; KEY_LEN]> {
-    MASTER_KEY.read().expect("master key lock").ok_or_else(|| {
-        Error::Config(
-            "secrets master key is not initialized; call settings::init_master_key at boot".into(),
-        )
-    })
+    MASTER_KEY
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .ok_or_else(|| {
+            Error::Config(
+                "secrets master key is not initialized; call settings::init_master_key at boot"
+                    .into(),
+            )
+        })
 }
 
 const ENVELOPE_VERSION: u8 = 0x01;

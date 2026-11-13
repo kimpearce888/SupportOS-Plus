@@ -200,7 +200,7 @@ fn ack_markers() -> &'static Regex {
     static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
     RE.get_or_init(|| {
         Regex::new(r"(?i)\b(sorry|apolog\w*|understand\w*|appreciate\w*|thank you|thanks for|patience|hear you|frustrat\w*)\b")
-            .unwrap()
+            .expect("static regex")
     })
 }
 
@@ -208,7 +208,7 @@ fn frustration_markers() -> &'static Regex {
     static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
     RE.get_or_init(|| {
         Regex::new(r"(?i)\b(frustrat\w*|unacceptable|ridiculous|again\?|still not working|third time|last time i|fed up|not happy|disappointed|worst)\b")
-            .unwrap()
+            .expect("static regex")
     })
 }
 
@@ -217,15 +217,15 @@ fn timeframe_patterns() -> &'static Vec<(Regex, &'static str)> {
     PATTERNS.get_or_init(|| {
         vec![
             (
-                Regex::new(r"(?i)\b(within|in|before|after)\s+(?:the\s+)?(?:next\s+)?(\d{1,4})\s*(minutes?|mins?|hours?|hrs?|days?|weeks?|business\s+days?)\b").unwrap(),
+                Regex::new(r"(?i)\b(within|in|before|after)\s+(?:the\s+)?(?:next\s+)?(\d{1,4})\s*(minutes?|mins?|hours?|hrs?|days?|weeks?|business\s+days?)\b").expect("static regex"),
                 "relative timeframe",
             ),
             (
-                Regex::new(r"(?i)\bby\s+(tomorrow|today|tonight|eod|end\s+of\s+(?:the\s+)?(?:day|week|month|quarter)|next\s+(?:monday|tuesday|wednesday|thursday|friday)|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b").unwrap(),
+                Regex::new(r"(?i)\bby\s+(tomorrow|today|tonight|eod|end\s+of\s+(?:the\s+)?(?:day|week|month|quarter)|next\s+(?:monday|tuesday|wednesday|thursday|friday)|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b").expect("static regex"),
                 "deadline",
             ),
             (
-                Regex::new(r"(?i)\b(as soon as possible|asap|right away|immediately)\b").unwrap(),
+                Regex::new(r"(?i)\b(as soon as possible|asap|right away|immediately)\b").expect("static regex"),
                 "urgency commitment",
             ),
         ]

@@ -278,7 +278,7 @@ pub(crate) fn derive_outcome(
 
     let escalated = notes.iter().any(|n| {
         regex::Regex::new(r"(?i)escalat|urgent|priority|vip")
-            .unwrap()
+            .expect("static regex")
             .is_match(&n.text)
     }) || reply_texts.iter().any(|t| t.contains("escalat"));
 

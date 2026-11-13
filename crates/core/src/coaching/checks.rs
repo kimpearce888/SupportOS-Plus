@@ -261,7 +261,8 @@ pub(super) fn check_timeframe(conn: &Connection, conv: &ConvRow, draft: &str) ->
 
 pub(super) fn check_acknowledgment(threads: &[ThreadRow], signals: &str, draft: &str) -> Value {
     let kind = "missing_acknowledgment";
-    let signals_re = Regex::new(r#"(?i)frustration[":\s]*(moderate|strong)"#).unwrap();
+    let signals_re =
+        Regex::new(r#"(?i)frustration[":\s]*(moderate|strong)"#).expect("static regex");
     let mut frustration: Option<(String, String, Option<i64>)> = None;
     if signals_re.is_match(signals) {
         frustration = Some((
@@ -399,8 +400,8 @@ pub(super) fn check_detail(signals: &str, threads: &[ThreadRow], draft: &str) ->
                 .count()
         })
         .sum::<usize>();
-    let technical_re =
-        Regex::new(r#"(?i)technical_language[":\s]*(technical|highly_technical)"#).unwrap();
+    let technical_re = Regex::new(r#"(?i)technical_language[":\s]*(technical|highly_technical)"#)
+        .expect("static regex");
     let technical = technical_re.is_match(signals);
     if words < 15 && (question_count > 0 || technical) {
         return result(
@@ -603,7 +604,7 @@ pub(super) fn check_wrong_context(
     let kind = "wrong_customer_context";
     let mut findings: Vec<Value> = Vec::new();
 
-    let number_refs_re = Regex::new(r"#(\d{3,8})\b").unwrap();
+    let number_refs_re = Regex::new(r"#(\d{3,8})\b").expect("static regex");
     let number_refs: Vec<i64> = number_refs_re
         .captures_iter(draft)
         .filter_map(|c| c.get(1).and_then(|m| m.as_str().parse::<i64>().ok()))
@@ -645,7 +646,8 @@ pub(super) fn check_wrong_context(
         }
     }
 
-    let greeting_re = Regex::new(r"(?im)^(?:hi|hello|hey|dear)\s+([a-z][a-z'-]{1,30})\b").unwrap();
+    let greeting_re =
+        Regex::new(r"(?im)^(?:hi|hello|hey|dear)\s+([a-z][a-z'-]{1,30})\b").expect("static regex");
     if let Some(greeting) = greeting_re.captures(draft)
         && let Some((first_name, _)) = customer
         && let Some(greeted) = greeting.get(1).map(|m| m.as_str().to_lowercase())
@@ -705,7 +707,8 @@ pub(super) fn check_preference_mismatch(
         );
     };
     let words = normalize_words(draft).len();
-    let steps_re = Regex::new(r"(?i)\b(step|first|then|next|finally)\b|\d\.").unwrap();
+    let steps_re =
+        Regex::new(r"(?i)\b(step|first|then|next|finally)\b|\d\.").expect("static regex");
     let has_steps = steps_re.is_match(draft);
     let open_question = threads
         .iter()
