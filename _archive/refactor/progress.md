@@ -43,7 +43,7 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 | R2.1 dead-code sweep | terminal (session 4) | ZERO active warnings (clippy -D warnings already green); 2 vestigial suppressions deleted (testsupport.rs allow(dead_code) — module already cfg(test)-gated, all helpers used; issue_radar.rs allow(unused_mut) — nav mutated at 8 sites); battery green; CI run#315 green — see complete.md |
 | R2.2 #[allow] audit | terminal (session 4) | 37 instances audited (28 in-src + 9 in-test): verdict table in progress.md, survivor policy memory D-13; 1 vestigial deleted (search/lanes.rs ref_option — signature already Option<&str>); 34 kept with written justifications (FFI islands, constraint-3-unsatisfiable style pairs, R3.4/R4.5-owned clusters, D-10 test regions); battery green; CI run#317 green — see complete.md |
 | R2.3 dependency hygiene | terminal (session 4) | machete v0.9.2: 4 candidates = 1 real unused (scrypt — zero source occurrences; removed from workspace+core manifests; lock dropped exactly scrypt+salsa20+pbkdf2, 747 bytes) + 3 false positives (custom lib names spp_core/spp_catalog defeat machete's string matcher); cargo-deny v0.20.2: advisories/bans/licenses/sources all ok; battery green; CI run#319 green — see complete.md |
-| R2.4 unwrap/expect policy | in_progress (session 5) | batch a DONE: D-14 policy written (G-08 census 86 prod = A45/B21/C17/D3); B-class 21 mutex-poison ELIMINATED (into_inner recovery; 5 inert sites collapsed into lock_world()); A-class 20 unwraps normalized to expect("static regex"); prod 86→65, unwrap 24→4; battery green; CI rides the session-5 push — batch b (class C, 17 sites) next |
+| R2.4 unwrap/expect policy | in_progress (session 5) | batch a DONE: D-14 policy written (G-08 census 86 prod = A45/B21/C17/D3); B-class 21 mutex-poison ELIMINATED (into_inner recovery; 5 inert sites collapsed into lock_world()); A-class 20 unwraps normalized to expect("static regex"); prod 86→65, unwrap 24→4; battery green; CI run#322 green (id 43391137472) — batch b (class C, 17 sites) next |
 | R2.5 panic!/todo!/unimplemented! | pending | 30 instances + 3 unreachable! arms (session-4 survey); same D-14-shaped policy expected |
 | R3.1–R3.6 DRY | pending | see plan §7 R3 |
 | R4.1–R4.5 clean code | pending | see plan §7 R4 |
@@ -130,6 +130,39 @@ Checks: cargo machete (v0.9.2, installed ad hoc) now reports only the 3 document
   poison recovery, static-regex normalization` (code + ledger in one
   commit per D-08). CI rides the push; run id recorded below after
   the first poll.
+- CI closure: run#322 (id 43391137472) GREEN on `d8cbb9c` — all four
+  jobs success (fmt/clippy/test/deny; AppImage+.deb x2; kittest
+  snapshot locks drift gate). The diff touched only core (8 files,
+  app-shell untouched — goldens unaffected, as predicted).
+- R2.4-b prep notes (read-only analysis done while CI ran; the 17
+  class-C sites triaged for the next session):
+  - ELIMINATE, clean rewrites (6): live_chats.rs:349 (`is_some_and`+
+    expect → `if let Some(cache) = …filter(…)`); notification_sweep.rs:
+    164 (`Some(last().map(…).expect(…))` inside `if hit_cap` → plain
+    `events.last().map(…)` — identical semantics minus the expect);
+    coaching/mod.rs:461+485 (`unwrap_or("").is_empty() {} else {
+    as_str().unwrap() }` → `match as_str() { Some(s) if !s.is_empty()
+    => …, _ => "(see reasoning)" }`); inert.rs:644 (`is_none()` early
+    return + `wf.unwrap()` → `let Some(wf) = wf else { return Err }`);
+    quality/mod.rs:629 (`json!` literal + `as_object_mut().unwrap()`
+    → build a `serde_json::Map` directly, wrap once at the end).
+  - ELIMINATE-IF-NATURAL, needs flow study (3): embeddings.rs:690+744
+    (qdrant `Option` checked far above — rebind the checked value or
+    `if let` through the point-building loop); settings.rs:15 (match
+    arm `bytes.len() == KEY_LEN` + `try_into().expect("length
+    checked")` → nested match on `try_from` with the wrong-length
+    error; borderline — the restructure unifies two error paths).
+  - KEEP, documented post-conditions (8): live_chats.rs:111 (page-model
+    contract; ui-closure restructure risks pixel drift, D-05);
+    ai_pipeline 1116/1747/1751 (rows/JSON written by this same code;
+    1747's `?` propagation needs a rusqlite conversion-failure mapping
+    for provably-valid data); support_graph:294 (static 12-kinds
+    table); workers/execute:675 (decision-type guarantee — note for
+    R3.4); webhook.rs:29 (HMAC library contract); embeddings.rs:813
+    (`json!` macro literal).
+  Batch b = the 6 clean eliminations (+2-3 if-natural after study),
+  full battery, one commit. Expected end state: ~10-11 kept class-C
+  expects, each with a written D-14 justification; R2.4 then terminal.
 
 ### Session 4 — 2026-11-13
 - Pre-flight: sandbox reset AGAIN (clone + toolchain gone) — re-provisioned
