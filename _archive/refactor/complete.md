@@ -33,7 +33,7 @@ CI evidence, date, notes.
 | R1.7 app-shell/infra strip | `17cfce1` | CI run#309, 2026-11-12 | 2026-11-12 | 429 whole + 2 inline; 2 G-07 masked-lint fixes (behavior-identical) |
 | R1.8 app-shell/pages-A strip | `ad13191` | CI run#310, 2026-11-12 | 2026-11-12 | 864 whole + 1 inline, the 7 largest pages; 2 more G-07 fixes |
 | R1.9 app-shell/pages-B + tests strip | `267da13` | CI run#311, 2026-11-12 | 2026-11-12 | 1011 whole + 1 inline; kittest goldens drift-locked green (pixel-neutral); whole tree comment-free (205/205) |
-| R1.10 comment closeout | (this push) | CI pending — row to be finalized with the run id after the push | 2026-11-13 | redundant warn/allow missing_docs pairs deleted (catalog+core lib.rs); 12 attr lines; stage R1 TERMINAL: 3,174 whole comment lines + 6 inline removed by the stripper across R1.1–R1.9, + 12 attr lines in R1.10 |
+| R1.10 comment closeout | `9b4aac5` | CI run#313 (id 43357073596), all 4 lanes success, 2026-11-13 | 2026-11-13 | redundant warn/allow missing_docs pairs deleted (catalog+core lib.rs); 12 attr lines; stage R1 TERMINAL: 3,174 whole comment lines + 6 inline removed by the stripper across R1.1–R1.9, + 12 attr lines in R1.10 |
 
 ## Final metrics (fill at close-out)
 
