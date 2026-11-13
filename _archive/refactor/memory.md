@@ -234,20 +234,28 @@ session ends by adding what the next session must not have to rediscover.
   these in R1.8/R1.9 (app-shell pages carry the most comments); run the
   clippy lane right after `cargo fmt`, before the test lanes, to catch them
   early.
-- **G-08 (session 5).** cfg(test)-aware scanning of this tree needs a
-  CROSS-LINE string state machine, never a per-line stripper: the storage
-  modules carry multi-line SQL string literals (raw and `\`-continued),
-  and a line-based stripper treats their continuation lines as code —
-  brace counts drift, test regions get truncated, and production
-  occurrences are misattributed (session 4's crude tracker overcounted
-  production at 126; the precise count was 86). Also: string contents
-  must be blanked while PRESERVING newlines, or line numbers shift after
-  the first multi-line string. External test modules (`#[cfg(test)] mod
-  x;` semicolon form) resolve to whole FILES (bench.rs, it_*.rs,
-  mockserver.rs, testsupport.rs) — the file-level tag must come from the
-  declaration site, not the file itself. The session-5 scanner lives at
+- **G-08 (session 5; refined session 6).** cfg(test)-aware scanning of
+  this tree needs a CROSS-LINE string state machine, never a per-line
+  stripper: the storage modules carry multi-line SQL string literals
+  (raw and `\`-continued), and a line-based stripper treats their
+  continuation lines as code — brace counts drift, test regions get
+  truncated, and production occurrences are misattributed (session 4's
+  crude tracker overcounted production at 126; the precise count was
+  86). Also: string contents must be blanked while PRESERVING
+  newlines, or line numbers shift after the first multi-line string.
+  External test modules (`#[cfg(test)] mod x;` semicolon form) resolve
+  to whole FILES (bench.rs, it_*.rs, mockserver.rs, testsupport.rs) —
+  the file-level tag must come from the declaration site, not the file
+  itself. The session-5 scanner lives at
   `/home/z/my-project/tool-results/r24_triage.py` (sandbox-local; not
   committed — zero-repo-pollution policy for one-off triage tooling).
+  Session-6 refinement: the tracker models cfg(test) at MODULE level
+  only — ARM-level attributes (`#[cfg(test)] "..." =>` inside a
+  production match, execute.rs:468's `__test_panic` arm) escape it and
+  get counted as production. One instance tree-wide: correct manually
+  in the census notes; a scanner re-write is not warranted at this
+  density. The panic-family census extension lives alongside at
+  `r25_triage.py` (r24 kept intact as the unwrap/expect census).
 
 ## Open questions / deferred owner decisions
 

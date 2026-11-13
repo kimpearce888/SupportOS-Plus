@@ -132,6 +132,50 @@ Checks: cargo machete (v0.9.2, installed ad hoc) now reports only the 3 document
   the R2.4 CI row rides this push — final confirmation next poll.
   Pointer advanced to R2.5 (panic!/todo!/unimplemented!, 30 + 3
   unreachable arms per the session-4 survey).
+- CI closure: run#325 (id 43418287308) GREEN on `82570a4` — all four
+  jobs success; notably the kittest snapshot drift gate passed with the
+  live_chats.rs edit (the if-let rewrite was pixel-neutral as
+  predicted — the then-arm's clones are identical values) and both
+  packaging lanes green. complete.md's R2.4 row filled with the run id.
+- R2.5 prep (read-only analysis done while CI ran; the scanner was
+  extended in tool-results — r25_triage.py adds panic/todo/
+  unimplemented/unreachable patterns to the G-08 machine, r24 kept
+  intact as the unwrap/expect census):
+  - PRECISE PRODUCTION CENSUS: FOUR occurrences, not the plan's 30
+    (the session-4 crude count included test regions — the same
+    overcount pattern R2.2's allow census hit). xtask: zero. todo!/
+    unimplemented!: zero tree-wide in production.
+  - app/mod.rs:891 `unreachable!("inbox handled above")` — KEEP
+    shape: exhaustiveness-forced arm; proof is cross-branch (the
+    match runs only in the `else` of `if self.page == PageKey::Inbox`,
+    verified by read). Removal would need a wildcard-None arm (silent
+    no-op — dishonest) or a UI-dispatch restructure (pixel drift,
+    D-05).
+  - oauth_state.rs:95 `unreachable!("hex_digit got {n} ...")` — KEEP
+    shape: exhaustiveness-forced `_` on u8; proof is the callers'
+    bit-masks (`b >> 4`, `b & 0x0f`); a range-newtype to satisfy the
+    type system is overkill/R3 territory.
+  - execute.rs:1833 `_ => unreachable!()` — BARE (message-less);
+    exhaustiveness-forced for `Result<Option<T>, E>` narrowed by the
+    outer match's `Ok(Some(article))` first arm (cross-match proof).
+    CANDIDATE R2.5 CODE INCREMENT: message normalization
+    `unreachable!("Ok(Some) handled by the outer arm")` (D-14 class-A
+    precedent — under constraint 3 the message is the only in-code
+    doc a survivor may carry).
+  - execute.rs:468 `panic!("intentional test panic (batch 27 item 86)")`
+    — inside `#[cfg(test)] "__test_panic" =>` match ARM: arm-level
+    cfg(test) compiles the arm only in test builds — semantically test
+    machinery (D-10 exempt), NOT a production panic. G-08 REFINEMENT
+    (record, do not re-write the scanner): the region tracker models
+    cfg(test) at mod level; arm-level attributes escape it; 1
+    instance tree-wide, manual correction suffices.
+  - Expected R2.5 shape: policy D-15 (panic family, D-14-shaped):
+    three exhaustiveness-forced unreachable! keeps with written
+    justifications + the one message normalization + the census
+    correction vs the plan's letter (Q-04-style record or fold into
+    Q-03's pattern). Docs-heavy, single small code edit; one commit.
+- Session closed: ledger addendum pushed on this commit; its docs-only
+  CI run is the next session's preflight gate.
 
 ### Session 5 — 2026-11-14
 - Pre-flight: sandbox reset AGAIN (clone + toolchain gone) — re-provisioned
