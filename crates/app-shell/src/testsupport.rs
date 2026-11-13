@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use spp_core::db::DbHandle;
 
 pub(crate) fn empty_db() -> DbHandle {

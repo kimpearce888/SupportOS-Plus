@@ -7,10 +7,11 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 
 ## CURRENT POINTER
 
-- Next task: **R2.1 — dead-code sweep** (fix every dead-code/unused
-  warning by deleting or wiring the code; never `#[allow]`; see `plan.md`
-  §7 R2.1). The whole R1 comment-stripping stage is TERMINAL (R1.0–R1.10;
-  see `complete.md`).
+- Next task: **R2.2 — `#[allow]` audit** (26 in-src instances: 15
+  too_many_arguments, 4 too_many_lines, 3 unsafe_code, 3 crate-level
+  style pairs, 1 ref_option — plus 9 in-test too_many_arguments;
+  resolve by fixing/deleting; survivors listed in memory.md with active
+  justification; see `plan.md` §7 R2.2).
 - Pre-flight: confirm CI green on the session-4 final head (run id in
   session log). If the session ended mid-CI, the run may still be in
   flight — next session must wait for it.
@@ -36,7 +37,7 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 | R1.8 app-shell/pages-A strip | done (session 3) | 864 whole lines + 1 inline comment removed from 7 of 7 pages (inbox 226, knowledge 150, outreach 157, custom_objects 132, settings 114, ai_center 55, reports 51); G-07 hit twice more (collapsible_if in custom_objects.rs + outreach.rs empty-state CTAs — same restructure fix); cumulative check 161/161 clean over stripped scopes; battery green; CI run#310 green |
 | R1.9 app-shell/pages-B strip | done (session 3) | 1011 whole lines + 1 inline comment removed from 44 of 51 scanned (16 pages + mod.rs + queries.rs + json_fields.rs + all 26 tests files); NO G-07 hits; whole-tree check crates 205/205 clean — the entire Rust source tree is comment-free; battery green (app-shell lane re-linked all 26 stripped kittest binaries); CI run#311 green |
 | R1.10 comment closeout | terminal (session 4) | redundant warn+allow missing_docs pairs deleted from catalog/core lib.rs (12 attr lines, 4 insertions after fmt); crate lint headers now match app-shell's clean form; whole-tree check crates 205/205 green; battery green; CI run#313 green — see complete.md |
-| R2.1–R2.5 unnecessary code | pending | see plan §7 R2 |
+| R2.1–R2.5 unnecessary code | pending | R2.1 done in-session (see log); R2.2 census: 26 in-src allows + 9 in-test; R2.3 machete; R2.4 unwrap policy; see plan §7 R2 |
 | R3.1–R3.6 DRY | pending | see plan §7 R3 |
 | R4.1–R4.5 clean code | pending | see plan §7 R4 |
 | R5.1–R5.3 guardrails | pending (optional, stage-gated) | |
@@ -77,6 +78,31 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
   re-count at execution time (R1.x restructuring touched two sites:
   design/mod.rs and workers_host.rs G-07 fixes, plus the audit allowlist
   lines in core/src/audit.rs which are gate-anchored, invariant 7).
+- R2.1 executed (same session, after run#313 went green on the R1.10
+  head): the sweep proper found ZERO active dead-code/unused warnings
+  (clippy lanes already run `-D warnings` and pass — R1's lint hygiene
+  had kept the tree warning-clean). The audit's real finds were two
+  VESTIGIAL suppressions of exactly R2.1's lint classes: (a)
+  `testsupport.rs` `#![allow(dead_code)]` — the module is already
+  `#[cfg(test)]`-gated in lib.rs and every helper is used in the test
+  profile (seed_users/mailboxes/customers feed fixture(); empty_db,
+  install_master_key, ConvSeed, fixture, seed_conversation, seed_thread,
+  seed_rating, seed_tag, seed_doc_article all have call sites — 56
+  verified) — deleted; (b) `issue_radar.rs` `#[allow(unused_mut)]` —
+  nav is mutated at 8 sites; the stripped AUD-P2 stub comment had
+  obscured that the writers landed — deleted. Both deletion-only,
+  behavior-identical.
+- Battery after R2.1: gate clean, fmt --check clean, clippy workspace
+  (6.8s) + sandbox lane clean, app-shell 293+2 (272s), core 520 (478s),
+  core-sandbox 528 (444s), catalog+xtask 56, verify-icons verified,
+  whole-tree strip check 205/205.
+- R2.2 census recorded for the next session: in-src 26 = 15
+  too_many_arguments + 4 too_many_lines + 3 unsafe_code (vectorstore_
+  sqlitevec.rs FFI, sandbox.rs INSIDE cfg(test) mod tests, app-shell
+  lib.rs gating single_instance FFI) + 3 crate-level style pairs
+  (module_name_repetitions + missing_errors_doc) + 1 ref_option
+  (search/lanes.rs); in-tests 9 too_many_arguments. The plan's "31"
+  was the all-crates count at session 1.
 
 ### Session 3 — 2026-11-12
 - Pre-flight: sandbox reset AGAIN (clone + toolchain gone) — re-provisioned

@@ -336,7 +336,6 @@ impl IssueRadarPage {
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) -> Option<NavRequest> {
-        #[allow(unused_mut)]
         let mut nav: Option<NavRequest> = None;
         self.ensure_loaded(db);
 
