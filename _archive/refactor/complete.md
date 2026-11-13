@@ -37,6 +37,7 @@ CI evidence, date, notes.
 
 | R2.1 dead-code sweep | `f01ce18` | CI run#315 (id on file in progress.md), all 4 lanes success, 2026-11-13 | 2026-11-13 | zero active dead-code/unused warnings; 2 vestigial suppressions deleted (testsupport.rs allow(dead_code) — already cfg(test)-gated and fully used; issue_radar.rs allow(unused_mut) — nav mutated at 8 sites) |
 | R2.2 #[allow] audit | `f06e1ba` | CI run#317 (id 43368539603), all 4 lanes success, 2026-11-13 | 2026-11-13 | 37 instances audited (28 in-src + 9 in-test); verdict table in progress.md, survivor policy memory D-13; 1 vestigial deleted (search/lanes.rs ref_option); 34 kept with written justifications; R2.1+R2.2 together: 3 deletions, 0 unjustified suppressions remain |
+| R2.3 dependency hygiene | `981f2a0` | CI run#319 (id 43377764840), all 4 lanes success, 2026-11-13 | 2026-11-13 | machete: 1 real unused dep (scrypt) removed — lock dropped exactly scrypt+salsa20+pbkdf2 (747 bytes); 3 false positives kept (custom lib names); cargo deny: advisories/bans/licenses/sources ok; battery green |
 ## Final metrics (fill at close-out)
 
 - Comments removed (exact, from stripper): **3,174 whole comment lines +
