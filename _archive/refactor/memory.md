@@ -277,6 +277,53 @@ session ends by adding what the next session must not have to rediscover.
     paired `.expect("…")` messages merged into the prepare-side message
     (test-only observability, D-10 region).
 
+- **D-18 (session 10, R3.3).** HTTP/serde plumbing end state — three
+  helper definitions now own the previously-duplicated tails; a new
+  module-local rewrite of the same shapes is construction debt
+  (D-17's standing rule, extended to this domain).
+  - **`ai_lm_studio::send_json<T>(req, op)`** (private): the
+    OpenAI-compatible 4-stage tail (send → status+text → non-2xx
+    300-char-snippet error → `from_str`), messages
+    `"LM Studio {op} failed/read failed/request failed (HTTP
+    {status})/parse failed"` with op ∈ {list_models, chat, embed} —
+    byte-identical to the 4 folded sites. `OpenAiCompatibleClient::
+    authorized(req)` owns the bearer-if-present attach. THE CONTRACT:
+    text is read ALWAYS (status errors carry the body snippet) and
+    parse is `text`+`from_str` — NOT `res.json()` (from_slice; the two
+    differ observably on invalid UTF-8 — embeddings' kept site is the
+    proof-by-contrast). Fold rule (D-17 discipline): embeddings'
+    embed_texts KEEPS its own tail (send-error remedy hint, lazy text
+    read, `.json()` parse, `unwrap_or_default` text).
+  - **`helpscout_real::http::docs_request_json(req, method_label,
+    path, unreachable_friendly, invalid_json_friendly)`** (private):
+    the Docs-API read/write pair's shared skeleton; the two
+    differing friendly strings are PARAMETERS (read-path vs
+    write-path user messaging — the semantic distinction, made
+    visible). token_request/request_inner keep their own tails
+    (different error contracts; retry/ratelimit machinery).
+  - **`json_fields::json_str(v, key) -> Option<String>` /
+    `json_string(v, key) -> String`** (pub(crate), 9 LOC): the flat
+    key-indexed extraction idioms. Standing fold rules recorded in
+    the R3.3 verdict table: nested depth-2 paths stay direct
+    (`v["a"]["b"]` — a two-arg call with `&v["a"]` is not clearer);
+    literal-default sites stay direct (`.unwrap_or("lit")` carries
+    per-site knowledge); the `.get(k).and_then(as_str)` family stays
+    (borrowed &str, different type shape); `.as_i64()/.as_bool()` stay
+    (canonical one-call serde_json API). Tree-wide standing rule:
+    flat key-indexed owned-String extraction goes through these two
+    fns.
+  - Client-construction sites (6) are DELIBERATE keeps: each builder
+    encodes a distinct policy (timeout+retry-tracing,
+    redirect-none×2, default-headers bearer, plain,
+    blocking+timeouts) — a shared constructor would parameterize
+    policy = anti-DRY.
+  - **Deferred census note:** `.chars().take(N).collect()` (~100
+    sites, domain caps 40/240/300/4000/8000…) is a distinct
+    truncation-idiom class, NOT response parsing — candidate for a
+    future misc-DRY batch if the owner wants it; recorded here so it
+    is not lost.
+
+
 ## Facts (F-xx)
 
 - **F-01.** Baseline (session 1): 204 .rs files, 141,107 LOC — core
@@ -364,6 +411,16 @@ session ends by adding what the next session must not have to rediscover.
   in the census notes; a scanner re-write is not warranted at this
   density. The panic-family census extension lives alongside at
   `r25_triage.py` (r24 kept intact as the unwrap/expect census).
+  Session-10 refinement (r33_triage.py): `out.append('""')` appends a
+  2-char string as ONE list element, so `len(out)` (used for
+  line_starts) undercounts by one char per string — the joined-text
+  positions desync (in r25's original the same latent bug existed via
+  `out.append("'c'")` for char literals; r25's line numbers were
+  never cross-checked against the file, only its counts were trusted,
+  and the counts were unaffected). Fix: every multi-char placeholder
+  goes through `out.extend(...)`. If a future scanner reuses
+  strip_file, assert `stripped[ls[k]:ls[k]+len(line)] == line` for all
+  k before trusting any line number.
 - **G-09 (session 6, post-close incident).** CI's deny step checks the
   LIVE RUSTSEC advisory DB — a docs-only push can go RED between two
   runs minutes apart when a new advisory lands: run#327 green, run#328
@@ -392,6 +449,19 @@ session ends by adding what the next session must not have to rediscover.
   runs) remains the fallback when a lane outlives one window. Do not
   generalize from the nohup deaths to "all backgrounding is impossible" —
   use the subshell form and verify survival on the first poll.
+
+- **G-11 (session 10).** The bash tool's DISPLAY pipeline eats the
+  literal 3-char sequence `[m` (a bare ANSI-reset fragment) from any
+  text it shows — commands and files are intact (proven: `printf '%s'
+  'X[mY' | wc -c` = 4), but every `#[must_use]` rendered as
+  `#ust_use]` in output, and any display containing `[m` is
+  unreliable. Consequences: NEVER verify file content by eyeballing
+  bash output when the text could contain `[m` (or any other escape
+  fragment); use computed counts, `wc -c`, substring tests in python
+  that print booleans/numbers, or the Read tool. This misled the
+  session-10 census debugging for several steps (a phantom
+  "corrupted file" chase) before the printf probe exposed it.
+
 
 ## Open questions / deferred owner decisions
 

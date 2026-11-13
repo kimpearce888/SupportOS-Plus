@@ -49,6 +49,7 @@ pub mod interaction_engine;
 pub(crate) mod interaction_signals;
 pub(crate) mod issue_impact;
 pub mod jobs;
+pub(crate) mod json_fields;
 pub mod knowledge_store;
 pub mod logging;
 pub mod loopback;

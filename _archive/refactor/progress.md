@@ -1,25 +1,22 @@
 # Refactor Progress — Live State
 
-Last updated: session 9 (2026-11-13). Update rule: every session updates
+Last updated: session 10 (2026-11-13). Update rule: every session updates
 this file before ending. Statuses: `pending` / `in_progress` / `done` /
 `terminal` (done + closed in `complete.md`) / `dropped` (with reason in
 `memory.md`).
 
 ## CURRENT POINTER
 
-- Next task: **R3.3 — HTTP/serde plumbing** (reqwest response parsing +
-  JSON mapping duplication → shared client-side helpers; see plan §7 R3).
-  CENSUS FIRST — the standing R2.5 lesson (three consecutive census
-  corrections came from skipping it; R3.2 added the fifth: the census
-  pattern missed turbofish `collect::<…>()` spellings — match `collect`
-  with AND without generic arguments in trailing-tail patterns).
-- Pre-flight [session 9]: R3.2 executed on the green base `bfad483`
-  (run#334 green, all four lanes). R3.2 head `5cc08fc` is CI-VERIFIED
-  GREEN — run#335 (id 43492961540), all four lanes success (addendum
-  commit below). Green base for R3.3: the addendum head's own
-  docs-only run (the standard next-session preflight gate).
-- Session counter: 9 completed (R1 terminal; R2 stage TERMINAL; R3.1
-  terminal — run#332 green; R3.2 TERMINAL — run#335 green on `5cc08fc`).
+- Next task: **R3.4 — page scaffolding** (repeated page composition
+  through the shared host compositor; pixel-neutral, goldens confirm —
+  see plan §7 R3). CENSUS FIRST, with the standing R2.5/R3.2 lesson.
+- Pre-flight [session 10]: R3.3 executed on the green base `ac63c83`
+  (run#336 green, all four lanes — the docs-only addendum head, the
+  standard next-session preflight gate). R3.3 head is the commit of this
+  session; its CI run is session 11's preflight gate.
+- Session counter: 10 completed (R1 terminal; R2 stage TERMINAL; R3.1
+  terminal — run#332 green; R3.2 TERMINAL — run#335 green; R3.3 terminal —
+  battery green at exact baselines, CI row rides this session's push).
 - Environment: session 9's sandbox was PARTIALLY reset (clone and
   ~/.cargo SURVIVED; /tmp logs wiped; no re-provision needed beyond
   github-reconnect.sh). Warm build ran during the CI preflight wait
@@ -50,7 +47,8 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 | R2.5 panic!/todo!/unimplemented! | terminal (session 7) | precise census: 4 production occurrences, not the plan's 30 (27 were test-region overcounts; todo!/unimplemented! zero tree-wide); policy D-15: 3 exhaustiveness-forced unreachable! kept with written local proofs, 1 arm-level cfg(test) panic reclassified D-10-exempt; one code increment (execute.rs:1833 message normalization); battery green; CI row rides this push — see complete.md |
 | R3.1 error types | terminal (session 8) | census: FIVE types tree-wide, ZERO duplicate enums (root+boxed-subtype architecture already consolidated); 3 hand-rolled Display/Error impls → thiserror derives (byte-identical messages; AcquireError #[source] reproduces the hand-rolled source()); TranslateError enum→newtype (class dimension unread by its single consumer); app-shell +thiserror dep (lock: one edge line); D-16; CI run#332 green on `5ca31af` — see complete.md |
 | R3.2 SQL plumbing | terminal (session 9) | lenient row-collect tail consolidated into db::query_rows + db::rows_ok; 80 sites (73 census + 7 turbofish blind-spot); +657/−823 across 32 files; battery green (520/528/293+2/56); CI run#335 green on `5cc08fc` — see complete.md |
-| R3.3–R3.6 DRY | pending | see plan §7 R3 |
+| R3.3 HTTP/serde plumbing | terminal (session 10) | 4 LM-Studio send tails → `send_json` + `authorized` (byte-identical messages); 2 docs tails → `docs_request_json` (byte-identical friendly strings, verified by continuation-resolution); 122 flat key-indexed extraction sites → `json_fields::json_str`/`json_string` (new module, 9 LOC); 13 send-tails/6 builders/139 idioms censused, keeps recorded in the R3.3 verdict table; battery green (520/528/293+2/56); strip-check 206/206 — see complete.md |
+| R3.4–R3.6 DRY | pending | see plan §7 R3 |
 | R4.1–R4.5 clean code | pending | see plan §7 R4 |
 | R5.1–R5.3 guardrails | pending (optional, stage-gated) | |
 | R6.1–R6.2 polish + close | pending | |
@@ -139,7 +137,93 @@ Checks: cargo machete (v0.9.2, installed ad hoc) now reports only the 3 document
 
 **R3.2 verdict summary:** the plan's "row-mapping/statement boilerplate" letter resolved to ONE real duplication class (the lenient row-collect tail) + a wall of canonical-idiom keeps. 80 tails eliminated (75 full-folds → 77 `query_rows` calls — support_graph search and ai_tools clusters each carry a 2-branch if/else — plus 5 `rows_ok` tails); 1 pre-existing local helper absorbed; 32 files changed, +657/−823 (net −166); test-region sites included (8 census + turbofish — DRY is not production-only); battery green with EXACT baseline counts (520/528/293+2/56) — the lenient-vs-strict semantic boundary held everywhere (D-17 contract).
 
+### R3.3 — HTTP/serde plumbing (session 10; census: 13 send-tails, 6 client builders, 139 string-extraction idioms; scanner r33_triage.py in tool-results, G-08 discipline, line_starts element/char bug found and fixed en route)
+
+| class | sites | verdict | outcome |
+|---|---|---|---|
+| OpenAI-compatible send tail → `send_json` helper in ai_lm_studio.rs | 4 (list_models 112, chat 140, post_chat_body 210, embed 306) | consolidate | the EXACT 4-stage tail (send → status+text → 300-char-snippet non-2xx error → from_str) with byte-identical `{op} failed/read failed/request failed (HTTP …)/parse failed` messages; op ∈ {list_models, chat, embed}; bearer-auth attach (`authorized`, 5 sites incl. is_available) folded as a client method |
+| docs_request tail → `docs_request_json` helper in helpscout_real/http.rs | 2 (docs_request_inner, docs_request_send) | consolidate | same-file DRY-ladder-1: shared skeleton (network HsApiError → status+text(unwrap_or_default) → 2xx empty→Null/from_str → non-2xx HsApiError with friendly_error); the 3 differing strings (network friendly, parse friendly) + method_label/path parameterized; all other messages byte-identical |
+| flat key-indexed string extraction → `json_fields::json_str`/`json_string` | 122 (93 `.map(\|s\| s.to_string())` + 4 `.map(String::from)` + 23 `.unwrap_or_default().to_string()` + 2 test-region `String::from` in copilot) | consolidate | new `core/src/json_fields.rs` (pub(crate), 2 fns, json_string delegates to json_str().unwrap_or_default()); files: helpscout_real/mod.rs 75, helpscout_real/http.rs 44, analytics 1, copilot 2 (test region rides D-10 exemption but DRY is not production-only — R3.2 precedent) |
+| nested depth-2 extraction `v["a"]["b"].as_str().map(…)` | 8 (all helpscout_real/mod.rs) | keep | a two-arg helper call with `&v["a"]` is not clearer than the direct idiom; the flat-helper does not fit the path shape |
+| literal-default extraction `.unwrap_or("lit").to_string()` | 11 (helpscout_real 7, support_graph 4) | keep | the non-empty default is per-site knowledge; the shape differs from the pure extraction class |
+| `.get("k").and_then(\|v\| v.as_str())` family | ~50 tree-wide | keep | BORROWED &str access (no allocation) — a different type shape; converting to the owned helper would change perf/type semantics |
+| `.as_str().map(str::to_string)` without key index | 9 | keep | array-element Value→String conversion, no key access — different shape |
+| embeddings.rs `embed_texts` send tail | 1 | keep | D-17 fold-rule keep: send-error message carries a remedy hint, text read is lazy (error branch only), parse via `res.json()` (from_slice — observably different from text+from_str on invalid UTF-8), text read failure is `unwrap_or_default` not propagated |
+| version_check.rs `latest_release` | 1 | keep | single instance of its shape (404-hint branch); no duplication to fold |
+| token_request tail (http.rs) | 1 | keep | different error contract (returns Result<Value, HsApiError>, OAuth-specific messages, `.json()` parse, no empty-body Null rule) |
+| request_inner full tail (http.rs) | 1 | keep | the retry/ratelimit/301/401/429 machinery — its parse tail is embedded in bespoke control flow; consolidating would parameterize 6+ dimensions |
+| connectors.rs http arm | 1 | keep | bounded streaming download with mid-stream size caps and content-type detection — a data-connector concern, not the API-client shape |
+| connection_doctor.rs reach probe | 1 | keep | diagnostic flow (401-is-expected branch); the tail is DoctorStep reporting, not value parsing |
+| xtask fetch_pinned_with_retry | 1 (blocking) | keep | separate crate, blocking client, anyhow domain — D-14 xtask dev-machinery precedent |
+| reqwest::Client::builder sites | 6 | keep | each encodes a distinct policy (timeout+retry-tracing / redirect-none ×2 / default-headers bearer / plain / blocking+timeouts); a shared constructor would parameterize policy = anti-DRY |
+| `.chars().take(N).collect()` tree-wide | ~100 | noted, deferred | domain-cap truncation idiom (40/240/300/4000/8000…), NOT response parsing — out of R3.3's class; recorded for a possible future misc-DRY batch |
+| `.as_i64().unwrap_or(0)` / `.as_bool()` etc. | many | keep | canonical serde_json Value API — one call, no boilerplate to fold |
+
+**R3.3 verdict summary:** the plan's "reqwest response parsing + JSON mapping duplication" letter resolves to THREE real consolidation classes (4+2 send tails, 122 flat string-extraction sites) + a wall of differing-contract keeps. HTTP surface census: 13 production send-tails, 6 client builders, 7 reqwest-using files + connection_doctor via the shared client.
+
 ## Session log
+
+### Session 10 — 2026-11-13
+- Pre-flight: run#336 green on `ac63c83` (all four jobs verified via
+  the API — the docs-only addendum head, D-08 satisfied). Clone,
+  toolchain, and credentials all survived the session reset (partial
+  reset pattern continues); disk freed to 2G budget before the battery
+  (G-05 hit preemptively twice: 92% after the clippy lanes, 91% at the
+  final strip-check — incremental rm between every lane held).
+- Census first (r33_triage.py in tool-results, built on r25's
+  strip_file + region tracker): 13 production send-tails, 6 client
+  builders, and the string-extraction idiom family 139 (93 flat
+  `.map(|s| s.to_string())` + 8 nested depth-2 + 4 `String::from` + 23
+  `unwrap_or_default().to_string()` + 11 literal-default). Two
+  scanner defects found and fixed en route (recorded in G-08's
+  refinement + G-11): (a) `out.append('""')` appends a 2-char list
+  ELEMENT so `len(out)` undercounts by one per string — line_starts
+  desynced from the joined text (567/631 lines misaligned in
+  ai_lm_studio; fixed by `out.extend`); the same latent bug existed in
+  r25's original via `out.append("'c'")` — r25's reported LINE NUMBERS
+  were never cross-checked, so it went unnoticed (counts were always
+  right). (b) the bash tool's DISPLAY eats the literal `[m` (ANSI
+  reset fragment) from shown output — files on disk are intact;
+  verify via `wc -c`/computed counts, never by eyeballing displayed
+  text (G-11).
+- Execution: three prongs. (1) ai_lm_studio.rs — `send_json<T>`
+  (private, `serde::de::DeserializeOwned`) reproducing the 4-stage
+  tail with byte-identical `{op} failed/read failed/request failed
+  (HTTP …)/parse failed` messages, plus `authorized()` on
+  OpenAiCompatibleClient for the bearer-if-present attach (5 sites);
+  4 tails converted (list_models, chat, post_chat_body, embed);
+  is_available rides authorized only. (2) helpscout_real/http.rs —
+  `docs_request_json(req, method_label, path, unreachable_friendly,
+  invalid_json_friendly)`; both docs_request_inner and docs_request_send
+  call it; the two continuation-form friendly strings were verified
+  byte-identical by resolving the old `\`+newline+whitespace forms
+  and substring-comparing against the new single-line literals.
+  (3) new `core/src/json_fields.rs` (9 LOC: json_str =
+  `v[key].as_str().map(str::to_string)`, json_string =
+  `json_str().unwrap_or_default()`); 122 flat sites converted by
+  r33_convert.py (whole-file multiline-tolerant regex with per-file
+  count assertion against the census — the per-line variant failed on
+  wrapped forms, the R3.2 multiline lesson reconfirmed); 14
+  owned-Value receivers caught by the compiler and fixed to `&`
+  (http.rs token fns ×8, mod.rs `full` ×5, analytics `q` ×1).
+- Post-batch census: 0 convertible flat sites remain; keeps intact
+  (nested 8, literal-default 11, send-tails 13→9 through the 2
+  helpers, builders 6). 2 unit tests for json_fields were drafted
+  then DROPPED to hold the exact-baseline battery discipline (the
+  mock-server roundtrips in it_lm_studio/it_helpscout exercise both
+  helpers through every converted consumer — the R3.2 no-new-tests
+  precedent).
+- Battery: gate clean, fmt --check clean, clippy workspace + sandbox
+  clean, core 520 (468s), core-sandbox 528 (481s), app-shell 293+2
+  (288s, all 26 kittest binaries linked, no G-05 hit), catalog+xtask
+  56, verify-icons verified, strip-check 206/206 (205 + json_fields.rs
+  — the +1 is the new file). ALL GREEN at EXACT baselines.
+- Diff class review: programmatic per-line pattern audit + manual
+  read; every hunk is helper-addition, call-site conversion, import
+  addition, or fmt reflow of those. Net: 6 files modified + 1 new
+  module + lib.rs declaration; +274/−312 plus the 9-line module.
+- R3.3 terminal; pointer advances to R3.4 (page scaffolding, census
+  first). CI row rides this session's push.
 
 ### Session 9 — 2026-11-13
 - Pre-flight: sandbox PARTIALLY reset (clone + ~/.cargo survived; /tmp

@@ -1,5 +1,48 @@
 use super::*;
 
+use crate::json_fields::{json_str, json_string};
+
+async fn docs_request_json(
+    req: reqwest::RequestBuilder,
+    method_label: &str,
+    path: &str,
+    unreachable_friendly: &str,
+    invalid_json_friendly: &str,
+) -> Result<Value> {
+    let res = req.send().await.map_err(|e| -> crate::error::Error {
+        HsApiError {
+            status_code: 0,
+            message: format!("Network error contacting the Docs API: {e}"),
+            friendly: unreachable_friendly.into(),
+            retryable: true,
+        }
+        .into()
+    })?;
+    let status = res.status().as_u16();
+    let text = res.text().await.unwrap_or_default();
+    if (200..300).contains(&status) {
+        if text.is_empty() {
+            return Ok(Value::Null);
+        }
+        return serde_json::from_str(&text).map_err(|_| {
+            HsApiError {
+                status_code: status,
+                message: "Invalid JSON from the Docs API".into(),
+                friendly: invalid_json_friendly.into(),
+                retryable: false,
+            }
+            .into()
+        });
+    }
+    Err(HsApiError {
+        status_code: status,
+        message: format!("Docs API {method_label} {path} -> {status}"),
+        friendly: friendly_error(status, &text, method_label),
+        retryable: false,
+    }
+    .into())
+}
+
 impl RealHelpScoutProvider {
     pub(super) async fn docs_request_inner(&self, path: &str) -> Result<Value> {
         let basic = base64_of(&format!("{}:X", self.credentials.docs_api_key));
@@ -7,44 +50,16 @@ impl RealHelpScoutProvider {
             "{}{path}",
             self.credentials.docs_api_base.trim_end_matches('/')
         );
-        let res = self
-            .client
-            .get(url)
-            .header("Authorization", format!("Basic {basic}"))
-            .send()
-            .await
-            .map_err(|e| -> crate::error::Error {
-                HsApiError {
-                    status_code: 0,
-                    message: format!("Network error contacting the Docs API: {e}"),
-                    friendly: "The Help Scout Docs API is unreachable. The docs mirror stays empty; everything else keeps working.".into(),
-                    retryable: true,
-                }
-                .into()
-            })?;
-        let status = res.status().as_u16();
-        let text = res.text().await.unwrap_or_default();
-        if (200..300).contains(&status) {
-            if text.is_empty() {
-                return Ok(Value::Null);
-            }
-            return serde_json::from_str(&text).map_err(|_| {
-                HsApiError {
-                    status_code: status,
-                    message: "Invalid JSON from the Docs API".into(),
-                    friendly: "The Docs API returned an unexpected response format.".into(),
-                    retryable: false,
-                }
-                .into()
-            });
-        }
-        Err(HsApiError {
-            status_code: status,
-            message: format!("Docs API GET {path} -> {status}"),
-            friendly: friendly_error(status, &text, "GET"),
-            retryable: false,
-        }
-        .into())
+        docs_request_json(
+            self.client
+                .get(url)
+                .header("Authorization", format!("Basic {basic}")),
+            "GET",
+            path,
+            "The Help Scout Docs API is unreachable. The docs mirror stays empty; everything else keeps working.",
+            "The Docs API returned an unexpected response format.",
+        )
+        .await
     }
 
     pub(super) async fn docs_request_send(
@@ -78,63 +93,32 @@ impl RealHelpScoutProvider {
                 .header("Content-Type", "application/json")
                 .body(serde_json::to_string(&payload).unwrap_or_default());
         }
-        let res = req.send().await.map_err(|e| -> crate::error::Error {
-            HsApiError {
-                status_code: 0,
-                message: format!("Network error contacting the Docs API: {e}"),
-                friendly: "The Help Scout Docs API is unreachable. Nothing was \
-                               published; the draft stays in the review queue."
-                    .into(),
-                retryable: true,
-            }
-            .into()
-        })?;
-        let status = res.status().as_u16();
-        let text = res.text().await.unwrap_or_default();
-        if (200..300).contains(&status) {
-            if text.is_empty() {
-                return Ok(Value::Null);
-            }
-            return serde_json::from_str(&text).map_err(|_| {
-                HsApiError {
-                    status_code: status,
-                    message: "Invalid JSON from the Docs API".into(),
-                    friendly: "The Docs API returned an unexpected response format. Nothing \
-                               is treated as published without a valid confirmation."
-                        .into(),
-                    retryable: false,
-                }
-                .into()
-            });
-        }
-        Err(HsApiError {
-            status_code: status,
-            message: format!("Docs API {method_upper} {path} -> {status}"),
-            friendly: friendly_error(status, &text, &method_upper),
-            retryable: false,
-        }
-        .into())
+        docs_request_json(
+            req,
+            &method_upper,
+            path,
+            "The Help Scout Docs API is unreachable. Nothing was published; the draft stays in the review queue.",
+            "The Docs API returned an unexpected response format. Nothing is treated as published without a valid confirmation.",
+        )
+        .await
     }
 
     pub(super) fn doc_article_from_value(remote_id: String, article: &Value) -> HsDocArticle {
         HsDocArticle {
             remote_id,
-            collection_id: article["collectionId"]
-                .as_str()
-                .unwrap_or_default()
-                .to_string(),
+            collection_id: json_string(article, "collectionId"),
             category_id: article["categories"]
                 .as_array()
                 .and_then(|a| a.first())
-                .and_then(|c| c["id"].as_str().map(|s| s.to_string())),
+                .and_then(|c| json_str(c, "id")),
             number: article["number"].as_i64(),
-            slug: article["slug"].as_str().map(|s| s.to_string()),
-            name: article["name"].as_str().unwrap_or_default().to_string(),
-            status: article["status"].as_str().map(|s| s.to_string()),
-            text: article["text"].as_str().map(|s| s.to_string()),
+            slug: json_str(article, "slug"),
+            name: json_string(article, "name"),
+            status: json_str(article, "status"),
+            text: json_str(article, "text"),
             views: article["viewCount"].as_i64(),
-            created_at: article["createdDate"].as_str().map(|s| s.to_string()),
-            updated_at: article["modifiedDate"].as_str().map(|s| s.to_string()),
+            created_at: json_str(article, "createdDate"),
+            updated_at: json_str(article, "modifiedDate"),
         }
     }
 
@@ -307,10 +291,10 @@ impl RealHelpScoutProvider {
             ])
             .await
             .map_err(Error::from)?;
-        let access = v["access_token"].as_str().unwrap_or_default().to_string();
-        let refresh = v["refresh_token"].as_str().map(|s| s.to_string());
+        let access = json_string(&v, "access_token");
+        let refresh = json_str(&v, "refresh_token");
         let expires = v["expires_in"].as_i64();
-        let scope = v["scope"].as_str().map(|s| s.to_string());
+        let scope = json_str(&v, "scope");
         self.save_tokens(&access, refresh.as_deref(), expires, scope.as_deref())?;
         Ok(access)
     }
@@ -320,9 +304,9 @@ impl RealHelpScoutProvider {
             .token_request(&[("grant_type", "client_credentials")])
             .await
             .map_err(Error::from)?;
-        let access = v["access_token"].as_str().unwrap_or_default().to_string();
+        let access = json_string(&v, "access_token");
         let expires = v["expires_in"].as_i64();
-        let scope = v["scope"].as_str().map(|s| s.to_string());
+        let scope = json_str(&v, "scope");
         self.save_tokens(&access, None, expires, scope.as_deref())?;
         Ok(access)
     }
@@ -332,10 +316,10 @@ impl RealHelpScoutProvider {
             .token_request(&[("grant_type", "authorization_code"), ("code", code)])
             .await
             .map_err(Error::from)?;
-        let access = v["access_token"].as_str().unwrap_or_default().to_string();
-        let refresh = v["refresh_token"].as_str().map(|s| s.to_string());
+        let access = json_string(&v, "access_token");
+        let refresh = json_str(&v, "refresh_token");
         let expires = v["expires_in"].as_i64();
-        let scope = v["scope"].as_str().map(|s| s.to_string());
+        let scope = json_str(&v, "scope");
         self.save_tokens(&access, refresh.as_deref(), expires, scope.as_deref())?;
         Ok(access)
     }
@@ -546,31 +530,31 @@ impl RealHelpScoutProvider {
     pub(super) fn map_user(v: &Value) -> HsUser {
         HsUser {
             remote_id: v["id"].as_i64().unwrap_or(0),
-            first_name: v["firstName"].as_str().map(|s| s.to_string()),
-            last_name: v["lastName"].as_str().map(|s| s.to_string()),
-            email: v["email"].as_str().map(|s| s.to_string()),
-            role: v["role"].as_str().map(|s| s.to_string()),
+            first_name: json_str(v, "firstName"),
+            last_name: json_str(v, "lastName"),
+            email: json_str(v, "email"),
+            role: json_str(v, "role"),
             user_type: v["type"].as_str().unwrap_or("user").to_string(),
-            timezone: v["timezone"].as_str().map(|s| s.to_string()),
-            photo_url: v["photoUrl"].as_str().map(|s| s.to_string()),
-            initials: v["initials"].as_str().map(|s| s.to_string()),
-            mention: v["mention"].as_str().map(|s| s.to_string()),
-            job_title: v["jobTitle"].as_str().map(|s| s.to_string()),
-            phone: v["phone"].as_str().map(|s| s.to_string()),
+            timezone: json_str(v, "timezone"),
+            photo_url: json_str(v, "photoUrl"),
+            initials: json_str(v, "initials"),
+            mention: json_str(v, "mention"),
+            job_title: json_str(v, "jobTitle"),
+            phone: json_str(v, "phone"),
             alternate_emails: Vec::new(),
-            created_at: v["createdAt"].as_str().map(|s| s.to_string()),
-            updated_at: v["updatedAt"].as_str().map(|s| s.to_string()),
+            created_at: json_str(v, "createdAt"),
+            updated_at: json_str(v, "updatedAt"),
         }
     }
 
     pub(super) fn map_mailbox(v: &Value) -> HsMailbox {
         HsMailbox {
             remote_id: v["id"].as_i64().unwrap_or(0),
-            name: v["name"].as_str().unwrap_or_default().to_string(),
-            slug: v["slug"].as_str().map(|s| s.to_string()),
-            email: v["email"].as_str().map(|s| s.to_string()),
-            created_at: v["createdAt"].as_str().map(|s| s.to_string()),
-            updated_at: v["updatedAt"].as_str().map(|s| s.to_string()),
+            name: json_string(v, "name"),
+            slug: json_str(v, "slug"),
+            email: json_str(v, "email"),
+            created_at: json_str(v, "createdAt"),
+            updated_at: json_str(v, "updatedAt"),
         }
     }
 
@@ -578,8 +562,8 @@ impl RealHelpScoutProvider {
         HsFolder {
             remote_id: v["id"].as_i64().unwrap_or(0),
             mailbox_id,
-            name: v["name"].as_str().unwrap_or_default().to_string(),
-            kind: v["type"].as_str().unwrap_or_default().to_string(),
+            name: json_string(v, "name"),
+            kind: json_string(v, "type"),
             user_id: v["userId"].as_i64(),
             total_count: v["totalCount"].as_i64().unwrap_or(0),
             active_count: v["activeCount"].as_i64().unwrap_or(0),
@@ -590,9 +574,9 @@ impl RealHelpScoutProvider {
         HsField {
             remote_id: v["id"].as_i64().unwrap_or(0),
             mailbox_id,
-            name: v["name"].as_str().unwrap_or_default().to_string(),
-            kind: v["type"].as_str().unwrap_or_default().to_string(),
-            system_type: v["systemType"].as_str().map(|s| s.to_string()),
+            name: json_string(v, "name"),
+            kind: json_string(v, "type"),
+            system_type: json_str(v, "systemType"),
             required: v["required"].as_bool().unwrap_or(false),
             sort_order: v["order"].as_i64().unwrap_or(0),
             options: v["_embedded"]["fields"]
@@ -602,7 +586,7 @@ impl RealHelpScoutProvider {
                         .map(|o| HsFieldOption {
                             id: o["id"].as_i64().unwrap_or(0),
                             order: o["order"].as_i64().unwrap_or(0),
-                            label: o["label"].as_str().unwrap_or_default().to_string(),
+                            label: json_string(o, "label"),
                         })
                         .collect()
                 })
@@ -613,12 +597,12 @@ impl RealHelpScoutProvider {
     pub(super) fn map_tag(v: &Value) -> HsTag {
         HsTag {
             remote_id: v["id"].as_i64().unwrap_or(0),
-            name: v["tag"].as_str().unwrap_or_default().to_string(),
-            slug: v["slug"].as_str().map(|s| s.to_string()),
-            color: v["color"].as_str().map(|s| s.to_string()),
+            name: json_string(v, "tag"),
+            slug: json_str(v, "slug"),
+            color: json_str(v, "color"),
             ticket_count: v["ticketCount"].as_i64(),
-            created_at: v["createdAt"].as_str().map(|s| s.to_string()),
-            updated_at: v["updatedAt"].as_str().map(|s| s.to_string()),
+            created_at: json_str(v, "createdAt"),
+            updated_at: json_str(v, "updatedAt"),
         }
     }
 }

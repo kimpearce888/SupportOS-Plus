@@ -9,6 +9,7 @@ use crate::api_queue::{
     PRIORITY_USER_SEND, QueueRateLimiter,
 };
 use crate::error::{Error, Result};
+use crate::json_fields::{json_str, json_string};
 
 use crate::helpscout::{
     ConversationCreated, ConversationPatch, ConversationQuery, CreateConversationInput,
@@ -698,13 +699,13 @@ impl RealHelpScoutProvider {
         HsConversation {
             remote_id: v["id"].as_i64().unwrap_or(0),
             number: v["number"].as_i64().unwrap_or(0),
-            kind: v["type"].as_str().map(|s| s.to_string()),
+            kind: json_str(v, "type"),
             source_type: v["source"]["type"].as_str().map(|s| s.to_string()),
             source_via: v["source"]["via"].as_str().map(|s| s.to_string()),
-            subject: v["subject"].as_str().map(|s| s.to_string()),
-            preview: v["preview"].as_str().map(|s| s.to_string()),
+            subject: json_str(v, "subject"),
+            preview: json_str(v, "preview"),
             status: v["status"].as_str().unwrap_or("active").to_string(),
-            state: v["state"].as_str().map(|s| s.to_string()),
+            state: json_str(v, "state"),
             mailbox_id: v["mailboxId"].as_i64().unwrap_or(0),
             assignee_id: if assignee_is_team {
                 None
@@ -719,19 +720,15 @@ impl RealHelpScoutProvider {
             }),
             customer_id: v["primaryCustomer"]["id"].as_i64().unwrap_or(0),
             priority: None,
-            created_at: v["createdAt"].as_str().map(|s| s.to_string()),
-            updated_at: v["userUpdatedAt"].as_str().map(|s| s.to_string()),
-            closed_at: v["closedAt"].as_str().map(|s| s.to_string()),
+            created_at: json_str(v, "createdAt"),
+            updated_at: json_str(v, "userUpdatedAt"),
+            closed_at: json_str(v, "closedAt"),
             snoozed_until: v["snooze"]["snoozedUntil"].as_str().map(|s| s.to_string()),
             thread_count: v["threads"].as_i64().unwrap_or(0),
             merged_into: None,
             tags: v["tags"]
                 .as_array()
-                .map(|a| {
-                    a.iter()
-                        .filter_map(|t| t["tag"].as_str().map(String::from))
-                        .collect()
-                })
+                .map(|a| a.iter().filter_map(|t| json_str(t, "tag")).collect())
                 .unwrap_or_default(),
             custom_fields: v["fields"]
                 .as_array()
@@ -739,9 +736,9 @@ impl RealHelpScoutProvider {
                     a.iter()
                         .map(|f| crate::helpscout::HsCustomFieldValue {
                             field_id: f["id"].as_i64().unwrap_or(0),
-                            value: f["value"].as_str().map(String::from),
-                            text: f["label"].as_str().map(String::from),
-                            system_type: f["systemType"].as_str().map(String::from),
+                            value: json_str(f, "value"),
+                            text: json_str(f, "label"),
+                            system_type: json_str(f, "systemType"),
                         })
                         .collect()
                 })
@@ -755,8 +752,8 @@ impl RealHelpScoutProvider {
             .map(|a| {
                 a.iter()
                     .map(|e| crate::helpscout::HsCustomerEmail {
-                        value: e["value"].as_str().map(|s| s.to_string()),
-                        kind: e["type"].as_str().map(|s| s.to_string()),
+                        value: json_str(e, "value"),
+                        kind: json_str(e, "type"),
                     })
                     .collect()
             })
@@ -766,28 +763,28 @@ impl RealHelpScoutProvider {
             .map(|a| {
                 a.iter()
                     .map(|p| crate::helpscout::HsCustomerPhone {
-                        value: p["value"].as_str().map(|s| s.to_string()),
-                        kind: p["type"].as_str().map(|s| s.to_string()),
+                        value: json_str(p, "value"),
+                        kind: json_str(p, "type"),
                     })
                     .collect()
             })
             .unwrap_or_default();
         HsCustomer {
             remote_id: v["id"].as_i64().unwrap_or(0),
-            first_name: v["firstName"].as_str().map(|s| s.to_string()),
-            last_name: v["lastName"].as_str().map(|s| s.to_string()),
+            first_name: json_str(v, "firstName"),
+            last_name: json_str(v, "lastName"),
             email: emails.first().and_then(|e| e.value.clone()),
             organization: v["organization"]["name"].as_str().map(|s| s.to_string()),
-            job_title: v["jobTitle"].as_str().map(|s| s.to_string()),
+            job_title: json_str(v, "jobTitle"),
             phone: phones.first().and_then(|p| p.value.clone()),
-            created_at: v["createdAt"].as_str().map(|s| s.to_string()),
-            updated_at: v["updatedAt"].as_str().map(|s| s.to_string()),
-            photo_url: v["photoUrl"].as_str().map(|s| s.to_string()),
+            created_at: json_str(v, "createdAt"),
+            updated_at: json_str(v, "updatedAt"),
+            photo_url: json_str(v, "photoUrl"),
             organization_id: v["organization"]["id"].as_i64(),
-            background: v["background"].as_str().map(|s| s.to_string()),
+            background: json_str(v, "background"),
             age: v["age"].as_i64().map(|a| a.to_string()),
-            gender: v["gender"].as_str().map(|s| s.to_string()),
-            location: v["location"].as_str().map(|s| s.to_string()),
+            gender: json_str(v, "gender"),
+            location: json_str(v, "location"),
             emails,
             phones,
             chats: v["chatHandles"]
@@ -796,8 +793,8 @@ impl RealHelpScoutProvider {
                 .map(|a| {
                     a.iter()
                         .map(|ch| crate::helpscout::HsCustomerChat {
-                            value: ch["value"].as_str().map(|s| s.to_string()),
-                            kind: ch["type"].as_str().map(|s| s.to_string()),
+                            value: json_str(ch, "value"),
+                            kind: json_str(ch, "type"),
                         })
                         .collect()
                 })
@@ -807,7 +804,7 @@ impl RealHelpScoutProvider {
                 .map(|a| {
                     a.iter()
                         .map(|w| crate::helpscout::HsCustomerWebsite {
-                            value: w["value"].as_str().map(|s| s.to_string()),
+                            value: json_str(w, "value"),
                         })
                         .collect()
                 })
@@ -817,8 +814,8 @@ impl RealHelpScoutProvider {
                 .map(|a| {
                     a.iter()
                         .map(|s| crate::helpscout::HsCustomerSocialProfile {
-                            value: s["value"].as_str().map(|x| x.to_string()),
-                            kind: s["type"].as_str().map(|x| x.to_string()),
+                            value: json_str(s, "value"),
+                            kind: json_str(s, "type"),
                         })
                         .collect()
                 })
@@ -832,9 +829,9 @@ impl RealHelpScoutProvider {
                     a.iter()
                         .map(|p| crate::helpscout::HsCustomerPropertyValue {
                             definition_remote_id: p["definitionRemoteId"].as_i64(),
-                            key: p["key"].as_str().map(|s| s.to_string()),
-                            name: p["name"].as_str().map(|s| s.to_string()),
-                            value: p["value"].as_str().map(|s| s.to_string()),
+                            key: json_str(p, "key"),
+                            name: json_str(p, "name"),
+                            value: json_str(p, "value"),
                         })
                         .collect()
                 })
@@ -857,7 +854,7 @@ impl RealHelpScoutProvider {
                             } else {
                                 crate::helpscout::HsThreadRecipient {
                                     id: r["id"].as_i64(),
-                                    email: r["email"].as_str().map(|s| s.to_string()),
+                                    email: json_str(r, "email"),
                                 }
                             }
                         })
@@ -871,8 +868,8 @@ impl RealHelpScoutProvider {
                 a.iter()
                     .map(|at| crate::helpscout::HsThreadAttachment {
                         remote_id: at["id"].as_i64().unwrap_or(0),
-                        filename: at["filename"].as_str().map(|s| s.to_string()),
-                        mime_type: at["mimeType"].as_str().map(|s| s.to_string()),
+                        filename: json_str(at, "filename"),
+                        mime_type: json_str(at, "mimeType"),
                         size: at["size"].as_i64(),
                     })
                     .collect()
@@ -882,9 +879,9 @@ impl RealHelpScoutProvider {
             remote_id: v["id"].as_i64().unwrap_or(0),
             conversation_id,
             kind: v["type"].as_str().unwrap_or("message").to_string(),
-            status: v["status"].as_str().map(|s| s.to_string()),
-            state: v["state"].as_str().map(|s| s.to_string()),
-            body: v["body"].as_str().map(|s| s.to_string()),
+            status: json_str(v, "status"),
+            state: json_str(v, "state"),
+            body: json_str(v, "body"),
             created_by_customer_id: if v["createdBy"]["type"].as_str() == Some("customer") {
                 v["createdBy"]["id"].as_i64()
             } else {
@@ -896,18 +893,18 @@ impl RealHelpScoutProvider {
                 v["createdByUser"]["id"].as_i64()
             },
             assigned_to_id: v["assignedTo"]["id"].as_i64(),
-            created_at: v["createdAt"].as_str().map(|s| s.to_string()),
+            created_at: json_str(v, "createdAt"),
             to: recipients("to"),
             cc: recipients("cc"),
             attachments,
-            scheduled_for: v["scheduledFor"].as_str().map(|s| s.to_string()),
+            scheduled_for: json_str(v, "scheduledFor"),
         }
     }
 
     fn map_organization(v: &Value) -> HsOrganization {
         HsOrganization {
             remote_id: v["id"].as_i64().unwrap_or(0),
-            name: v["name"].as_str().unwrap_or_default().to_string(),
+            name: json_string(v, "name"),
             domains: v["domains"]
                 .as_array()
                 .map(|d| {
@@ -916,8 +913,8 @@ impl RealHelpScoutProvider {
                         .collect()
                 })
                 .unwrap_or_default(),
-            created_at: v["createdAt"].as_str().map(|s| s.to_string()),
-            updated_at: v["updatedAt"].as_str().map(|s| s.to_string()),
+            created_at: json_str(v, "createdAt"),
+            updated_at: json_str(v, "updatedAt"),
         }
     }
 }
@@ -956,7 +953,7 @@ impl HelpScoutProvider for RealHelpScoutProvider {
                 a.iter()
                     .map(|t| HsTeam {
                         remote_id: t["id"].as_i64().unwrap_or(0),
-                        name: t["name"].as_str().unwrap_or_default().to_string(),
+                        name: json_string(t, "name"),
                         member_user_ids: t["_embedded"]["users"]
                             .as_array()
                             .map(|users| {
@@ -1244,9 +1241,9 @@ impl HelpScoutProvider for RealHelpScoutProvider {
             "savedReplies",
             |r| HsSavedReply {
                 remote_id: r["id"].as_i64().unwrap_or(0),
-                name: r["name"].as_str().unwrap_or_default().to_string(),
-                preview: r["preview"].as_str().map(|s| s.to_string()),
-                text: r["text"].as_str().map(|s| s.to_string()),
+                name: json_string(r, "name"),
+                preview: json_str(r, "preview"),
+                text: json_str(r, "text"),
             },
         )
         .await
@@ -1299,7 +1296,7 @@ impl HelpScoutProvider for RealHelpScoutProvider {
         self.list_all_v2("/v2/workflows", "workflows", |w| HsWorkflow {
             remote_id: w["id"].as_i64().unwrap_or(0),
             mailbox_id: w["mailboxId"].as_i64(),
-            name: w["name"].as_str().unwrap_or_default().to_string(),
+            name: json_string(w, "name"),
             kind: w["type"].as_str().unwrap_or("manual").to_string(),
             status: w["status"].as_str().unwrap_or("inactive").to_string(),
             sort_order: w["order"].as_i64().unwrap_or(0),
@@ -1322,7 +1319,7 @@ impl HelpScoutProvider for RealHelpScoutProvider {
             for w in &embedded {
                 out.push(HsWebhookConfig {
                     remote_id: w["id"].as_i64().unwrap_or(0),
-                    url: w["url"].as_str().unwrap_or_default().to_string(),
+                    url: json_string(w, "url"),
                     events: w["events"]
                         .as_array()
                         .map(|e| {
@@ -1591,35 +1588,35 @@ impl HelpScoutProvider for RealHelpScoutProvider {
             emails: emails
                 .iter()
                 .map(|e| crate::helpscout::HsCustomerEmail {
-                    value: e["value"].as_str().map(|s| s.to_string()),
-                    kind: e["type"].as_str().map(|s| s.to_string()),
+                    value: json_str(e, "value"),
+                    kind: json_str(e, "type"),
                 })
                 .collect(),
             phones: phones
                 .iter()
                 .map(|p| crate::helpscout::HsCustomerPhone {
-                    value: p["value"].as_str().map(|s| s.to_string()),
-                    kind: p["type"].as_str().map(|s| s.to_string()),
+                    value: json_str(p, "value"),
+                    kind: json_str(p, "type"),
                 })
                 .collect(),
             chats: chats
                 .iter()
                 .map(|c| crate::helpscout::HsCustomerChat {
-                    value: c["value"].as_str().map(|s| s.to_string()),
-                    kind: c["type"].as_str().map(|s| s.to_string()),
+                    value: json_str(c, "value"),
+                    kind: json_str(c, "type"),
                 })
                 .collect(),
             websites: websites
                 .iter()
                 .map(|w| crate::helpscout::HsCustomerWebsite {
-                    value: w["value"].as_str().map(|s| s.to_string()),
+                    value: json_str(w, "value"),
                 })
                 .collect(),
             social_profiles: social
                 .iter()
                 .map(|s| crate::helpscout::HsCustomerSocialProfile {
-                    value: s["value"].as_str().map(|x| x.to_string()),
-                    kind: s["type"].as_str().map(|x| x.to_string()),
+                    value: json_str(s, "value"),
+                    kind: json_str(s, "type"),
                 })
                 .collect(),
             ..HsCustomer::placeholder()
@@ -1692,11 +1689,11 @@ impl HelpScoutProvider for RealHelpScoutProvider {
             }
             for c in &items {
                 out.push(HsDocCollection {
-                    remote_id: c["id"].as_str().unwrap_or_default().to_string(),
-                    slug: c["slug"].as_str().map(|s| s.to_string()),
-                    name: c["name"].as_str().unwrap_or_default().to_string(),
-                    description: c["description"].as_str().map(|s| s.to_string()),
-                    visibility: c["visibility"].as_str().map(|s| s.to_string()),
+                    remote_id: json_string(c, "id"),
+                    slug: json_str(c, "slug"),
+                    name: json_string(c, "name"),
+                    description: json_str(c, "description"),
+                    visibility: json_str(c, "visibility"),
                     article_count: c["articleCount"].as_i64(),
                 });
             }
@@ -1727,10 +1724,10 @@ impl HelpScoutProvider for RealHelpScoutProvider {
             }
             for c in &items {
                 out.push(HsDocCategory {
-                    remote_id: c["id"].as_str().unwrap_or_default().to_string(),
+                    remote_id: json_string(c, "id"),
                     collection_id: collection_id.clone(),
-                    slug: c["slug"].as_str().map(|s| s.to_string()),
-                    name: c["name"].as_str().unwrap_or_default().to_string(),
+                    slug: json_str(c, "slug"),
+                    name: json_string(c, "name"),
                     sort_order: c["order"].as_i64(),
                 });
             }
@@ -1760,11 +1757,7 @@ impl HelpScoutProvider for RealHelpScoutProvider {
                 break;
             }
             for art in &items {
-                let Some(id) = art["id"]
-                    .as_str()
-                    .map(|s| s.to_string())
-                    .filter(|s| !s.is_empty())
-                else {
+                let Some(id) = json_str(art, "id").filter(|s| !s.is_empty()) else {
                     continue;
                 };
                 refs.push((id, art.clone()));
@@ -1829,21 +1822,21 @@ impl HelpScoutProvider for RealHelpScoutProvider {
                 category_id: full["categories"]
                     .as_array()
                     .and_then(|a| a.first())
-                    .and_then(|c| c["id"].as_str().map(|s| s.to_string())),
+                    .and_then(|c| json_str(c, "id")),
                 number: full["number"].as_i64().or_else(|| r["number"].as_i64()),
-                slug: full["slug"].as_str().map(|s| s.to_string()),
+                slug: json_str(&full, "slug"),
                 name: full["name"]
                     .as_str()
                     .or_else(|| r["name"].as_str())
                     .unwrap_or_default()
                     .to_string(),
-                status: full["status"].as_str().map(|s| s.to_string()),
-                text: full["text"].as_str().map(|s| s.to_string()),
+                status: json_str(&full, "status"),
+                text: json_str(&full, "text"),
                 views: full["viewCount"]
                     .as_i64()
                     .or_else(|| r["viewCount"].as_i64()),
-                created_at: full["createdDate"].as_str().map(|s| s.to_string()),
-                updated_at: full["modifiedDate"].as_str().map(|s| s.to_string()),
+                created_at: json_str(&full, "createdDate"),
+                updated_at: json_str(&full, "modifiedDate"),
             });
         }
         Ok(out)
@@ -2186,8 +2179,8 @@ impl RealHelpScoutProvider {
     fn map_property_def(v: &Value) -> HsPropertyDef {
         HsPropertyDef {
             remote_id: v["id"].as_i64().unwrap_or(0),
-            name: v["name"].as_str().unwrap_or_default().to_string(),
-            slug: v["slug"].as_str().map(|s| s.to_string()),
+            name: json_string(v, "name"),
+            slug: json_str(v, "slug"),
             kind: v["type"].as_str().unwrap_or("text").to_string(),
             sort_order: v["order"].as_i64().unwrap_or(0),
         }

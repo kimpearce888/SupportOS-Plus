@@ -1,5 +1,7 @@
 use serde_json::{Value, json};
 
+use crate::json_fields::json_string;
+
 pub fn why_contacting_impl(conn: &rusqlite::Connection, days: i64) -> Vec<Value> {
     let rows: Vec<(String, i64)> = crate::db::query_rows(
         conn,
@@ -176,7 +178,7 @@ pub fn issue_radar_impl(conn: &rusqlite::Connection) -> Vec<Value> {
             alerts.push(radar_alert(
                 "high_volume_question",
                 format!("High-volume question ({count} tickets)"),
-                q["question"].as_str().unwrap_or_default().to_string(),
+                json_string(&q, "question"),
                 q["conversation_ids"]
                     .as_array()
                     .map(|a| a.iter().filter_map(|v| v.as_i64()).collect::<Vec<i64>>())

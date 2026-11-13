@@ -696,6 +696,7 @@ pub fn starter_questions(conn: &Connection, conversation_id: i64) -> Vec<(String
 #[cfg(test)]
 mod batch23_audit_tests {
     use super::*;
+    use crate::json_fields::json_str;
     use serde_json::json;
 
     fn db() -> Connection {
@@ -887,7 +888,7 @@ mod batch23_audit_tests {
                     .as_array()
                     .expect("tool_calls array")
                     .iter()
-                    .filter_map(|tc| tc["id"].as_str().map(String::from))
+                    .filter_map(|tc| json_str(tc, "id"))
                     .collect::<Vec<_>>()
             })
             .collect();
@@ -895,7 +896,7 @@ mod batch23_audit_tests {
         let answered_ids: Vec<String> = messages
             .iter()
             .filter(|m| m["role"] == "tool")
-            .filter_map(|m| m["tool_call_id"].as_str().map(String::from))
+            .filter_map(|m| json_str(m, "tool_call_id"))
             .collect();
         for id in &assistant_ids {
             assert!(

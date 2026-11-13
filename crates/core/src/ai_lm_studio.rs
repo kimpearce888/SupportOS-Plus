@@ -96,13 +96,11 @@ impl OpenAiCompatibleClient {
     }
 
     pub(crate) async fn is_available(&self) -> bool {
-        let mut req = self
-            .http
-            .get(format!("{}/models", self.base_url))
-            .timeout(self.request_timeout);
-        if let Some(ref key) = self.api_key {
-            req = req.bearer_auth(key);
-        }
+        let req = self.authorized(
+            self.http
+                .get(format!("{}/models", self.base_url))
+                .timeout(self.request_timeout),
+        );
         match req.send().await {
             Ok(resp) => resp.status().is_success(),
             Err(_) => false,
@@ -110,60 +108,24 @@ impl OpenAiCompatibleClient {
     }
 
     pub async fn list_models(&self) -> Result<Vec<ModelInfo>> {
-        let mut req = self
-            .http
-            .get(format!("{}/models", self.base_url))
-            .timeout(self.request_timeout);
-        if let Some(ref key) = self.api_key {
-            req = req.bearer_auth(key);
-        }
-        let resp = req
-            .send()
-            .await
-            .map_err(|e| Error::Config(format!("LM Studio list_models failed: {e}")))?;
-        let status = resp.status();
-        let text = resp
-            .text()
-            .await
-            .map_err(|e| Error::Config(format!("LM Studio list_models read failed: {e}")))?;
-        if !status.is_success() {
-            let snippet: String = text.chars().take(300).collect();
-            return Err(Error::Config(format!(
-                "LM Studio list_models request failed (HTTP {status}): {snippet}"
-            )));
-        }
-        let body: ModelsResponse = serde_json::from_str(&text)
-            .map_err(|e| Error::Config(format!("LM Studio list_models parse failed: {e}")))?;
+        let req = self.authorized(
+            self.http
+                .get(format!("{}/models", self.base_url))
+                .timeout(self.request_timeout),
+        );
+        let body: ModelsResponse = send_json(req, "list_models").await?;
         Ok(body.data.into_iter().map(infer_model_role).collect())
     }
 
     pub async fn chat(&self, model: &str, messages: &[ChatMessage]) -> Result<ChatResponse> {
         let request = build_chat_request_body(model, messages);
-        let mut req_builder = self
-            .http
-            .post(format!("{}/chat/completions", self.base_url))
-            .timeout(self.request_timeout)
-            .json(&request);
-        if let Some(ref key) = self.api_key {
-            req_builder = req_builder.bearer_auth(key);
-        }
-        let resp = req_builder
-            .send()
-            .await
-            .map_err(|e| Error::Config(format!("LM Studio chat failed: {e}")))?;
-        let status = resp.status();
-        let text = resp
-            .text()
-            .await
-            .map_err(|e| Error::Config(format!("LM Studio chat read failed: {e}")))?;
-        if !status.is_success() {
-            let snippet: String = text.chars().take(300).collect();
-            return Err(Error::Config(format!(
-                "LM Studio chat request failed (HTTP {status}): {snippet}"
-            )));
-        }
-        let body: ChatCompletionResponse = serde_json::from_str(&text)
-            .map_err(|e| Error::Config(format!("LM Studio chat parse failed: {e}")))?;
+        let req = self.authorized(
+            self.http
+                .post(format!("{}/chat/completions", self.base_url))
+                .timeout(self.request_timeout)
+                .json(&request),
+        );
+        let body: ChatCompletionResponse = send_json(req, "chat").await?;
         parse_chat_response(body)
     }
 
@@ -209,31 +171,13 @@ impl OpenAiCompatibleClient {
 
     async fn post_chat_body(&self, body: serde_json::Value) -> Result<ChatOptsResult> {
         let started = std::time::Instant::now();
-        let mut req_builder = self
-            .http
-            .post(format!("{}/chat/completions", self.base_url))
-            .timeout(self.request_timeout)
-            .json(&body);
-        if let Some(ref key) = self.api_key {
-            req_builder = req_builder.bearer_auth(key);
-        }
-        let resp = req_builder
-            .send()
-            .await
-            .map_err(|e| Error::Config(format!("LM Studio chat failed: {e}")))?;
-        let status = resp.status();
-        let text = resp
-            .text()
-            .await
-            .map_err(|e| Error::Config(format!("LM Studio chat read failed: {e}")))?;
-        if !status.is_success() {
-            let snippet: String = text.chars().take(300).collect();
-            return Err(Error::Config(format!(
-                "LM Studio chat request failed (HTTP {status}): {snippet}"
-            )));
-        }
-        let body: ChatCompletionResponse = serde_json::from_str(&text)
-            .map_err(|e| Error::Config(format!("LM Studio chat parse failed: {e}")))?;
+        let req = self.authorized(
+            self.http
+                .post(format!("{}/chat/completions", self.base_url))
+                .timeout(self.request_timeout)
+                .json(&body),
+        );
+        let body: ChatCompletionResponse = send_json(req, "chat").await?;
         let latency_ms = started.elapsed().as_millis() as u64;
         let content = body.choices.first().and_then(|c| c.message.content.clone());
         let tool_calls = body
@@ -305,33 +249,46 @@ impl OpenAiCompatibleClient {
 
     pub async fn embed(&self, model: &str, text: &str) -> Result<EmbedResponse> {
         let request = build_embed_request_body(model, text);
-        let mut req_builder = self
-            .http
-            .post(format!("{}/embeddings", self.base_url))
-            .timeout(self.request_timeout)
-            .json(&request);
-        if let Some(ref key) = self.api_key {
-            req_builder = req_builder.bearer_auth(key);
-        }
-        let resp = req_builder
-            .send()
-            .await
-            .map_err(|e| Error::Config(format!("LM Studio embed failed: {e}")))?;
-        let status = resp.status();
-        let body_text = resp
-            .text()
-            .await
-            .map_err(|e| Error::Config(format!("LM Studio embed read failed: {e}")))?;
-        if !status.is_success() {
-            let snippet: String = body_text.chars().take(300).collect();
-            return Err(Error::Config(format!(
-                "LM Studio embed request failed (HTTP {status}): {snippet}"
-            )));
-        }
-        let body: EmbeddingResponse = serde_json::from_str(&body_text)
-            .map_err(|e| Error::Config(format!("LM Studio embed parse failed: {e}")))?;
+        let req = self.authorized(
+            self.http
+                .post(format!("{}/embeddings", self.base_url))
+                .timeout(self.request_timeout)
+                .json(&request),
+        );
+        let body: EmbeddingResponse = send_json(req, "embed").await?;
         Ok(parse_embed_response(body))
     }
+
+    fn authorized(&self, req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        if let Some(ref key) = self.api_key {
+            req.bearer_auth(key)
+        } else {
+            req
+        }
+    }
+}
+
+async fn send_json<T>(req: reqwest::RequestBuilder, op: &str) -> Result<T>
+where
+    T: serde::de::DeserializeOwned,
+{
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| Error::Config(format!("LM Studio {op} failed: {e}")))?;
+    let status = resp.status();
+    let text = resp
+        .text()
+        .await
+        .map_err(|e| Error::Config(format!("LM Studio {op} read failed: {e}")))?;
+    if !status.is_success() {
+        let snippet: String = text.chars().take(300).collect();
+        return Err(Error::Config(format!(
+            "LM Studio {op} request failed (HTTP {status}): {snippet}"
+        )));
+    }
+    serde_json::from_str(&text)
+        .map_err(|e| Error::Config(format!("LM Studio {op} parse failed: {e}")))
 }
 
 fn build_http_client(timeout_ms: u64) -> reqwest::Client {
