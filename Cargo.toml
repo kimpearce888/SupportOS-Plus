@@ -43,7 +43,6 @@ tokio = { version = "1", features = ["rt", "rt-multi-thread", "time", "sync", "f
 rusqlite = { version = "0.41", features = ["bundled"] }
 
 aes-gcm = "0.11"
-scrypt = "0.12"
 rand = "0.10"
 
 # --- egui stack (decision D1): exact pins. Only what a member actually

@@ -7,9 +7,9 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 
 ## CURRENT POINTER
 
-- Next task: **R2.3 — dependency hygiene** (`cargo machete` install ad
-  hoc; remove every unused declared dependency; `cargo deny check bans`
-  stays green; Cargo.lock diff reviewed; see `plan.md` §7 R2.3).
+- Next task: **R2.4 — `unwrap`/`expect` policy pass** (separate production
+  from `#[cfg(test)]` occurrences; eliminate all production ones
+  (bootstrap in main.rs only, D-10); see `plan.md` §7 R2.4).
 - Pre-flight: confirm CI green on the session-4 final head (run id in
   session log). If the session ended mid-CI, the run may still be in
   flight — next session must wait for it.
@@ -37,7 +37,8 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 | R1.10 comment closeout | terminal (session 4) | redundant warn+allow missing_docs pairs deleted from catalog/core lib.rs (12 attr lines, 4 insertions after fmt); crate lint headers now match app-shell's clean form; whole-tree check crates 205/205 green; battery green; CI run#313 green — see complete.md |
 | R2.1 dead-code sweep | terminal (session 4) | ZERO active warnings (clippy -D warnings already green); 2 vestigial suppressions deleted (testsupport.rs allow(dead_code) — module already cfg(test)-gated, all helpers used; issue_radar.rs allow(unused_mut) — nav mutated at 8 sites); battery green; CI run#315 green — see complete.md |
 | R2.2 #[allow] audit | terminal (session 4) | 37 instances audited (28 in-src + 9 in-test): verdict table in progress.md, survivor policy memory D-13; 1 vestigial deleted (search/lanes.rs ref_option — signature already Option<&str>); 34 kept with written justifications (FFI islands, constraint-3-unsatisfiable style pairs, R3.4/R4.5-owned clusters, D-10 test regions); battery green; CI run#317 green — see complete.md |
-| R2.2–R2.5 unnecessary code | pending | R2.3 machete; R2.4 unwrap policy; see plan §7 R2 |
+| R2.3 dependency hygiene | terminal (session 4) | machete v0.9.2: 4 candidates = 1 real unused (scrypt — zero source occurrences; removed from workspace+core manifests; lock dropped exactly scrypt+salsa20+pbkdf2, 747 bytes) + 3 false positives (custom lib names spp_core/spp_catalog defeat machete's string matcher); cargo-deny v0.20.2: advisories/bans/licenses/sources all ok; battery green; CI pending — see complete.md |
+| R2.4–R2.5 unnecessary code | pending | R2.4 unwrap policy; R2.5 twin sweep; see plan §7 R2 |
 | R3.1–R3.6 DRY | pending | see plan §7 R3 |
 | R4.1–R4.5 clean code | pending | see plan §7 R4 |
 | R5.1–R5.3 guardrails | pending (optional, stage-gated) | |
@@ -61,6 +62,15 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 | app-shell/tests (inbox_copilot x2, list_pages x2, inbox_page x2, operations, reports, dashboard) | 9 `#[allow(clippy::too_many_arguments)]` on kittest fixture/seed constructors | keep | test region (D-10); fixture constructors read better with explicit seeds than nested struct literals; D-13 |
 
 **R2.2 verdict summary (whole audit incl. R2.1's findings):** 37 instances received verdicts (28 in-src + 9 in-test at audit start) — 3 DELETED (all vestigial: dead_code, unused_mut in R2.1; ref_option in R2.2), 34 KEPT, every keep carrying an active written justification in memory D-13. No keep is unjustified; no delete was load-bearing.
+
+### R2.3 — dependency hygiene (session 4)
+
+| module | construct | verdict | outcome |
+|---|---|---|---|
+| core/Cargo.toml + workspace root | `scrypt = "0.12"` | delete | UNUSED — zero `scrypt`/`Scrypt` occurrences across all .rs files (the KDF stack is aes-gcm + sha2); removed from both manifests; Cargo.lock dropped exactly scrypt + salsa20 + pbkdf2 (its exclusive transitive deps; 747 bytes, no other change) |
+| xtask/app-shell → supportos-plus-core; core → supportos-plus-catalog | path dependencies | keep (machete false positives) | machete is string-based; the custom lib names (spp_core, spp_catalog) defeat its matcher — xtask uses `spp_core::` 14×, app-shell 56+×, catalog is re-exported via core's `pub mod catalog { pub use spp_catalog::*; }` |
+
+Checks: cargo machete (v0.9.2, installed ad hoc) now reports only the 3 documented false positives; cargo deny (v0.20.2, installed ad hoc) — advisories ok, bans ok, licenses ok, sources ok.
 
 ## Session log
 
@@ -136,6 +146,27 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
   segments; no test was run twice-unclean.)
 - CI note: run#316 (docs-only head `5c8dc5c`) was still in flight at
   R2.2 battery end; the R2.2 push stacks on it.
+- CI closures mid-session: run#316 green on `5c8dc5c` (docs head),
+  run#317 green on `f06e1ba` (R2.2 head), run#318 green on `5e47b50`
+  (R2.2 ledger addendum) — each verified before the next batch started.
+- R2.3 executed (after run#318 confirmed the green base): installed
+  cargo-machete v0.9.2 + cargo-deny v0.20.2 ad hoc (both to ~/.cargo,
+  ~5 min total). Machete's 4 candidates triaged: 1 REAL (scrypt —
+  zero source occurrences anywhere; the KDF stack is aes-gcm + sha2
+  only) + 3 FALSE POSITIVES (machete's string matcher can't see the
+  custom lib names: xtask's spp_core:: x14, app-shell's spp_core::
+  x56+, core's catalog re-export shim `pub mod catalog { pub use
+  spp_catalog::*; }`). Removed scrypt from the workspace
+  [workspace.dependencies] + core's manifest; Cargo.lock pruned exactly
+  scrypt + salsa20 + pbkdf2 (scrypt's exclusive transitives; 747 bytes
+  — verified by diff, nothing else moved). cargo deny check: advisories
+  / bans / licenses / sources ALL ok. Full battery green: gate, fmt,
+  clippy x2 (31s/22s — dep-graph change rebuilt core+dependents), core
+  520 (453s), core-sandbox 528 (483s), app-shell 293+2 (294s),
+  catalog+xtask 56, verify-icons, strip check 205/205. G-05 hit twice
+  (96%→97% at test-binary links) — incremental rm + retry green both
+  times.
+
 
 ### Session 3 — 2026-11-12
 - Pre-flight: sandbox reset AGAIN (clone + toolchain gone) — re-provisioned

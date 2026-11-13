@@ -22,7 +22,6 @@ chrono-tz.workspace = true
 tokio.workspace = true
 rusqlite.workspace = true
 aes-gcm.workspace = true
-scrypt.workspace = true
 rand.workspace = true
 sha2 = "0.11"
 base64 = "0.23"
