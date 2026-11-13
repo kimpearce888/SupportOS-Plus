@@ -12,10 +12,12 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
   CENSUS FIRST — the standing R2.5 lesson (precise scan before sizing a
   plan batch; three consecutive census corrections came from skipping it).
 - Pre-flight [session 8]: R3.1 executed on the green base `17a3ff6`
-  (run#331); the R3.1 head's own CI run rides the session-8 push — confirm
-  green (or diagnose per handover §7 step 3) before starting R3.2.
+  (run#331); R3.1 head `5ca31af` is CI-VERIFIED GREEN — run#332
+  (id 43476466581), all four lanes success (addendum commit below).
+  Green base for R3.2: the addendum head's own docs-only run (the
+  standard next-session preflight gate).
 - Session counter: 8 completed (R1 terminal; R2 stage TERMINAL — R2.1
-  through R2.5; R3.1 done, CI confirmation at next poll).
+  through R2.5; R3.1 TERMINAL — run#332 green on `5ca31af`).
 - Environment: session 8 began with a sandbox reset at the context boundary
   (standard §2 re-provision: re-clone + rustup 1.29.3 + pinned 1.99.1).
   Cold target/; G-05 managed preemptively (incremental rm between lanes,
@@ -47,7 +49,7 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 | R2.3 dependency hygiene | terminal (session 4) | machete v0.9.2: 4 candidates = 1 real unused (scrypt — zero source occurrences; removed from workspace+core manifests; lock dropped exactly scrypt+salsa20+pbkdf2, 747 bytes) + 3 false positives (custom lib names spp_core/spp_catalog defeat machete's string matcher); cargo-deny v0.20.2: advisories/bans/licenses/sources all ok; battery green; CI run#319 green — see complete.md |
 | R2.4 unwrap/expect policy | terminal (session 6) | batch a: D-14 policy + B-class poison elimination + A-class normalization (CI run#322 green); batch b: class C resolved — 9 eliminated (incl. ALL 4 production unwraps), 8 kept with written D-14 justifications; scanner census 56 prod expects + 0 unwraps; battery green; CI row rides this push — see complete.md |
 | R2.5 panic!/todo!/unimplemented! | terminal (session 7) | precise census: 4 production occurrences, not the plan's 30 (27 were test-region overcounts; todo!/unimplemented! zero tree-wide); policy D-15: 3 exhaustiveness-forced unreachable! kept with written local proofs, 1 arm-level cfg(test) panic reclassified D-10-exempt; one code increment (execute.rs:1833 message normalization); battery green; CI row rides this push — see complete.md |
-| R3.1 error types | done (session 8) | census: FIVE types tree-wide, ZERO duplicate enums (root+boxed-subtype architecture already consolidated); 3 hand-rolled Display/Error impls → thiserror derives (byte-identical messages; AcquireError #[source] reproduces the hand-rolled source()); TranslateError enum→newtype (class dimension unread by its single consumer); app-shell +thiserror dep (lock: one edge line); D-16; CI row rides this push — see complete.md |
+| R3.1 error types | terminal (session 8) | census: FIVE types tree-wide, ZERO duplicate enums (root+boxed-subtype architecture already consolidated); 3 hand-rolled Display/Error impls → thiserror derives (byte-identical messages; AcquireError #[source] reproduces the hand-rolled source()); TranslateError enum→newtype (class dimension unread by its single consumer); app-shell +thiserror dep (lock: one edge line); D-16; CI run#332 green on `5ca31af` — see complete.md |
 | R3.2–R3.6 DRY | pending | see plan §7 R3 |
 | R4.1–R4.5 clean code | pending | see plan §7 R4 |
 | R5.1–R5.3 guardrails | pending (optional, stage-gated) | |
@@ -170,6 +172,52 @@ Checks: cargo machete (v0.9.2, installed ad hoc) now reports only the 3 document
   the CI row rides this push; terminal confirmation + run id at the next
   poll (addendum pattern). Pointer advances to R3.2 (SQL plumbing,
   census first).
+- CI closure: run#332 (id 43476466581) GREEN on `5ca31af` — all four
+  jobs success; kittest drift gate green (single_instance is not a
+  rendered page — pixel-neutral trivially; the TranslateError collapse
+  is worker-side only). complete.md R3.1 row filled; task TERMINAL.
+- R3.2 census (read-only prep, done while run#332 executed — the
+  executing session reads this instead of re-scanning):
+  - THE actionable class: the lenient row-collect tail
+    `.map(|rows| rows.filter_map(|r| r.ok()).collect())` — **73 sites
+    across 28 files** (a few spell the row var `x`; regenerate the site
+    list with `rg -n "filter_map\(\|[rx]\| [rx]\.ok\(\)\)\.collect\(\)"
+    crates/core/src --type rust`). Candidate helpers in db.rs (the
+    storage infrastructure module): (a) full wrapper
+    `pub(crate) fn query_rows<T>(conn, sql, params: impl Params, map:
+    impl FnMut(&Row<'_>) -> rusqlite::Result<T>) -> Result<Vec<T>>`
+    (prepare + query_map + lenient collect; HRTB closure signature like
+    rusqlite's own query_map) for the clean 3-step sites (~50–60 by
+    crude scan); (b) tail-only `rows_ok(rows) -> Vec<T>` for the ~13
+    sites that bind the query_map result to a var / interleave logic.
+    BEHAVIOR CONTRACT (invariant 3): prepare Err propagates, query_map
+    Err propagates, individual ROW errors are SILENTLY SKIPPED — the
+    lenient semantics must be preserved exactly; do NOT "improve" it to
+    strict during the DRY pass (that would be an unsanctioned behavior
+    change smuggled into a mechanical batch).
+  - KEEP verdicts (census-recorded, no action): strict collect
+    `collect::<rusqlite::Result<Vec<_>>>()` (60 sites — the canonical
+    one-expression idiom, OPPOSITE semantics to the lenient tail);
+    scalar `|r| r.get(0)` mappers (362 sites — canonical rusqlite
+    idiom, nothing to consolidate without obscuring); JSON column
+    defaults (~15–20 sites across FOUR semantic shapes — json!({}) /
+    Value::Null / Default / "{}" string — heterogeneous per-site
+    choices; a helper per shape = 4 micro-helpers used a handful of
+    times each, net complexity UP); per-module named row mappers
+    (digest_from_row et al. — the established GOOD pattern; each maps
+    its own table's columns; zero cross-module duplication found);
+    incidental SQL literal repeats (short test/seed queries, 3–5
+    textual coincidences — coupling unrelated code would be anti-DRY);
+    `.optional()` (9 sites — idiomatic rusqlite extension).
+  - Sizing: 73 mechanical edits + helper(s) + battery = one session's
+    batch. Execute per-file (read site → edit tail) — NOT blind regex
+    (indent levels and interleaved logic vary; ~13 sites bind the
+    query_map result to a var first). Census-first discipline held: the
+    plan's "row-mapping/statement boilerplate" letter shrank to ONE
+    real class + a wall of canonical-idiom keeps.
+- Session closed: this closure line + R3.2 prep + the R3.1 CI-verified
+  rows ride the addendum commit; its docs-only CI run is session 9's
+  preflight gate.
 
 ### Session 7 — 2026-11-15
 - Pre-flight: context boundary + sandbox reset (clone, /tmp logs, and
