@@ -39,6 +39,7 @@ CI evidence, date, notes.
 | R2.2 #[allow] audit | `f06e1ba` | CI run#317 (id 43368539603), all 4 lanes success, 2026-11-13 | 2026-11-13 | 37 instances audited (28 in-src + 9 in-test); verdict table in progress.md, survivor policy memory D-13; 1 vestigial deleted (search/lanes.rs ref_option); 34 kept with written justifications; R2.1+R2.2 together: 3 deletions, 0 unjustified suppressions remain |
 | R2.3 dependency hygiene | `981f2a0` | CI run#319 (id 43377764840), all 4 lanes success, 2026-11-13 | 2026-11-13 | machete: 1 real unused dep (scrypt) removed — lock dropped exactly scrypt+salsa20+pbkdf2 (747 bytes); 3 false positives kept (custom lib names); cargo deny: advisories/bans/licenses/sources ok; battery green |
 | R2.4 unwrap/expect policy | `82570a4` | CI run#325 (id 43418287308), all 4 lanes success (kittest drift gate green — live_chats edit pixel-neutral), 2026-11-15 | 2026-11-15 | 86 production occurrences triaged under D-14: batch a eliminated the 21 mutex-poison sites (into_inner recovery) and normalized 20 unwraps→expects; batch b resolved the 17 class-C guarded sites — 9 eliminated (incl. ALL 4 production unwraps), 8 kept with written justifications; end state 56 production occurrences, all expects, zero unwraps; +32/−33 across 7 source files; battery green (520/528/293+2/56, clippy x2, gate, strip-check 205/205) |
+| R2.5 panic family | `<this push>` | CI run rides the push — run id recorded at next poll | 2026-11-15 | precise census FOUR production occurrences (not the plan's 30 — 27 test-region overcounts): 3 exhaustiveness-forced unreachable! kept with written local proofs (D-15), 1 arm-level cfg(test) panic D-10-exempt; one code increment (execute.rs:1833 message normalization); STAGE R2 TERMINAL — R2.1 through R2.5 closed |
 
 ## Final metrics (fill at close-out)
 
@@ -53,5 +54,14 @@ CI evidence, date, notes.
   20 message-less unwraps normalized to justified expects; end state 56
   production occurrences (45 class-A + 8 class-C + 3 class-D), all
   expects, each with a written D-14 justification, zero production
-  unwraps.** The panic!/todo!/unimplemented! family is R2.5 (pending).
+  unwraps.** The panic family closes below (R2.5, same day).
+- `panic` family resolved: **R2.5 terminal — production census FOUR
+  (1 panic! + 3 unreachable!), all kept/classified under D-15: 3
+  exhaustiveness-forced `unreachable!` arms with written local proofs
+  (the honest survivors), 1 arm-level cfg(test) test panic (D-10);
+  todo!/unimplemented! ZERO tree-wide in production; one bare
+  `unreachable!()` normalized with a message. The plan's "30
+  instances" shrank to 4 under the precise cfg(test)-aware census
+  (third consecutive census correction — R2.2 allows, R2.4 unwraps,
+  R2.5 panics).**
 - Files split: —

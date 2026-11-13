@@ -1830,7 +1830,7 @@ impl WorkerManager {
                         "The article published but the verify fetch found no article.".to_string()
                     }
                     Err(ref e) => format!("Published, but the verify re-sync failed: {e}"),
-                    _ => unreachable!(),
+                    _ => unreachable!("Ok(Some) is handled by the outer match arm"),
                 };
                 tracing::warn!(operation = "publish_article_draft", draft_id, %msg);
                 let conn = self.lock();

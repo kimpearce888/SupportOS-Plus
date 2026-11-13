@@ -1,33 +1,29 @@
 # Refactor Progress — Live State
 
-Last updated: session 6 (2026-11-15). Update rule: every session updates
+Last updated: session 7 (2026-11-15). Update rule: every session updates
 this file before ending. Statuses: `pending` / `in_progress` / `done` /
 `terminal` (done + closed in `complete.md`) / `dropped` (with reason in
 `memory.md`).
 
 ## CURRENT POINTER
 
-- Next task: **R2.5 — panic!/todo!/unimplemented!** (the session-6
-  precise census is DONE and recorded in the session-6 log's R2.5 prep:
-  FOUR production occurrences, not the plan's 30 — 3 exhaustiveness-
-  forced unreachable! keeps (app/mod.rs:891, oauth_state.rs:95,
-  execute.rs:1833) + 1 arm-level-cfg(test) test panic (execute.rs:468,
-  D-10 exempt); scanner extension at tool-results/r25_triage.py).
-  Execute per the prep notes: policy D-15 (D-14-shaped), the 1833
-  message normalization as the one code increment, census correction
-  vs the plan's letter, then R3.1.
-- Pre-flight: the CURRENT head `cdc38ee` is RED (run#328 — RUSTSEC-
-  2026-0533, ammonia; see the post-close incident entry + G-09). The
-  lock-only fix commit (ammonia 4.2.5) rides on top; its CI run is
-  THIS session's real preflight gate — do not start R2.5 until it is
-  green. (General rule stands: if the head run is still in flight,
-  wait for it.)
-- Session counter: 6 completed (R1 terminal; R2.1-R2.4 terminal; R2.5
-  next).
-- Environment: toolchain reinstalled this session (cold target/); G-05
-  managed preemptively (incremental rm between lanes; peak 94%); ONE
-  lane per tool call. Triage tooling: see G-08 — cross-line string
-  state machine required, scanner at tool-results/r24_triage.py.
+- Next task: **R3.1 — DRY pass, first batch** (see plan §7 R3 for the
+  batch map; R2 stage is TERMINAL — R2.1-R2.5 all closed). The session-7
+  log records the R2.5 close (D-15 policy + census correction; 1 code
+  increment). Pre-flight as usual: green head required.
+- Pre-flight [session-6 tail, resolved session 7]: head `cdc38ee` had
+  gone RED (run#328 — RUSTSEC-2026-0533 advisory; G-09) — fixed by the
+  lock-only ammonia 4.2.5 bump `ea089b0`, run#329 GREEN verified before
+  R2.5 began. R2.5 then executed on that green base (session-7 log).
+- Session counter: 7 completed (R1 terminal; R2 stage TERMINAL — R2.1
+  through R2.5; R3 next).
+- Environment: session 7 began with a sandbox reset at the context
+  boundary (the first locally-bumped ammonia lock, applied at session
+  6's tail, was lost with it — re-applied after re-provision);
+  toolchain reinstalled; cold target/. G-05 managed preemptively
+  (incremental rm between lanes); ONE lane per tool call. Triage
+  tooling: see G-08 — scanners at tool-results/r24_triage.py
+  (unwrap/expect) and r25_triage.py (panic family).
 
 ## Task states
 
@@ -49,7 +45,7 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 | R2.2 #[allow] audit | terminal (session 4) | 37 instances audited (28 in-src + 9 in-test): verdict table in progress.md, survivor policy memory D-13; 1 vestigial deleted (search/lanes.rs ref_option — signature already Option<&str>); 34 kept with written justifications (FFI islands, constraint-3-unsatisfiable style pairs, R3.4/R4.5-owned clusters, D-10 test regions); battery green; CI run#317 green — see complete.md |
 | R2.3 dependency hygiene | terminal (session 4) | machete v0.9.2: 4 candidates = 1 real unused (scrypt — zero source occurrences; removed from workspace+core manifests; lock dropped exactly scrypt+salsa20+pbkdf2, 747 bytes) + 3 false positives (custom lib names spp_core/spp_catalog defeat machete's string matcher); cargo-deny v0.20.2: advisories/bans/licenses/sources all ok; battery green; CI run#319 green — see complete.md |
 | R2.4 unwrap/expect policy | terminal (session 6) | batch a: D-14 policy + B-class poison elimination + A-class normalization (CI run#322 green); batch b: class C resolved — 9 eliminated (incl. ALL 4 production unwraps), 8 kept with written D-14 justifications; scanner census 56 prod expects + 0 unwraps; battery green; CI row rides this push — see complete.md |
-| R2.5 panic!/todo!/unimplemented! | pending | 30 instances + 3 unreachable! arms (session-4 survey); same D-14-shaped policy expected |
+| R2.5 panic!/todo!/unimplemented! | terminal (session 7) | precise census: 4 production occurrences, not the plan's 30 (27 were test-region overcounts; todo!/unimplemented! zero tree-wide); policy D-15: 3 exhaustiveness-forced unreachable! kept with written local proofs, 1 arm-level cfg(test) panic reclassified D-10-exempt; one code increment (execute.rs:1833 message normalization); battery green; CI row rides this push — see complete.md |
 | R3.1–R3.6 DRY | pending | see plan §7 R3 |
 | R4.1–R4.5 clean code | pending | see plan §7 R4 |
 | R5.1–R5.3 guardrails | pending (optional, stage-gated) | |
@@ -97,7 +93,51 @@ Checks: cargo machete (v0.9.2, installed ad hoc) now reports only the 3 document
 
 **R2.4-b verdict summary (session 6):** the 17 class-C sites resolved — 9 ELIMINATED (the 6 prep-note clean rewrites + all 3 if-natural studies resolved to eliminate: embeddings' qdrant rebind, settings' nested try_from), 8 KEPT, every keep carrying an active written justification in memory D-14 class C. Net tree after batch b: 56 production occurrences, ALL expects, ZERO unwraps; 8 file diff, +32/−33 after fmt. The 3 settings/embeddings deviations from the session-5 prep note's borderline leanings were resolved in favor of elimination after flow study (rationale in D-14); no keep was left unjustified.
 
+### R2.5 — panic family (session 7; precise census FOUR production occurrences)
+
+| site | construct | verdict | outcome |
+|---|---|---|---|
+| app-shell/src/app/mod.rs:891 | `unreachable!("inbox handled above")` | keep | exhaustiveness-forced arm; proof is cross-branch (match runs only in the else of `if self.page == PageKey::Inbox`, verified by read); removal needs a wildcard-None silent no-op (dishonest) or a UI-dispatch restructure (pixel drift, D-05); D-15 |
+| core/src/oauth_state.rs:95 | `unreachable!("hex_digit got {n} …")` | keep | `_` on u8 forced by the type; proof is the callers' bit-masks (b>>4, b&0x0f); range-newtype = R3-territory overkill; D-15 |
+| core/src/workers/execute.rs:1833 | `_ => unreachable!()` (bare) | keep + normalize | exhaustiveness-forced for `Result<Option<T>,E>` narrowed by the outer match's `Ok(Some(article))` arm; message added: `unreachable!("Ok(Some) is handled by the outer match arm")` — the batch's one code increment (D-14 class-A precedent: the message is the only in-code doc a survivor may carry); D-15 |
+| core/src/workers/execute.rs:468 | `panic!("intentional test panic …")` | exempt (D-10) | inside `#[cfg(test)] "__test_panic" =>` match arm — arm-level cfg(test), compiles only in test builds; the G-08 tracker models cfg(test) at mod level so this escaped it (refinement recorded in memory G-08); semantically test machinery, not production |
+
+**R2.5 verdict summary:** the panic-family production census is FOUR (1 panic! + 3 unreachable!), not the plan's 30 — 27 were test-region overcounts (the third census correction of the program after R2.2's allows and R2.4's unwraps; lesson for R3/R4: ALWAYS run the precise scanner before sizing a plan batch). todo!/unimplemented!: ZERO tree-wide in production. xtask: zero. One code increment (1833 message). STAGE R2 TERMINAL: R2.1–R2.5 all closed; every kept panic-family member carries a written local proof (D-15 + Q-04).
+
 ## Session log
+
+### Session 7 — 2026-11-15
+- Pre-flight: context boundary + sandbox reset (clone, /tmp logs, and
+  the session-6-tail ammonia lock bump all lost) — re-provisioned per
+  handover §2. Head `cdc38ee` RED (run#328): RUSTSEC-2026-0533
+  (ammonia 4.2.4 mutation-XSS) landed in the live advisory DB between
+  runs #327/#328 on the same dependency tree — diagnosed from the
+  session-6 job-log pull; incident protocol executed per G-09: lock-only
+  bump (`cargo update -p ammonia` → 4.2.5; manifest "4.2" already
+  covered), FULL battery re-run green (gate, fmt, clippy x2, core 520,
+  sandbox 528, app-shell 293+2, catalog+xtask 56, verify-icons,
+  strip-check 205/205), PLUS local `cargo deny check advisories bans
+  licenses sources` green (0.20.2 installed ad hoc). Committed
+  `ea089b0`; run#329 (id 43442412648) GREEN on it — base restored.
+- R2.5 executed on the green base (the CURRENT POINTER batch; census
+  + prep done session 6): policy D-15 written (memory.md) — 3
+  exhaustiveness-forced `unreachable!` keeps with written local proofs,
+  1 arm-level-cfg(test) panic reclassified D-10-exempt; ONE code
+  increment: execute.rs:1833 bare `unreachable!()` normalized to
+  `unreachable!("Ok(Some) is handled by the outer match arm")`;
+  census correction vs the plan's letter recorded (4 real production
+  occurrences, not 30 — 27 test-region overcounts; Q-04 owner-override
+  record for the 3 keeps).
+- Battery: gate clean, fmt --check clean, clippy workspace + sandbox
+  clean, core 520, core-sandbox 528, app-shell 293+2, catalog+xtask 56,
+  verify-icons verified, strip-check 205/205 — all green (post-batch
+  values recorded in the closure push).
+- R2.5 TERMINAL → STAGE R2 TERMINAL (R2.1–R2.5). Terminal row in
+  complete.md; the R2.5 CI row rides this push. Pointer advanced to
+  R3.1 (DRY pass, first batch — read plan §7 R3 next session start).
+- Session closed: this log + pointer + D-15/Q-04/G-09 ride the R2.5
+  commit per D-08; CI monitored to green before close where time
+  allows (else the run id is the next session's preflight gate).
 
 ### Session 6 — 2026-11-15
 - Pre-flight: sandbox reset AGAIN (clone + toolchain gone) — re-provisioned

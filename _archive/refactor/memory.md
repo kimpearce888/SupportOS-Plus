@@ -169,6 +169,39 @@ session ends by adding what the next session must not have to rediscover.
     for owner override; the alternative was rejected on the R3-collision
     and unrepresentable-error grounds above.
 
+- **D-15 (session 7, R2.5).** `panic!`/`todo!`/`unimplemented!`/
+  `unreachable!` production policy — the panic-family analog of D-14,
+  refined from D-10's blanket form. Precise census at pass start
+  (G-08 scanner extended with the panic-family pattern set —
+  r25_triage.py; r24 kept intact as the unwrap/expect census): FOUR
+  production occurrences, not the plan's 30 — the session-4 crude
+  count included test regions (same overcount pattern as R2.2's allow
+  census and R2.4's 126-vs-86); todo!/unimplemented! are ZERO
+  tree-wide in production, xtask ZERO panic-family.
+  - **Exhaustiveness-forced `unreachable!` (3): KEEP, each with a
+    local proof.** app/mod.rs:891 `PageKey::Inbox` — the match runs
+    only in the `else` of `if self.page == PageKey::Inbox` (verified
+    by read); removal needs a wildcard-None arm (silent no-op —
+    dishonest) or a UI-dispatch restructure (pixel drift, D-05).
+    oauth_state.rs:95 `hex_digit` — the `_` on u8 is forced by the
+    type; the proof is the callers' bit-masks (`b >> 4`, `b & 0x0f`);
+    a range-newtype is R3-territory overkill. execute.rs:1833 —
+    `Result<Option<T>, E>` narrowed by the outer match's
+    `Ok(Some(article))` first arm; message normalized to
+    `unreachable!("Ok(Some) is handled by the outer match arm")`
+    (D-14 class-A precedent: under constraint 3 the message is the
+    only in-code doc a survivor may carry) — the batch's one code
+    increment.
+  - **Arm-level `#[cfg(test)]` panic (1): NOT production.**
+    execute.rs:468 `__test_panic` arm compiles only in test builds —
+    D-10's exemption, reached through a scanner blind spot (G-08
+    refinement: the tracker models cfg(test) at mod level; arm-level
+    attributes escape it; one instance tree-wide).
+  - **Census correction vs the plan's letter:** the plan's "30
+    instances" does not exist in production — 27 of the 30 were
+    test-region overcounts. The real deviation is keeping 3
+    exhaustiveness-forced unreachable! arms, recorded as Q-04.
+
 ## Facts (F-xx)
 
 - **F-01.** Baseline (session 1): 204 .rs files, 141,107 LOC — core
@@ -289,3 +322,13 @@ session ends by adding what the next session must not have to rediscover.
   class-C keeps → per-site control-flow restructures (see D-14 for why
   each was judged unnatural), class D → startup error handling in app
   bootstrap. Default (standing unless overridden): D-14's keeps.
+- **Q-04 (session 7, D-15).** R2.5 keeps 3 exhaustiveness-forced
+  `unreachable!` arms (app/mod.rs:891, oauth_state.rs:95,
+  execute.rs:1833 — each with a written local proof in D-15) instead of
+  the plan's letter (a "30-instance" family, of which 27 were
+  test-region overcounts; production held only these 4 minus the 1
+  cfg(test) test arm). If the owner wants the strict reading anyway,
+  the work is: app/mod.rs UI-dispatch restructure (D-05 pixel-drift
+  risk — must ride a golden-verified batch), oauth_state range-newtype
+  (R3-territory), execute.rs outer-arm re-nesting. Default (standing
+  unless overridden): D-15's keeps.
