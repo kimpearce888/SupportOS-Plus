@@ -24,7 +24,8 @@ use crate::search::apply_fts_migration;
 mod interaction;
 pub(crate) use interaction::{analyze_interaction, build_interaction_strategy_block};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+#[error("{message}")]
 pub struct LmStudioError {
     pub message: String,
     pub retryable: bool,
@@ -38,14 +39,6 @@ impl LmStudioError {
         }
     }
 }
-
-impl std::fmt::Display for LmStudioError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.message)
-    }
-}
-
-impl std::error::Error for LmStudioError {}
 
 pub(crate) fn lm_error(e: &crate::error::Error) -> Option<&LmStudioError> {
     if let crate::error::Error::Other(b) = e {

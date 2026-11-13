@@ -41,6 +41,7 @@ rusqlite.workspace = true
 serde_json.workspace = true
 sha2 = "0.11"
 hex = "0.4"
+thiserror.workspace = true
 
 [dev-dependencies]
 egui_kittest = { version = "0.37.0", features = ["eframe", "snapshot", "wgpu"] }

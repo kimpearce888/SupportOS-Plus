@@ -25,21 +25,14 @@ pub(crate) const HS_AUTHORIZE_URL: &str =
 
 const DOC_ARTICLE_FETCH_CAP: usize = 500;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, thiserror::Error)]
+#[error("{friendly}")]
 pub(crate) struct HsApiError {
     pub status_code: u16,
     pub message: String,
     pub friendly: String,
     pub retryable: bool,
 }
-
-impl std::fmt::Display for HsApiError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.friendly)
-    }
-}
-
-impl std::error::Error for HsApiError {}
 
 impl From<HsApiError> for Error {
     fn from(e: HsApiError) -> Self {

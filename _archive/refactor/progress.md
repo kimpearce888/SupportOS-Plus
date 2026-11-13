@@ -1,29 +1,30 @@
 # Refactor Progress — Live State
 
-Last updated: session 7 (2026-11-15). Update rule: every session updates
+Last updated: session 8 (2026-11-13). Update rule: every session updates
 this file before ending. Statuses: `pending` / `in_progress` / `done` /
 `terminal` (done + closed in `complete.md`) / `dropped` (with reason in
 `memory.md`).
 
 ## CURRENT POINTER
 
-- Next task: **R3.1 — DRY pass, first batch** (see plan §7 R3 for the
-  batch map; R2 stage is TERMINAL — R2.1-R2.5 all closed). The session-7
-  log records the R2.5 close (D-15 policy + census correction; 1 code
-  increment). Pre-flight as usual: green head required.
-- Pre-flight [session-6 tail, resolved session 7]: head `cdc38ee` had
-  gone RED (run#328 — RUSTSEC-2026-0533 advisory; G-09) — fixed by the
-  lock-only ammonia 4.2.5 bump `ea089b0`, run#329 GREEN verified before
-  R2.5 began. R2.5 then executed on that green base (session-7 log).
-- Session counter: 7 completed (R1 terminal; R2 stage TERMINAL — R2.1
-  through R2.5; R3 next).
-- Environment: session 7 began with a sandbox reset at the context
-  boundary (the first locally-bumped ammonia lock, applied at session
-  6's tail, was lost with it — re-applied after re-provision);
-  toolchain reinstalled; cold target/. G-05 managed preemptively
-  (incremental rm between lanes); ONE lane per tool call. Triage
-  tooling: see G-08 — scanners at tool-results/r24_triage.py
-  (unwrap/expect) and r25_triage.py (panic family).
+- Next task: **R3.2 — SQL plumbing** (rusqlite row-mapping/statement
+  boilerplate → shared helpers in the storage modules; see plan §7 R3).
+  CENSUS FIRST — the standing R2.5 lesson (precise scan before sizing a
+  plan batch; three consecutive census corrections came from skipping it).
+- Pre-flight [session 8]: R3.1 executed on the green base `17a3ff6`
+  (run#331); the R3.1 head's own CI run rides the session-8 push — confirm
+  green (or diagnose per handover §7 step 3) before starting R3.2.
+- Session counter: 8 completed (R1 terminal; R2 stage TERMINAL — R2.1
+  through R2.5; R3.1 done, CI confirmation at next poll).
+- Environment: session 8 began with a sandbox reset at the context boundary
+  (standard §2 re-provision: re-clone + rustup 1.29.3 + pinned 1.99.1).
+  Cold target/; G-05 managed preemptively (incremental rm between lanes,
+  peak 94% after the app-shell link). NEW: G-10 — backgrounded builds DIE
+  at tool-call end (nohup does not survive); the working pattern is
+  repeated foreground 10-min windows (cargo artifacts persist between
+  killed runs). Triage tooling: see G-08 — scanners at
+  tool-results/r24_triage.py (unwrap/expect) and r25_triage.py (panic
+  family).
 
 ## Task states
 
@@ -46,7 +47,8 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 | R2.3 dependency hygiene | terminal (session 4) | machete v0.9.2: 4 candidates = 1 real unused (scrypt — zero source occurrences; removed from workspace+core manifests; lock dropped exactly scrypt+salsa20+pbkdf2, 747 bytes) + 3 false positives (custom lib names spp_core/spp_catalog defeat machete's string matcher); cargo-deny v0.20.2: advisories/bans/licenses/sources all ok; battery green; CI run#319 green — see complete.md |
 | R2.4 unwrap/expect policy | terminal (session 6) | batch a: D-14 policy + B-class poison elimination + A-class normalization (CI run#322 green); batch b: class C resolved — 9 eliminated (incl. ALL 4 production unwraps), 8 kept with written D-14 justifications; scanner census 56 prod expects + 0 unwraps; battery green; CI row rides this push — see complete.md |
 | R2.5 panic!/todo!/unimplemented! | terminal (session 7) | precise census: 4 production occurrences, not the plan's 30 (27 were test-region overcounts; todo!/unimplemented! zero tree-wide); policy D-15: 3 exhaustiveness-forced unreachable! kept with written local proofs, 1 arm-level cfg(test) panic reclassified D-10-exempt; one code increment (execute.rs:1833 message normalization); battery green; CI row rides this push — see complete.md |
-| R3.1–R3.6 DRY | pending | see plan §7 R3 |
+| R3.1 error types | done (session 8) | census: FIVE types tree-wide, ZERO duplicate enums (root+boxed-subtype architecture already consolidated); 3 hand-rolled Display/Error impls → thiserror derives (byte-identical messages; AcquireError #[source] reproduces the hand-rolled source()); TranslateError enum→newtype (class dimension unread by its single consumer); app-shell +thiserror dep (lock: one edge line); D-16; CI row rides this push — see complete.md |
+| R3.2–R3.6 DRY | pending | see plan §7 R3 |
 | R4.1–R4.5 clean code | pending | see plan §7 R4 |
 | R5.1–R5.3 guardrails | pending (optional, stage-gated) | |
 | R6.1–R6.2 polish + close | pending | |
@@ -104,7 +106,70 @@ Checks: cargo machete (v0.9.2, installed ad hoc) now reports only the 3 document
 
 **R2.5 verdict summary:** the panic-family production census is FOUR (1 panic! + 3 unreachable!), not the plan's 30 — 27 were test-region overcounts (the third census correction of the program after R2.2's allows and R2.4's unwraps; lesson for R3/R4: ALWAYS run the precise scanner before sizing a plan batch). todo!/unimplemented!: ZERO tree-wide in production. xtask: zero. One code increment (1833 message). STAGE R2 TERMINAL: R2.1–R2.5 all closed; every kept panic-family member carries a written local proof (D-15 + Q-04).
 
+### R3.1 — error types (session 8; census: FIVE types tree-wide, ZERO duplicates)
+
+| construct | verdict | outcome |
+|---|---|---|
+| core/src/error.rs `Error` (thiserror, 11 variants) + `Result` alias | keep | the per-domain root; `Other(Box<dyn Error>)` is the sanctioned bridge for domain subtypes — the plan's "per-domain consolidation" prong found the architecture ALREADY in place |
+| ai_pipeline/mod.rs `LmStudioError` + hand-rolled Display + hand-rolled `impl std::error::Error` | merge (derive) | `#[derive(Debug, Clone, PartialEq, thiserror::Error)] #[error("{message}")]` — Display byte-identical (verbatim message); `new()` ctor, `lm_error()` downcast, Other-box flow unchanged |
+| helpscout_real/mod.rs `HsApiError` + hand-rolled Display + hand-rolled `impl std::error::Error` | merge (derive) | `#[derive(Debug, Clone, thiserror::Error)] #[error("{friendly}")]` — Display byte-identical (verbatim friendly); the hand-written `From<HsApiError> for Error` bridge KEPT (domain bridge, not duplication) |
+| app-shell/single_instance.rs `AcquireError` + hand-rolled Display + hand-rolled source() | merge (derive) | `#[derive(Debug, thiserror::Error)]`, per-variant `#[error]`, `Io(#[source] std::io::Error)` — Display + source() byte-identical (main.rs renders both user-visibly via tracing+fatal); app-shell gains `thiserror.workspace = true` (lock diff: exactly one edge line, crate already present via core) |
+| translation.rs `TranslateError` enum{Client,Service,BadGateway}(String) | merge (collapse) | the class dimension was UNREAD structure: the single caller (execute.rs translate_composer) destructured all three variants identically to the message string; newtype `TranslateError(pub String)`; 8 ctor sites + the execute.rs triple-arm match collapsed to `e.0`; deliberately Display-less — no consumer ever displays it, so a thiserror Display would mint unused API surface (§5.3) |
+| ai_eval.rs `CaseErr` = (String, Option<u64>) alias | keep | golden-harness data tuple (message + latency), not a domain error type |
+| xtask anyhow usage | keep | dev-invoked build machinery (D-14 xtask precedent); anyhow is the idiomatic tooling error type, not a duplicate domain enum |
+
+**R3.1 verdict summary:** census-first again — the plan's "no duplicate error enums" prong found ZERO duplicates (fourth consecutive batch where the precise census beat the plan's sizing assumptions, though this time the correction is favorable: less to do, not more). Actionable set: exactly the 3 hand-rolled Display/Error impls (→ thiserror derives, byte-identical messages) + 1 class-dead enum (→ newtype). End state: every named production error type either derives thiserror or is Display-less by design (D-16). Net source diff +19/−62 across 6 files + 1 manifest line + 1 lock edge.
+
 ## Session log
+
+### Session 8 — 2026-11-13
+- Pre-flight: sandbox reset at the context boundary (clone + toolchain
+  gone) — re-provisioned per handover §2. Repo state was AHEAD of the
+  session-7 handover summary (that summary was generated mid-fix-battery,
+  before the session's tail work landed): the G-09 ammonia incident had
+  closed (`ea089b0`, run#329 green), session 7 then executed R2.5 to
+  terminal (`0984936`, run#330 green) plus the CI-verified addendum
+  `17a3ff6` — run#331 GREEN confirmed via API before work began. STAGE R2
+  TERMINAL on arrival; pointer at R3.1. (Ledger date note: session 6/7
+  log headers say 2026-11-15 but the git commit timestamps are
+  2026-11-13 — the machine clock is authoritative; session 8 dates from
+  it.)
+- R3.1 census (the R2.5 lesson applied — precise scan before sizing):
+  `impl Display` tree-wide = exactly 3 hand-rolled (LmStudioError,
+  HsApiError, AcquireError); `thiserror` usage = exactly 1 (core error.rs);
+  error-named types = 5 total (census incl. a hidden-type sweep over
+  `Result<T, E>` params, which surfaced ai_eval's private `CaseErr` tuple
+  alias); catalog: zero error types; xtask: anyhow. ZERO duplicate error
+  enums — the root-enum + Other-boxed-subtypes architecture already
+  satisfies the plan's consolidation prong.
+- R3.1 executed (verdict table above): the 3 hand-rolled Display/Error
+  impls → thiserror derives with byte-identical messages (AcquireError's
+  `Io(#[source] …)` reproduces the hand-rolled source() exactly — already
+  Running → None, Io → Some(inner)); TranslateError enum → newtype (its
+  variant class was never read by any consumer — execute.rs destructured
+  all three arms identically; 8 ctor sites + the triple-arm match
+  collapsed to `e.0`); app-shell manifest +`thiserror.workspace = true`
+  (Cargo.lock diff: exactly one edge line — the crate was already in the
+  lock via core; no version movement).
+- Battery (cold target/): gate clean, fmt --check clean, clippy workspace
+  (2m24s) + sandbox lane (40s) clean, core 520 (484s), core-sandbox 528
+  (460s), app-shell 293+2 (266s — the 2 are single_instance's own tests,
+  green on the derived AcquireError; 27 kittest binaries linked, 0 run,
+  F-06), catalog+xtask 56, verify-icons verified, strip-check 205/205 —
+  all green. G-05 managed preemptively (incremental rm between lanes;
+  disk peaked 94% right after the app-shell link, back to 76% after rm).
+- G-10 discovered: a backgrounded cargo lane (`nohup … &`) DIED at the
+  end of the tool call that launched it — nohup does not survive the
+  call boundary in this sandbox (same class as the session-6 rustup
+  kill). Working pattern: repeated foreground windows at the max 10-min
+  timeout; cargo preserves compiled artifacts between killed runs, so a
+  cold lane grinds to completion across 2–3 windows. Recorded in
+  memory.md.
+- Net diff: 6 source files + app-shell/Cargo.toml + Cargo.lock,
+  +19/−62 in sources (+1 manifest line, +1 lock edge line). R3.1 done —
+  the CI row rides this push; terminal confirmation + run id at the next
+  poll (addendum pattern). Pointer advances to R3.2 (SQL plumbing,
+  census first).
 
 ### Session 7 — 2026-11-15
 - Pre-flight: context boundary + sandbox reset (clone, /tmp logs, and

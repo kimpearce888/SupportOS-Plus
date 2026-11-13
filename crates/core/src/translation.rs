@@ -532,11 +532,7 @@ fn stopwords_from(cleaned: &str) -> Vec<String> {
 }
 
 #[derive(Debug)]
-pub enum TranslateError {
-    Client(String),
-    Service(String),
-    BadGateway(String),
-}
+pub struct TranslateError(pub String);
 
 fn purpose_prompt(purpose: &str) -> &'static str {
     match purpose {
@@ -572,7 +568,7 @@ pub async fn translate(
     let text = text.trim();
     let purpose = purpose.unwrap_or("general");
     if !is_supported(to) {
-        return Err(TranslateError::Client(format!(
+        return Err(TranslateError(format!(
             "Unsupported target language '{to}'. Supported: {}.",
             SUPPORTED_LANGUAGES
                 .iter()
@@ -582,12 +578,10 @@ pub async fn translate(
         )));
     }
     if text.is_empty() {
-        return Err(TranslateError::BadGateway(
-            "Nothing to translate: empty text.".into(),
-        ));
+        return Err(TranslateError("Nothing to translate: empty text.".into()));
     }
     if text.chars().count() > 8000 {
-        return Err(TranslateError::BadGateway(
+        return Err(TranslateError(
             "Text too long for a single local translation (8000 char cap).".into(),
         ));
     }
@@ -602,14 +596,14 @@ pub async fn translate(
             .map(str::to_string);
         source_lang = code.clone().unwrap_or_else(|| "en".into());
         if code.is_none() {
-            return Err(TranslateError::Client(
+            return Err(TranslateError(
                 "Source language could not be detected; please specify it explicitly.".into(),
             ));
         }
         detected = Some(detection);
     }
     if source_lang == to {
-        return Err(TranslateError::Client(format!(
+        return Err(TranslateError(format!(
             "Source and target language are both '{to}' - nothing to translate."
         )));
     }
@@ -661,12 +655,10 @@ pub async fn translate(
             content: text.to_string(),
         },
     ];
-    let (content, model) = chat(messages, 0.1, 2048)
-        .await
-        .map_err(TranslateError::Service)?;
+    let (content, model) = chat(messages, 0.1, 2048).await.map_err(TranslateError)?;
     let translated = content.unwrap_or_default().trim().to_string();
     if translated.is_empty() {
-        return Err(TranslateError::BadGateway(
+        return Err(TranslateError(
             "The local model returned an empty translation.".into(),
         ));
     }
@@ -677,7 +669,7 @@ pub async fn translate(
          ON CONFLICT (cache_key) DO UPDATE SET translated_text = excluded.translated_text, model = excluded.model",
         params![cache_key, source_lang, to, purpose, text, translated, model],
     )
-    .map_err(|e| TranslateError::BadGateway(e.to_string()))?;
+    .map_err(|e| TranslateError(e.to_string()))?;
 
     Ok(json!({
         "source_lang": source_lang,

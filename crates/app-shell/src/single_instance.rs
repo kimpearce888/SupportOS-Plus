@@ -5,30 +5,12 @@ use std::path::{Path, PathBuf};
 
 pub(crate) const LOCK_FILE_NAME: &str = "instance.lock";
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum AcquireError {
+    #[error("another SupportOS+ instance is already running")]
     AlreadyRunning,
-    Io(std::io::Error),
-}
-
-impl std::fmt::Display for AcquireError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::AlreadyRunning => {
-                write!(f, "another SupportOS+ instance is already running")
-            }
-            Self::Io(e) => write!(f, "failed to acquire the instance lock: {e}"),
-        }
-    }
-}
-
-impl std::error::Error for AcquireError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::AlreadyRunning => None,
-            Self::Io(e) => Some(e),
-        }
-    }
+    #[error("failed to acquire the instance lock: {0}")]
+    Io(#[source] std::io::Error),
 }
 
 pub struct InstanceLock {

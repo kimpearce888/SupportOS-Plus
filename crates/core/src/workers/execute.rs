@@ -1274,11 +1274,7 @@ impl WorkerManager {
                         .unwrap_or_default()
                         .to_string())
                 }
-                Err(e) => Err(match e {
-                    crate::translation::TranslateError::Client(m)
-                    | crate::translation::TranslateError::Service(m)
-                    | crate::translation::TranslateError::BadGateway(m) => m,
-                }),
+                Err(e) => Err(e.0),
             }
         })
         .await

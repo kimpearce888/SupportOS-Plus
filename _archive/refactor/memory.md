@@ -202,6 +202,33 @@ session ends by adding what the next session must not have to rediscover.
     test-region overcounts. The real deviation is keeping 3
     exhaustiveness-forced unreachable! arms, recorded as Q-04.
 
+- **D-16 (session 8, R3.1).** Error-type end state — the tree's error
+  architecture was ALREADY consolidated (census: thiserror root
+  `core::Error` + `Other`-boxed domain subtypes + string bridges; ZERO
+  duplicate error enums; catalog has no error types; xtask rides anyhow
+  as dev machinery per the D-14 xtask precedent; ai_eval's private
+  `CaseErr` (String, Option<u64>) alias is golden-harness data, not a
+  domain error). The batch's real work was the plan's second prong: the
+  three hand-rolled `Display`/`std::error::Error` impls became thiserror
+  derives with byte-identical messages — `LmStudioError`
+  (`#[error("{message}")]`, Clone/PartialEq kept; `new()`/`lm_error()`/
+  Other-box flow unchanged), `HsApiError` (`#[error("{friendly}")]`; the
+  hand-written `From<HsApiError> for Error` bridge stays — it is the
+  domain bridge, not duplication), `AcquireError` (per-variant messages;
+  `Io(#[source] std::io::Error)` reproduces the hand-rolled source()
+  exactly; app-shell gained `thiserror.workspace = true` — lock diff one
+  edge line, no version movement). `TranslateError` collapsed
+  enum→newtype: the three same-shaped variants (Client/Service/BadGateway)
+  carried a class NO consumer ever read — the single caller (execute.rs
+  translate_composer) destructured all three identically to the message;
+  under constraints 2/5 the class dimension was unread structure.
+  `TranslateError` deliberately stays Display-less: no consumer displays
+  it (the message is extracted directly), so a thiserror Display would
+  mint unused API surface (§5.3 minimal-surface rule). Standing policy:
+  a NEW error type must either derive thiserror or be Display-less BY
+  DESIGN with the no-consumer-displays proof recorded here; hand-rolled
+  Display/Error impls are construction debt (constraint 2).
+
 ## Facts (F-xx)
 
 - **F-01.** Baseline (session 1): 204 .rs files, 141,107 LOC — core
@@ -305,6 +332,15 @@ session ends by adding what the next session must not have to rediscover.
   freezes. Ammonia usage here: core/src/richtext.rs one Builder for
   sanitize_html (customer-visible rich text), so the advisory is
   genuinely reachable — patch, never ignore.
+- **G-10 (session 8).** Background processes DIE at tool-call end in this
+  sandbox — `nohup cmd & log` does not survive the call boundary (bit the
+  session-6 rustup install; re-confirmed session 8 with a backgrounded
+  clippy lane that died mid-dependency-compile with zero errors in its
+  log and zero log growth between polls). Working pattern for long lanes:
+  repeated FOREGROUND windows at the max 10-min tool timeout — cargo
+  preserves compiled artifacts between killed runs, so a cold lane grinds
+  to completion across 2–3 windows. Never plan on launching-then-polling
+  a backgrounded build.
 
 ## Open questions / deferred owner decisions
 
