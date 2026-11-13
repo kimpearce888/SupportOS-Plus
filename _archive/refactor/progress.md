@@ -163,6 +163,10 @@ Checks: cargo machete (v0.9.2, installed ad hoc) now reports only the 3 document
   Batch b = the 6 clean eliminations (+2-3 if-natural after study),
   full battery, one commit. Expected end state: ~10-11 kept class-C
   expects, each with a written D-14 justification; R2.4 then terminal.
+- Session closed: ledger addendum pushed on `68a06e5`; its docs-only CI
+  run#323 (id 43394732056) verified GREEN before close (all four jobs
+  success). This final closure line rides commit `68a06e5`+1 — its own
+  docs-only run is the next session's preflight gate.
 
 ### Session 4 — 2026-11-13
 - Pre-flight: sandbox reset AGAIN (clone + toolchain gone) — re-provisioned
