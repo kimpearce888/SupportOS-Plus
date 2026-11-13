@@ -174,8 +174,10 @@ Checks: cargo machete (v0.9.2, installed ad hoc) now reports only the 3 document
     justifications + the one message normalization + the census
     correction vs the plan's letter (Q-04-style record or fold into
     Q-03's pattern). Docs-heavy, single small code edit; one commit.
-- Session closed: ledger addendum pushed on this commit; its docs-only
-  CI run is the next session's preflight gate.
+- Session closed: ledger addendum pushed on `0941fb3`; its docs-only CI
+  run#326 (id 43420872242) verified GREEN before close (all four jobs
+  success). This final closure line rides commit `0941fb3`+1 — its own
+  docs-only run is the next session's preflight gate.
 
 ### Session 5 — 2026-11-14
 - Pre-flight: sandbox reset AGAIN (clone + toolchain gone) — re-provisioned
