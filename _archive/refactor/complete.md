@@ -36,6 +36,7 @@ CI evidence, date, notes.
 | R1.10 comment closeout | `9b4aac5` | CI run#313 (id 43357073596), all 4 lanes success, 2026-11-13 | 2026-11-13 | redundant warn/allow missing_docs pairs deleted (catalog+core lib.rs); 12 attr lines; stage R1 TERMINAL: 3,174 whole comment lines + 6 inline removed by the stripper across R1.1–R1.9, + 12 attr lines in R1.10 |
 
 | R2.1 dead-code sweep | `f01ce18` | CI run#315 (id on file in progress.md), all 4 lanes success, 2026-11-13 | 2026-11-13 | zero active dead-code/unused warnings; 2 vestigial suppressions deleted (testsupport.rs allow(dead_code) — already cfg(test)-gated and fully used; issue_radar.rs allow(unused_mut) — nav mutated at 8 sites) |
+| R2.2 #[allow] audit | `f06e1ba` | CI run#317 (id 43368539603), all 4 lanes success, 2026-11-13 | 2026-11-13 | 37 instances audited (28 in-src + 9 in-test); verdict table in progress.md, survivor policy memory D-13; 1 vestigial deleted (search/lanes.rs ref_option); 34 kept with written justifications; R2.1+R2.2 together: 3 deletions, 0 unjustified suppressions remain |
 ## Final metrics (fill at close-out)
 
 - Comments removed (exact, from stripper): **3,174 whole comment lines +
