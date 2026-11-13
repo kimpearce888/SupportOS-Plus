@@ -242,6 +242,38 @@ pub(crate) fn spawn_sync_action(
     true
 }
 
+pub(crate) fn sync_now_button(
+    ui: &mut egui::Ui,
+    db: &DbHandle,
+    engine: Option<&Arc<SyncEngine>>,
+    sync_note: &mut String,
+) -> bool {
+    if design::button_with_icon(ui, Icon::Refresh, "Sync now", ButtonVariant::Outline)
+        .on_hover_text(
+            "pull fresh data from Help Scout now — the completion toast \
+         reports the outcome; the page re-reads on every sync anyway",
+        )
+        .clicked()
+    {
+        match engine {
+            Some(engine) => {
+                if spawn_sync_action(db, engine, SyncAction::Incremental) {
+                    *sync_note = "syncing\u{2026}".into();
+                } else {
+                    *sync_note = "a sync is already running".into();
+                }
+                false
+            }
+            None => {
+                *sync_note = "re-read the local mirror (no engine)".into();
+                true
+            }
+        }
+    } else {
+        false
+    }
+}
+
 pub(crate) fn spawn_docs_sync(db: &DbHandle, engine: &Arc<SyncEngine>) {
     if engine.is_running() {
         return;

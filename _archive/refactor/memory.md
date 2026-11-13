@@ -323,6 +323,29 @@ session ends by adding what the next session must not have to rediscover.
     future misc-DRY batch if the owner wants it; recorded here so it
     is not lost.
 
+- **D-19 (session 11, R3.4).** Page-scaffold end state — the "Sync
+  now" toolbar fragment is ONE definition
+  (`sync_health::sync_now_button`, pub(crate)): the
+  button_with_icon(Refresh, "Sync now", Outline) + the fixed hover
+  text + the engine match + the three note strings ("syncing…",
+  "a sync is already running", "re-read the local mirror (no
+  engine)") live there; call sites pass `&mut sync_note` and act on
+  the returned re-read flag with their page-specific `invalidate()`
+  (the None-arm's caller-side part). Standing fold rules recorded in
+  the R3.4 verdict table: the inbox live-label variant is a different
+  policy (keep); ensure_loaded latch conditions are per-page
+  staleness policy (keep — abstracting parameterizes policy,
+  anti-DRY per D-17's discipline); RANGES is already single-source
+  and its 2-site chip loop stays (borrow-conflicted extraction); a
+  new page wiring the same toolbar MUST call the helper — a new
+  inline copy is construction debt (D-17's standing rule, extended
+  to page scaffolding). The None-arm statement-order flip
+  (invalidate→note became note→invalidate via the flag return) is
+  proven state-neutral (disjoint fields — no invalidate() impl
+  touches sync_note) and pixel-neutral (no page-data reads between
+  the two writes) — recorded so a future reader does not "restore"
+  the order.
+
 
 ## Facts (F-xx)
 
@@ -461,6 +484,14 @@ session ends by adding what the next session must not have to rediscover.
   that print booleans/numbers, or the Read tool. This misled the
   session-10 census debugging for several steps (a phantom
   "corrupted file" chase) before the printf probe exposed it.
+
+- **G-12 (session 11).** The file-edit tool can only write paths under
+  /home/z — clone SupportOS-Plus at /home/z/SupportOS-Plus (handover
+  §2's canonical location), NOT under /tmp, or every edit routes
+  through python surgery instead. Related reset-recovery trap:
+  github-reconnect.sh's exists-branch only re-sets the remote URL —
+  after a reset that leaves an EMPTY dir remnant, remove it first or
+  the clone silently never happens (bit session 11's pre-flight).
 
 
 ## Open questions / deferred owner decisions

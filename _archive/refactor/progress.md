@@ -1,52 +1,37 @@
 # Refactor Progress — Live State
 
-Last updated: session 10 (2026-11-13). Update rule: every session updates
+Last updated: session 11 (2026-11-13). Update rule: every session updates
 this file before ending. Statuses: `pending` / `in_progress` / `done` /
 `terminal` (done + closed in `complete.md`) / `dropped` (with reason in
 `memory.md`).
 
 ## CURRENT POINTER
 
-- Next task: **R3.4 — page scaffolding** (repeated page composition
-  through the shared host compositor; pixel-neutral, goldens confirm —
-  see plan §7 R3). CENSUS FIRST, with the standing R2.5/R3.2 lesson.
-  Session-10 read-only prep (for session 11's census): the hosting
-  layer is ALREADY shared (design::host_standard_page +
-  host_inbox_page, one dispatch site in app/mod.rs:848/852); 21 of 23
-  rendered pages route through design::page_header (inbox uses the
-  inbox host; json_fields/queries/mod are not rendered pages); chips/
-  cards/empty-state CTAs are shared design calls. THE REAL CANDIDATE
-  FOUND: the "Sync now" toolbar fragment (button_with_icon Refresh
-  "Sync now" Outline + hover text "pull fresh data from Help Scout
-  now — …" + match engine { spawn_sync_action(Incremental) →
-  sync_note "syncing…"/"a sync is already running"; None →
-  self.invalidate() + "re-read the local mirror (no engine)" }) is
-  byte-identical across 5 pages: dashboard ~520, customers ~330,
-  reports ~367, organizations ~205, inbox ~1475 — the only varying
-  part is the None-arm's page-specific invalidate(). A shared helper
-  in sync_health.rs (button + match + note write, invalidate as the
-  caller-side or callback part) is the leading extraction shape;
-  pixel-neutrality is by construction (same widget calls, same order)
-  and the CI kittest drift gate is the arbiter. Also noted for the
-  census: ensure_loaded 3-line latches ×20 (per-page trigger fields —
-  likely keeps, anti-DRY to abstract); RANGES chip-toolbars in
-  dashboard+reports (compare at census time).
-- Pre-flight [session 10]: R3.3 executed on the green base `ac63c83`
-  (run#336 green, all four lanes — the docs-only addendum head, the
-  standard next-session preflight gate). R3.3 head `518ba64` is
-  CI-VERIFIED GREEN — run#337 (id 43512962814), all four lanes
-  success incl. the kittest drift gate (addendum commit below).
-  Green base for R3.4: the addendum head's own docs-only run (the
-  standard next-session preflight gate).
-- Session counter: 10 completed (R1 terminal; R2 stage TERMINAL; R3.1
+- Next task: **R3.5 — `PageKey` tables** (match-arm duplication
+  label/route/etc. → table-driven single source; names stay stable,
+  invariant 5 — see plan §7 R3). CENSUS FIRST, with the standing
+  R2.5/R3.2/R3.4 lesson (plan numbers overcount; the census decides):
+  enumerate every `match` over `PageKey` tree-wide (app dispatch,
+  titles, labels, route strings, sidebar/nav fields) and classify
+  each arm-set — the table-driven fold only lands where ≥2 match
+  sites repeat the SAME arm payload shape; differing payloads and
+  single-sites get verdict rows as keeps.
+- Pre-flight [session 11]: R3.4 executed on the green base `ae64a25`
+  (run#338 green, all four lanes — the docs-only addendum head, the
+  standard next-session preflight gate). R3.4 head (this session's
+  commit) rides this push — CI row to be filled by the addendum once
+  green.
+- Session counter: 11 completed (R1 terminal; R2 stage TERMINAL; R3.1
   terminal — run#332 green; R3.2 TERMINAL — run#335 green; R3.3
-  TERMINAL — run#337 green on `518ba64`).
-- Environment: session 9's sandbox was PARTIALLY reset (clone and
-  ~/.cargo SURVIVED; /tmp logs wiped; no re-provision needed beyond
-  github-reconnect.sh). Warm build ran during the CI preflight wait
-  (subshell-detached form, G-10) — the battery lanes then ran
-  incremental. G-05 hit twice mid-battery (89% before the app-shell
-  link, 86% after) — incremental rm between lanes held.
+  TERMINAL — run#337 green on `518ba64`; R3.4 terminal, CI pending).
+- Environment: session 11's sandbox was reset again (the clone under
+  /tmp/my-project gone — empty dir remnant; tool-results, rustup, and
+  cargo-home under /tmp/my-project survived). Re-cloned to the
+  canonical /home/z/SupportOS-Plus (handover §2's stated location —
+  also the only tree the file-edit tool reaches, G-12). Warm build ran
+  detached (G-10 subshell form, cargo test --no-run) while the census
+  executed. G-05 preemptive incremental-rm before every test lane;
+  battery green at exact baselines (520/528/293+2/56).
 
 ## Task states
 
@@ -72,7 +57,8 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 | R3.1 error types | terminal (session 8) | census: FIVE types tree-wide, ZERO duplicate enums (root+boxed-subtype architecture already consolidated); 3 hand-rolled Display/Error impls → thiserror derives (byte-identical messages; AcquireError #[source] reproduces the hand-rolled source()); TranslateError enum→newtype (class dimension unread by its single consumer); app-shell +thiserror dep (lock: one edge line); D-16; CI run#332 green on `5ca31af` — see complete.md |
 | R3.2 SQL plumbing | terminal (session 9) | lenient row-collect tail consolidated into db::query_rows + db::rows_ok; 80 sites (73 census + 7 turbofish blind-spot); +657/−823 across 32 files; battery green (520/528/293+2/56); CI run#335 green on `5cc08fc` — see complete.md |
 | R3.3 HTTP/serde plumbing | terminal (session 10) | 4 LM-Studio send tails → `send_json` + `authorized` (byte-identical messages); 2 docs tails → `docs_request_json` (byte-identical friendly strings, verified by continuation-resolution); 122 flat key-indexed extraction sites → `json_fields::json_str`/`json_string` (new module, 9 LOC); 13 send-tails/6 builders/139 idioms censused, keeps recorded in the R3.3 verdict table; battery green (520/528/293+2/56); strip-check 206/206; CI run#337 green on `518ba64` — see complete.md |
-| R3.4–R3.6 DRY | pending | see plan §7 R3 |
+| R3.4 page scaffolding | terminal (session 11) | census: hosting layer ALREADY shared (design:: hosts/page_header; 21/23 pages); the real repeat = the "Sync now" toolbar fragment byte-identical ×4 (dashboard/customers/reports/organizations) → `sync_health::sync_now_button` (button+hover+match+3 note strings in ONE place; re-read flag returns for the caller-side page-specific invalidate()); inbox variant, ensure_loaded latches, RANGES chip loops, LIST_CAP hint censused as keeps (R3.4 verdict table); +41/−97 across 5 files; battery green (520/528/293+2/56); strip-check 206/206 — see complete.md |
+| R3.5–R3.6 DRY | pending | see plan §7 R3 |
 | R4.1–R4.5 clean code | pending | see plan §7 R4 |
 | R5.1–R5.3 guardrails | pending (optional, stage-gated) | |
 | R6.1–R6.2 polish + close | pending | |
@@ -185,7 +171,66 @@ Checks: cargo machete (v0.9.2, installed ad hoc) now reports only the 3 document
 
 **R3.3 verdict summary:** the plan's "reqwest response parsing + JSON mapping duplication" letter resolves to THREE real consolidation classes (4+2 send tails, 122 flat string-extraction sites) + a wall of differing-contract keeps. HTTP surface census: 13 production send-tails, 6 client builders, 7 reqwest-using files + connection_doctor via the shared client.
 
+### R3.4 — page scaffolding (session 11; census: hosting layer already shared; ONE real repeat family)
+
+| candidate | sites | verdict | outcome |
+|---|---|---|---|
+| "Sync now" toolbar fragment (button_with_icon Refresh Outline + fixed hover + engine match + 3 note strings) | 4 byte-identical (dashboard 518, customers 328, reports 365, organizations 203) | consolidate | → `sync_health::sync_now_button(ui, db, engine, &mut sync_note) -> bool`; the bool is the None-arm re-read signal for the caller-side page-specific `invalidate()`; all five strings byte-verified identical old-vs-new programmatically (continuation-resolution + \u{2026} decode); the None-arm statement order flips (invalidate→note became note→invalidate via the flag return) — proven state-neutral: the four `invalidate()` impls (dashboard data=None, customers stale=true, organizations loaded/orgs/detail, reports overview/sla/lists) never touch `sync_note`, disjoint fields, and nothing reads page data between the two writes; pixel-neutral by construction (same widget calls, same order, same scope) |
+| inbox Sync button | 1 (inbox.rs ~1461) | keep | different policy: live label (`Syncing…`/`Sync now` by engine.is_running), different hover text (30 s-while-busy/backoff cadence), `&& let Some(engine)` guard (no None-arm invalidate), set_status_message channel with header-ring wording |
+| ensure_loaded latches | ~20 | keep | each latch condition IS the page's staleness policy (loaded flag / is_none / stale+reset / time-throttle+timestamp / composite search condition) — abstracting parameterizes policy = anti-DRY (D-17 discipline) |
+| RANGES chip loop | 2 (dashboard card + reports header) | keep | the RANGES table is already single-source (dashboard::RANGES pub(crate), reports imports it); the 5-line loop repeats with disjoint field paths (scope.days vs days) and closure-extraction is borrow-conflicted; a 2-site repeat below parameterization cost |
+| LIST_CAP + "first 200" hint | 1 (organizations) | keep | single site, no repeat |
+| host compositor / page_header / chips / cards / empty-state CTAs | already shared via design:: | keep | plan letter already satisfied by construction (session-10 prep: host_standard_page + host_inbox_page, one dispatch site app/mod.rs:848/852) |
+
+**R3.4 verdict summary:** the plan's "repeated page composition through the shared host compositor" letter resolves to ONE real consolidation — the 4× Sync-now fragment (25 lines each → 3-line calls + a 32-line helper; net −56: +41/−97 across 5 files). The pointer's 5-site estimate censused to 4 (inbox is a different policy). Dashboard's orphaned ButtonVariant import trimmed with the fold.
+
 ## Session log
+
+### Session 11 — 2026-11-13
+- Pre-flight: run#338 green on `ae64a25` (all four lanes — the
+  docs-only addendum head, the standard preflight gate). Sandbox was
+  reset again: the clone under /tmp/my-project was gone (an empty
+  dir remnant was all that survived of it); tool-results, rustup, and
+  cargo-home under /tmp/my-project DID survive. Re-cloned to the
+  canonical /home/z/SupportOS-Plus (handover §2's stated location —
+  also the only tree the file-edit tool reaches, G-12);
+  github-reconnect.sh needed the empty remnant removed first (its
+  exists-branch only re-sets the remote URL, so a leftover empty dir
+  silently skips the clone). Git identity + credentials re-applied by
+  the script.
+- Warm build ran detached (G-10 subshell form,
+  `cargo test --locked --workspace --no-run`) while the census
+  executed — the dependency compile came off the battery clock.
+- Census first (no scanner needed — the fragment shape is textual):
+  the "Sync now" toolbar fragment is byte-identical across exactly 4
+  pages (dashboard 518, customers 328, reports 365, organizations
+  203; the pointer's 5-site estimate included inbox, which censuses
+  OUT — different label policy, hover, guard, and status channel).
+  All other composition candidates censused to keeps (verdict table):
+  hosting already shared via design::, latches are policy, RANGES
+  already single-sourced with a 2-site loop, LIST_CAP single-site.
+- R3.4 executed: helper `sync_now_button` in sync_health.rs (32
+  lines: the button + hover + engine match + the three note strings,
+  returning the re-read flag); the 4 call sites became 3-line ifs;
+  the None-arm's invalidate() stays caller-side (page-specific). Net
+  +41/−97 across 5 files (−56). String byte-equality verified
+  programmatically — all five strings, old fragments vs helper,
+  including the \u{2026} ellipsis decode and the line-continuation
+  whitespace strip. Dashboard's ButtonVariant import orphaned by the
+  fold — trimmed.
+- Battery: gate clean, fmt --check clean, clippy workspace (3m46s) +
+  sandbox lane (1m10s) clean, catalog+xtask 56, app-shell 293+2
+  (287s), core 520 (501s), core-sandbox 528 (485s), verify-icons
+  verified, strip-check 206/206 — EXACT baselines held. G-05
+  preemptive incremental-rm before each test lane; disk never below
+  2.0G free.
+- One tooling incident during the call-site surgery: the first
+  python fragment-locator matched the fragment END before the block
+  had opened (a depth==0 precondition bug) and mangled three files
+  in one write; recovered via git checkout + the fixed script
+  (opened-flag guard); both runs re-verified with the Read tool.
+  No repo damage persisted.
+- Commit: `refactor(R3.4)` (this session); CI rides the push.
 
 ### Session 10 — 2026-11-13
 - Pre-flight: run#336 green on `ac63c83` (all four jobs verified via

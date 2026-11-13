@@ -3,7 +3,7 @@ use rusqlite::Connection;
 use spp_core::db::DbHandle;
 
 use crate::chart;
-use crate::design::{self, BadgeTone, ButtonVariant};
+use crate::design::{self, BadgeTone};
 use crate::icons::Icon;
 
 pub(crate) const RANGES: [(i64, &str); 4] = [
@@ -515,30 +515,8 @@ impl DashboardPage {
                 if !self.sync_note.is_empty() {
                     design::hint_text(ui, &self.sync_note);
                 }
-                if design::button_with_icon(ui, Icon::Refresh, "Sync now", ButtonVariant::Outline)
-                    .on_hover_text(
-                        "pull fresh data from Help Scout now — the completion toast \
-                     reports the outcome; the page re-reads on every sync anyway",
-                    )
-                    .clicked()
-                {
-                    match engine {
-                        Some(engine) => {
-                            if crate::pages::sync_health::spawn_sync_action(
-                                db,
-                                engine,
-                                crate::pages::sync_health::SyncAction::Incremental,
-                            ) {
-                                self.sync_note = "syncing\u{2026}".into();
-                            } else {
-                                self.sync_note = "a sync is already running".into();
-                            }
-                        }
-                        None => {
-                            self.invalidate();
-                            self.sync_note = "re-read the local mirror (no engine)".into();
-                        }
-                    }
+                if crate::pages::sync_health::sync_now_button(ui, db, engine, &mut self.sync_note) {
+                    self.invalidate();
                 }
             },
         );
