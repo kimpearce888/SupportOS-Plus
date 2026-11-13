@@ -37,7 +37,7 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 | R1.6 core/domain strip | done (session 3) | 479 whole lines + 1 inline comment removed from 26 of 122 files — core crate now 100% comment-free (135/135 cumulative); `core/tests/` in the plan is vacuous (tests are inline `#[cfg(test)]`); battery green (app-shell lane needed one G-05 disk retry); CI run#308 green |
 | R1.7 app-shell/infra strip | done (session 3) | 429 whole lines + 2 inline comments removed from 11 of 19 files; G-07 hit twice (comments had masked let_and_return in design/mod.rs + collapsible_if in workers_host.rs — fixed by behavior-identical restructure); cumulative subset check clean (154/154); battery green; CI run#309 green |
 | R1.8 app-shell/pages-A strip | done (session 3) | 864 whole lines + 1 inline comment removed from 7 of 7 pages (inbox 226, knowledge 150, outreach 157, custom_objects 132, settings 114, ai_center 55, reports 51); G-07 hit twice more (collapsible_if in custom_objects.rs + outreach.rs empty-state CTAs — same restructure fix); cumulative check 161/161 clean over stripped scopes; battery green; CI run#310 green |
-| R1.9 app-shell/pages-B strip | done (session 3) | 1011 whole lines + 1 inline comment removed from 44 of 51 scanned (16 pages + mod.rs + queries.rs + json_fields.rs + all 26 tests files); NO G-07 hits; whole-tree check crates 205/205 clean — the entire Rust source tree is comment-free; battery green (app-shell lane re-linked all 26 stripped kittest binaries); CI pending |
+| R1.9 app-shell/pages-B strip | done (session 3) | 1011 whole lines + 1 inline comment removed from 44 of 51 scanned (16 pages + mod.rs + queries.rs + json_fields.rs + all 26 tests files); NO G-07 hits; whole-tree check crates 205/205 clean — the entire Rust source tree is comment-free; battery green (app-shell lane re-linked all 26 stripped kittest binaries); CI run#311 green |
 | R1.10 comment closeout | pending | lint-attr cleanup + zero-check |
 | R2.1–R2.5 unnecessary code | pending | see plan §7 R2 |
 | R3.1–R3.6 DRY | pending | see plan §7 R3 |
@@ -148,7 +148,8 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
   + 5 inline comments removed, 5 G-07 masked-lint fixes (2 x
   let_and_return/collapsible_if in infra, 2 x collapsible_if empty-state
   CTAs in pages A, 0 in pages B), 3 G-05 disk retries, all four CI runs
-  green so far (308, 309, 310; R1.9's run kicked off at push).
+  green so far (308, 309, 310, 311 — the R1.9 run concluded green at
+  session close; all four heads CI-verified).
 
 ### Session 2 — 2026-11-12
 - Pre-flight: sandbox reset AGAIN (clone + toolchain gone) — re-provisioned
