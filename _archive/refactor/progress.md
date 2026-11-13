@@ -160,13 +160,17 @@ Checks: cargo machete (v0.9.2, installed ad hoc) now reports only the 3 document
   F-06), catalog+xtask 56, verify-icons verified, strip-check 205/205 —
   all green. G-05 managed preemptively (incremental rm between lanes;
   disk peaked 94% right after the app-shell link, back to 76% after rm).
-- G-10 discovered: a backgrounded cargo lane (`nohup … &`) DIED at the
-  end of the tool call that launched it — nohup does not survive the
-  call boundary in this sandbox (same class as the session-6 rustup
-  kill). Working pattern: repeated foreground windows at the max 10-min
-  timeout; cargo preserves compiled artifacts between killed runs, so a
-  cold lane grinds to completion across 2–3 windows. Recorded in
-  memory.md.
+- G-10 discovered and refined in-session: a `nohup … &`-launched cargo
+  lane DIED at the end of the tool call that launched it (same class as
+  the session-6 rustup kill; setsid+nohup also died). BUT the
+  subshell-detached form `(cmd > log 2>&1 &)` SURVIVES — proven with the
+  Next.js dev server across many later tool calls (incl. a full
+  agent-browser session; the sandbox preview console verified
+  end-to-end: tabs, 15 sliders w/ keyboard, register 35 rows w/ row
+  expansion, lightbox+Escape, mobile 375 no-hscroll, zero console
+  errors). Foreground-window iteration remains the fallback for cargo
+  lanes that outlive one 10-min window. Memory.md carries the refined
+  G-10.
 - Net diff: 6 source files + app-shell/Cargo.toml + Cargo.lock,
   +19/−62 in sources (+1 manifest line, +1 lock edge line). R3.1 done —
   the CI row rides this push; terminal confirmation + run id at the next

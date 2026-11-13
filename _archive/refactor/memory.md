@@ -332,15 +332,18 @@ session ends by adding what the next session must not have to rediscover.
   freezes. Ammonia usage here: core/src/richtext.rs one Builder for
   sanitize_html (customer-visible rich text), so the advisory is
   genuinely reachable — patch, never ignore.
-- **G-10 (session 8).** Background processes DIE at tool-call end in this
-  sandbox — `nohup cmd & log` does not survive the call boundary (bit the
-  session-6 rustup install; re-confirmed session 8 with a backgrounded
-  clippy lane that died mid-dependency-compile with zero errors in its
-  log and zero log growth between polls). Working pattern for long lanes:
-  repeated FOREGROUND windows at the max 10-min tool timeout — cargo
-  preserves compiled artifacts between killed runs, so a cold lane grinds
-  to completion across 2–3 windows. Never plan on launching-then-polling
-  a backgrounded build.
+- **G-10 (session 8; refined same session).** Background-process survival
+  depends on the LAUNCH FORM. PROVEN WORKING: the subshell-detached form
+  `(cmd > log 2>&1 &)` — a Next.js dev server launched this way survived
+  across many subsequent tool calls (verified repeatedly, incl. through
+  an agent-browser session). PROVEN DYING at tool-call end: `nohup cmd &`
+  and `setsid nohup cmd &` (the session-6 rustup install; session-8's
+  first clippy attempt and first dev-server attempt — both died with
+  zero errors in their logs). For long cargo lanes the foreground-window
+  pattern (repeated 10-min windows; artifacts persist between killed
+  runs) remains the fallback when a lane outlives one window. Do not
+  generalize from the nohup deaths to "all backgrounding is impossible" —
+  use the subshell form and verify survival on the first poll.
 
 ## Open questions / deferred owner decisions
 
