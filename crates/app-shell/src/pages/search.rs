@@ -117,7 +117,7 @@ impl SearchPage {
         ui.horizontal(|ui| {
             let mut query = self.query_edit.clone();
             let response = ui.add_sized(
-                [320.0, 28.0],
+                [320.0, design::scale::CONTROL_H],
                 egui::TextEdit::singleline(&mut query).hint_text("Search…"),
             );
             if response.changed() {
@@ -152,7 +152,7 @@ impl SearchPage {
         design::divider(ui);
 
         if let Some(err) = &self.error {
-            design::error_text(ui, &format!("error: {err}"));
+            design::error_note(ui, err);
             return None;
         }
         let Some(response) = &self.response else {

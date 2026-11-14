@@ -544,9 +544,12 @@ impl SyncHealthPage {
                         design::td_num(ui, &cp.records_processed.to_string());
                         design::td_num(ui, &cp.records_failed.to_string());
                         design::td_num(ui, &cp.retry_count.to_string());
-                        let last = cp.last_success_at.clone().unwrap_or_else(|| "—".into());
+                        let last = cp
+                            .last_success_at
+                            .clone()
+                            .unwrap_or_else(|| design::MISSING_VALUE.into());
                         ui.monospace(egui::RichText::new(last.as_str()).size(12.5))
-                            .on_hover_text(if last == "—" {
+                            .on_hover_text(if last == design::MISSING_VALUE {
                                 "This resource has never completed a sync.".to_string()
                             } else {
                                 format!("{} ({})", last, crate::pages::relative_time(&last))

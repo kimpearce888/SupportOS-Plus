@@ -179,6 +179,8 @@ pub(crate) fn tokens_for(ctx: &egui::Context) -> &'static Tokens {
     }
 }
 
+pub(crate) const MISSING_VALUE: &str = "—";
+
 pub mod scale {
     pub(crate) mod space {
         pub(crate) const SP1: f32 = 4.0;
@@ -211,6 +213,8 @@ pub mod scale {
     }
     pub const CONTENT_MAX: f32 = 1800.0;
     pub const READER_MEASURE: f32 = 860.0;
+    pub(crate) const CONTROL_H: f32 = 28.0;
+    pub(crate) const ROW_H: f32 = 32.0;
 }
 
 pub fn install(ctx: &egui::Context) {
@@ -664,7 +668,7 @@ pub(crate) fn segmented(
                         f32::INFINITY,
                         egui::TextStyle::Button,
                     );
-                    let size = egui::vec2(galley.size().x + 22.0, 28.0);
+                    let size = egui::vec2(galley.size().x + 22.0, scale::CONTROL_H);
                     let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
                     if on {
                         let r = egui::CornerRadius::same(scale::radius::CONTROL - 2);
@@ -1435,6 +1439,10 @@ pub(crate) fn error_text(ui: &mut egui::Ui, text: &str) {
             .small()
             .color(tokens(ui).destructive_text),
     );
+}
+
+pub(crate) fn error_note(ui: &mut egui::Ui, err: &str) {
+    error_text(ui, &format!("error: {err}"));
 }
 
 pub(crate) fn divider(ui: &mut egui::Ui) {

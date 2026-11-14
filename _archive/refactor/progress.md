@@ -1,34 +1,36 @@
 # Refactor Progress — Live State
 
-Last updated: session 16 (2026-11-14). Update rule: every session updates
+Last updated: session 17 (2026-11-14). Update rule: every session updates
 this file before ending. Statuses: `pending` / `in_progress` / `done` /
 `terminal` (done + closed in `complete.md`) / `dropped` (with reason in
 `memory.md`).
 
 ## CURRENT POINTER
 
-- Next task: **R4.4 — magic values → catalog constants** (plan §7 R4).
-  Census-first per the standing discipline (NINE consecutive corrections
-  so far — R4.3's 222 census candidates censused to 82 honest
-  downgrades once rustc's reachability had its say): scan for
-  production-literal repetition (numeric/string literals repeated
-  across modules where one catalog constant wants to own them) BEFORE
-  sizing the batch; fold only groups where the values are the SAME
-  policy (D-17's coincidental-value ruling from R3.6 stands — three
-  unrelated 200s are three policies, not a constant). R4.5 (file splits
-  for the >2K-line files) queues behind it.
-- Pre-flight [session 16]: run#349 (id 43621514210) green on `71f462d`
-  (the session-15 addendum head — the standard docs-only preflight
-  gate). R4.3 executed on that green base and is now itself CI-VERIFIED
-  (same session): run#350 (id 43633543056) green on `f005d49`, all four
-  lanes incl. the kittest snapshot drift gate — 203 goldens
-  byte-identical, pixel-neutrality confirmed for the prefix-only batch.
-  R4.3 TERMINAL; see `complete.md`. Green base for R4.4: this addendum
-  head's own docs-only run (the standard next-session preflight gate).
-- Session counter: 16 completed (R1 terminal; R2 TERMINAL; R3 TERMINAL
+- Next task: **R4.5 — file splits for the >2K-line files** (plan §5.3/§7
+  R4; the last R4 item — R4.4 is executed, battery-green, CI rides this
+  push). Census-first per the standing discipline (TEN consecutive
+  corrections — R4.4's 7,823 production numeric + 17,350 production string
+  occurrences censused to SIX same-policy families / 166 sites; see the
+  R4.4 verdict table): re-measure the CURRENT line counts (the R1 strip +
+  R4.2 decompositions shrank the plan's session-1 list — inbox 4715,
+  settings 3316, workers/mod 2826, ai_pipeline/mod 2780, design/mod 2698,
+  helpscout_real/mod 2675, knowledge 2647, workers/execute 2537, reports
+  2374, ai_center 2299 are all stale), split along EXISTING module seams
+  (mechanical moves only — D-23's flat-manifest ruling warns against
+  artificial seams), D-06 (kittest suite/fn names stable), the CI kittest
+  drift gate verifies pixel-neutrality (moves are pixel-neutral by
+  construction). After R4.5: R5 is optional owner-gated (Q-01); R6
+  close-out.
+- Pre-flight [session 17]: run#351 (id 43635267151) green on `8f41c19`
+  (the session-16 addendum head — the standard docs-only preflight
+  gate). R4.4 executed on that green base; its own CI verification rides
+  the push at session end (the standard hand-off).
+- Session counter: 17 completed (R1 terminal; R2 TERMINAL; R3 TERMINAL
   — R3.1 run#332, R3.2 run#335, R3.3 run#337, R3.4 run#339, R3.5
   zero-motion run#341, R3.6 run#342; R4.1 run#344; R4.2-a run#346;
-  R4.2-b run#348 — R4.2 TERMINAL; R4.3 run#350 — R4.3 TERMINAL).
+  R4.2-b run#348 — R4.2 TERMINAL; R4.3 run#350 — R4.3 TERMINAL; R4.4
+  executed session 17, CI rides this push).
 - Environment: session 16 was ANOTHER full reset — repo re-cloned via
   github-reconnect.sh; toolchain SURVIVED at /tmp/my-project/
   {rustup,cargo-home} (exports re-applied per bash call per §3); core
@@ -70,7 +72,8 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 | R4.2 decomposition (batch a) | done (session 14) | census (r42_census.py, cfg-aware fn-span scanner): 3,277 prod fns / 991 test fns; top-20 censused; 6 CORE mega-fns split (execute 1051→79 dispatch + 22 tool fns; derived_edges_touching 686→26 + 11 Kind fns + 4 module helpers + 2 epilogue fns; apply_m046 405→15 manifest + ensure_fk + 10 data consts; execute_job 3 fat arms→3 methods incl. embed×3 fold; build_support_health_report 465→34 manifest + 9 domain fns; analyze_friction 410→manifest + 6 finding fns + finding helper); 6 keeps + 11 queued to R4.2-b (verdict table below); battery green (520/528/293+2/56, clippy ×2, gate, icons, strip 207/207); CI run#346 green on `fa03cad` (all 4 lanes incl. kittest drift gate); D-23 |
 | R4.2 decomposition (batch b) | done (session 15) | all 11 queued fns split: execute_outbound 390→~86-line dispatcher + 6 send_* arm methods + payload_num/payload_str_or module fns (closures promoted per the batch-a recipe); sync_resource 331→19-arm dispatcher table + 16 sync_* methods (conversations/threads delegations + the `customers` since-seam + the unknown-resource fallback stay inline); incidents ui 527→~180 dispatcher + filter_controls/empty_list_ui/lifecycle_card_ui/linked_column_ui/info_column_ui methods + incident_row/incident_detail_header module fns; ai_center hub_ui 481→35-line dispatcher + 8 methods (endpoints card/row/key-edit/price/add-form/roles/features/ledger); organizations ui 393→~170 dispatcher + org_form_card_ui method + org_row/org_detail_header_ui/members_card_ui module fns; inbox list_ui→search_filter_ui/list_toolbar_ui/conversation_rows_ui methods, copilot_pane_ui→copilot_cards_ui/copilot_lmstudio_ui/assistant_ui methods, composer_pane_ui→enqueue_composer_tool/apply_composer_act/mention_popup_ui methods + composer_tool_row module fn + ToolAction enum hoisted to module scope; settings helpscout_ui→4 card methods; diagnostics ui→event_log_card_ui method + audit_trail/sync_reports/outbound_deliveries_card_ui module fns; design composer→composer_header_row/composer_footer_row module fns; ALL 4 too_many_lines allows deleted (every post-split fn under the 100-line threshold — clippy -D warnings green); battery green at EXACT baselines (520/528/293+2/56, clippy ×2, gate, icons, strip 207/207); pixel-neutrality verified locally by the widget-call multiset comparison (design::/ui. call multisets byte-identical old-vs-new on all 9 files after fixes — D-24); the CI kittest drift gate rides this push; D-23/D-24 |
 | R4.3 visibility | terminal (session 16) | CI run#350 green — see `complete.md` |
-| R4.4–R4.5 clean code | pending | see plan §7 R4; R4.4 queued (census-first) |
+| R4.4 magic values | done (session 17) | census (r44_census.py: 7,823 prod numeric + 17,350 prod string occs) — TENTH consecutive correction: SIX same-policy families / 166 sites folded (catalog::NO_SUBJECT ×14 cross-crate; design::MISSING_VALUE ×38 incl. the `== "—"` sentinel comparator; design::error_note ×17 byte-identical sites; design::scale::CONTROL_H ×72 single-line control heights; design::scale::ROW_H replacing the 3 identical page-local ROW_HEIGHT decls; coaching::EXCERPT_CAP ×15 private); everything else = keeps (verdict table below — coincidental values, wire vocab, algorithm constants, serde attr machinery, per-site layout); battery green at EXACT baselines (520/528/293/56, clippy ×2, gate, icons, strip 207/207); 30 files +254/−184; CI rides the push — see complete.md for the terminal entry |
+| R4.5 file splits | pending | see plan §5.3/§7 R4; census-first (re-measure current line counts — the session-1 list is stale) |
 | R5.1–R5.3 guardrails | pending (optional, stage-gated) | |
 | R6.1–R6.2 polish + close | pending | |
 
@@ -315,7 +318,78 @@ internal error.
 
 **R4.3 verdict summary:** the NINTH consecutive census correction — the plan's "minimize pub" letter resolved to 82 honest downgrades + ~140 compile-proven keeps + 9 dead deletions; the compile loop IS the visibility arbiter (rustc's effective-reachability computation sees signature/transitive/inference exposure no token census can). Net pub surface −90 (8%), 40 files, +101/−321 (net −220: the dead code the pub veil had hidden). Battery green at exact baselines; pixel-neutral by construction (no widget-call motion — D-24's multiset check unnecessary for prefix-only edits, CI kittest drift gate rides the push).
 
+### R4.4 — magic values (session 17; census-first: scanner r44_census.py in tool-results — the G-08/G-14 char-level walk lifted from r43, extended to COLLECT string-literal values + numeric literals from the sanitized text + `.take(N)`/SQL-`LIMIT N` idiom overlays + a const-initializer inventory so already-named values are distinguishable from raw call-site literals)
+
+**Census (7,823 production numeric occurrences / 456 distinct values; 17,350 production string occurrences / 8,739 distinct):** the tree was overwhelmingly honest — the same-policy set is SIX families / 166 sites. The D-17 coincidental-value ruling (same number ≠ same policy) dissolved every large group: 200/500 mixes HTTP statuses with truncation caps and SQL LIMITs; 365/3600/86400 are civil-date ALGORITHM constants; 250 is mostly rgb() palette components; 32.0 spans five unrelated height policies.
+
+| family | sites | verdict | outcome |
+|---|---|---|---|
+| `"(no subject)"` display fallback | 14 / 10 files / 2 crates | merge → catalog | `catalog::NO_SUBJECT` (root const, cross-crate per the R3.6 placement rule); core sites `crate::catalog::NO_SUBJECT` (10), shell sites `spp_core::catalog::NO_SUBJECT` (4); byte-identical output on every unwrap_or/unwrap_or_else form |
+| `"—"` missing-value placeholder | 38 / 11 files / 1 crate | merge → design | `design::MISSING_VALUE` (pub(crate) root const); includes the sync_health `== "—"` SENTINEL COMPARISON (producer + comparator now single-sourced — the strongest DRY case in the batch) and the diagnostics `(BadgeTone::Neutral, "—")` tuple arm; single-crate → design home per the D-19 architecture |
+| `"error: {err}"` page-error note | 17 / 17 files | merge → design | `design::error_note(ui, err)` — all 17 sites were byte-identical `error_text(ui, &format!("error: {err}"))` calls (R3.4-shaped fragment fold); `error_text` stays for custom messages |
+| `28.0` single-line control height | 72 / 26 files | merge → scale | `design::scale::CONTROL_H` (pub(crate), scale root beside CONTENT_MAX): 66 `[w, 28.0]` add_sized arrays + 3 data_table row-height args + 2 inbox row/frame allocations + 1 design chip height. KEEPS: `AvatarSize::Md => 28.0` (avatar-scale DATUM, not the control-height policy — D-17) and design:2111's `+ 28.0` horizontal pad |
+| `32.0` page-local `ROW_HEIGHT` decls | 3 identical consts (incidents/customers/organizations) + 11 refs | merge → scale | `design::scale::ROW_H` (pub(crate)); three same-named same-valued same-role consts were one policy; the OTHER 32.0s (egui interact_size, button heights, inbox taller inputs, composer) are separate policies sharing the number — keep (D-17) |
+| `240` coaching excerpt cap | 15 (checks ×13 + mod ×2) | merge → module-local | `coaching::EXCERPT_CAP` (private; checks.rs sees it via its `use super::*`); KEEPS: search/mod.rs:422 `take(240)` (search-chunk snippet cap) and ai_pipeline/interaction.rs:425 `take(240)` (analysis excerpt) — coincidental values, different policies |
+| civil-date algorithm constants (146_097/719_468/400/365/3600/86400) | ~30 / 6 files | keep | the Howard Hinnant civil_from_days family — algorithm DATA, not domain policy; naming them adds indirection without meaning |
+| HTTP status literals (200/404/409/503…) | ~30 sites | keep | wire-protocol vocabulary, self-documenting at the match ladders; the R3.6 DB-DDL ruling extends: protocol constants are not domain magic |
+| `.take(N)` truncation caps, other values (200/300/400/500/8000/1200/2000…) | ~80 sites | keep | per-site prompt/display budget knowledge; values coincide across consumers (D-17's three-unrelated-200s ruling); audit's 2-site 4000 pair is below the cross-module bar; D-18's deferred truncation-idiom note stays deferred (Q-03 family) |
+| `LIMIT N` SQL caps | ~120 sites | keep | per-query policy; SQL strings stay literal (R3.6 DDL ruling: format!-parameterizing SQL is anti-DRY and drift fails closed+loud) |
+| `rgb()` palette components | ~500 numeric sites | keep | palette DATA already owned by the named LIGHT/DARK token tables — the components are the tokens' definitions |
+| wire-vocab strings (`'status'`/`'id'`/`'created_at'`/`'conversationId'`…) | thousands | keep | invariant 5: serde fields/DB columns/JSON keys are vocabulary, not magic |
+| domain word comparisons (`== "high"` etc., 6 words) | 25 sites | keep | different domain DIMENSIONS sharing English words (confidence-high vs priority-high vs friction-high); the owning enums' as_str() are single-sourced in catalog; folding 25 scattered comparisons of six free-form wire fields is semantic-risk churn, not DRY |
+| serde attribute strings (`'Option::is_none'` ×63, `'snake_case'` ×18) | 81 | keep | macro-machinery spelling required by serde's attribute API (skip_serializing_if / rename_all) |
+| UI action labels (`'Cancel'` ×17 / `'Edit'` ×13 / `'Delete'` ×12) | 42 | keep (Q-06) | action-label PROSE: design::button is the single-sourced renderer, the label is the datum (D-23's indirection-without-abstraction ruling); the crisp line vs the folds above: fallback/SENTINEL strings are data (compared/reused as values — they folded); rendered-once words are prose. Q-06 records the owner option to fold them |
+| icons.rs geometry coordinates | ~289 numeric sites | keep | per-icon drawing data (paths/quads/dots at literal coordinates) — not sizing policy |
+| remaining pixel values (12.0/16.0/220.0/320.0/…) | ~1,500 sites | keep | per-site layout knowledge; the token system (space/text/radius + now CONTROL_H/ROW_H) owns the REUSABLE dims; a call-site 16.0 meaning icon-pixels or a width is not SP4's policy (D-17) |
+
+**R4.4 verdict summary:** the TENTH consecutive census correction — the plan's "magic values become named constants" letter resolved to 6 folds / 166 sites out of 7,823+17,350 production literal occurrences. All folds value-identical (const value byte-equals the replaced literal) → pixel-neutral BY CONSTRUCTION; the CI kittest drift gate is the verifier. 30 files +254/−184 after fmt (reflow accounted); battery green at EXACT baselines (520/528/293/56, clippy ×2, gate, icons, strip 207/207). New policy recorded as memory D-26; the action-label option recorded as Q-06.
+
 ## Session log
+
+### Session 17 — 2026-11-14
+- Pre-flight: run#351 (id 43635267151) green on `8f41c19` (the session-16
+  addendum head — the standard docs-only preflight gate).
+- Environment: FULL reset again — the repo at /home/z/SupportOS-Plus was
+  GONE (re-cloned via github-reconnect.sh; the toolchain again survived
+  at /tmp/my-project/{rustup,cargo-home}, exports re-applied per bash
+  call). Context-recovery note: the session-17 handover summary was the
+  SAME stale R2.5-era ammonia text session 16 received (describing the
+  long-closed ammonia battery mid-run) — the ledger was the source of
+  truth again; recovery via plan §8.1 read order; the ammonia episode
+  closed at `ea089b0` (G-09), R2.5 through R4.3 all terminal since.
+- R4.4 executed (magic values, census-first): scanner r44_census.py
+  (G-08/G-14 char-level walk + literal collection + take/LIMIT idiom
+  overlays + const-initializer inventory). TENTH consecutive census
+  correction: 7,823 prod numeric / 17,350 prod string occurrences → SIX
+  same-policy families / 166 sites; every large group dissolved under
+  D-17 (200/500 = status+cap+LIMIT mixes; 365/3600/86400 = civil-date
+  algorithm; 250 = rgb components; 32.0 = five unrelated height
+  policies). Verdict table above records the 16 family rulings.
+- Folds: catalog::NO_SUBJECT (root const; 14 sites cross-crate);
+  design::MISSING_VALUE (pub(crate); 38 sites incl. the `== "—"`
+  sentinel comparator — producer + comparator single-sourced);
+  design::error_note (17 byte-identical error_text+format sites);
+  design::scale::CONTROL_H (72 single-line control-height sites; avatar
+  datum + horizontal pad kept); design::scale::ROW_H (the 3 identical
+  page-local ROW_HEIGHT decls + 11 refs); coaching::EXCERPT_CAP
+  (private, 15 sites; search/interaction 240s kept as coincidental).
+- Apply via r44_apply.py: 54 pattern groups with hard per-pattern count
+  asserts, atomic write-after-all-asserts-pass; all asserts passed on
+  first run (G-12 discipline — input proven, then compile + battery
+  prove output); 30 files, +254/−184 after fmt (reflow accounted).
+- Battery: gate clean; fmt --check clean; clippy workspace 51s + sandbox
+  58s (-D warnings) clean; core lib 520 ✓ (446s), sandbox 528 ✓ (476s),
+  app-shell 293 ✓ (268s), catalog 0 + xtask 56 ✓, verify-icons ✓,
+  strip-comments --check 207/207 ✓. G-05 applied before link-heavy
+  lanes (disk peaked 72%); the cold workspace check needed the G-10
+  foreground-window continuation once (artifacts persisted).
+- Diff class review: every hunk = a const/fn introduction, a
+  literal→const-path replacement, or a rustfmt reflow — value-identical
+  by construction (pixel-neutral; the CI kittest drift gate rides this
+  push as the verifier, F-06).
+- Commits: code + ledger (D-08). CI verification of the R4.4 head rides
+  the push; the terminal entry lands in complete.md at addendum time
+  once green.
 
 ### Session 16 — 2026-11-14
 - Pre-flight: run#349 (id 43621514210) green on `71f462d` (the session-15

@@ -235,7 +235,7 @@ impl LiveChatsPage {
             chat.last_event_at
                 .as_deref()
                 .map(compact_chat_time)
-                .unwrap_or_else(|| "—".into())
+                .unwrap_or_else(|| design::MISSING_VALUE.into())
         );
         let a11y = format!("chat with {title} — {}", chat.state);
         let t = design::tokens(ui);
@@ -397,7 +397,7 @@ impl LiveChatsPage {
                 chat.last_event_at
                     .as_deref()
                     .map(compact_chat_time)
-                    .unwrap_or_else(|| "—".into())
+                    .unwrap_or_else(|| design::MISSING_VALUE.into())
             )),
             |ui| {
                 ui.horizontal(|ui| {
@@ -601,7 +601,7 @@ fn message_card_ui(ui: &mut egui::Ui, message: &MirrorMessage) {
         .created_at
         .as_deref()
         .map(compact_chat_time)
-        .unwrap_or_else(|| "—".into());
+        .unwrap_or_else(|| design::MISSING_VALUE.into());
     let time = time.as_str();
     let body = message.text.as_deref().unwrap_or("(no text)");
     design::message_card_with(

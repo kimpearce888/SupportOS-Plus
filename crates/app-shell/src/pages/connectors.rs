@@ -440,7 +440,7 @@ impl ConnectorsPage {
             design::success_text(ui, &format!("status: {message}"));
         }
         if let Some(err) = &self.error {
-            design::error_text(ui, &format!("error: {err}"));
+            design::error_note(ui, err);
         }
         design::divider(ui);
 
@@ -478,8 +478,8 @@ impl ConnectorsPage {
                     let kind = str_field(record, "kind");
                     let health = str_field(record, "health");
                     let refresh_method = str_field(record, "refresh_method");
-                    let last_sync =
-                        opt_str_field(record, "last_sync_at").unwrap_or_else(|| "—".into());
+                    let last_sync = opt_str_field(record, "last_sync_at")
+                        .unwrap_or_else(|| design::MISSING_VALUE.into());
                     let last_sync_rows = record.get("last_sync_rows").and_then(|v| v.as_i64());
                     let sync_label = match last_sync_rows {
                         Some(n) => format!("{last_sync} · {n} rows"),
@@ -567,7 +567,7 @@ impl ConnectorsPage {
             ui.horizontal(|ui| {
                 let mut q = rows_query;
                 let response = ui.add_sized(
-                    [220.0, 28.0],
+                    [220.0, design::scale::CONTROL_H],
                     egui::TextEdit::singleline(&mut q).hint_text("search rows…"),
                 );
                 if response.changed() {
@@ -617,7 +617,7 @@ impl ConnectorsPage {
             design::form_grid(ui, "connector-new", |ui| {
                 let name_label = design::field_label(ui, "Name");
                 ui.add_sized(
-                    [220.0, 28.0],
+                    [220.0, design::scale::CONTROL_H],
                     egui::TextEdit::singleline(&mut self.new_name).hint_text("connector name"),
                 )
                 .labelled_by(name_label.id);
@@ -635,7 +635,7 @@ impl ConnectorsPage {
                     Kind::Csv => {
                         let file_label = design::field_label(ui, "File (data dir)");
                         ui.add_sized(
-                            [260.0, 28.0],
+                            [260.0, design::scale::CONTROL_H],
                             egui::TextEdit::singleline(&mut self.new_file).hint_text("billing.csv"),
                         )
                         .on_hover_text("relative to the app data directory")
@@ -645,7 +645,7 @@ impl ConnectorsPage {
                     Kind::Http => {
                         let url_label = design::field_label(ui, "Url");
                         ui.add_sized(
-                            [280.0, 28.0],
+                            [280.0, design::scale::CONTROL_H],
                             egui::TextEdit::singleline(&mut self.new_url).hint_text("https://…"),
                         )
                         .labelled_by(url_label.id);
@@ -654,7 +654,7 @@ impl ConnectorsPage {
                 }
                 let refresh_label = design::field_label(ui, "Refresh seconds");
                 ui.add_sized(
-                    [140.0, 28.0],
+                    [140.0, design::scale::CONTROL_H],
                     egui::TextEdit::singleline(&mut self.new_refresh_seconds).hint_text("3600"),
                 )
                 .labelled_by(refresh_label.id);
@@ -686,7 +686,7 @@ impl ConnectorsPage {
                         AuthMode::Header => {
                             let hn_label = design::field_label(ui, "Header name");
                             ui.add_sized(
-                                [180.0, 28.0],
+                                [180.0, design::scale::CONTROL_H],
                                 egui::TextEdit::singleline(&mut self.new_header_name)
                                     .hint_text("X-Api-Key"),
                             )
@@ -694,7 +694,7 @@ impl ConnectorsPage {
                             ui.end_row();
                             let hv_label = design::field_label(ui, "Header value");
                             ui.add_sized(
-                                [260.0, 28.0],
+                                [260.0, design::scale::CONTROL_H],
                                 egui::TextEdit::singleline(&mut self.new_header_value)
                                     .hint_text("the API key value"),
                             )
@@ -704,7 +704,7 @@ impl ConnectorsPage {
                         AuthMode::Bearer => {
                             let token_label = design::field_label(ui, "Bearer token");
                             ui.add_sized(
-                                [280.0, 28.0],
+                                [280.0, design::scale::CONTROL_H],
                                 egui::TextEdit::singleline(&mut self.new_token)
                                     .hint_text("the bearer token"),
                             )

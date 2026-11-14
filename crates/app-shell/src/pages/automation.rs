@@ -417,7 +417,7 @@ impl AutomationPage {
             },
         );
         if let Some(err) = &self.error {
-            design::error_text(ui, &format!("error: {err}"));
+            design::error_note(ui, err);
         }
         design::divider(ui);
 
@@ -642,7 +642,7 @@ impl AutomationPage {
             design::form_grid(ui, "automation-new-rule", |ui| {
                 design::field_label(ui, "Name");
                 ui.add_sized(
-                    [220.0, 28.0],
+                    [220.0, design::scale::CONTROL_H],
                     egui::TextEdit::singleline(&mut self.new_name).hint_text("rule name"),
                 );
                 ui.end_row();
@@ -693,7 +693,7 @@ impl AutomationPage {
                     ActionKind::AddTag => {
                         design::field_label(ui, "Tag");
                         ui.add_sized(
-                            [180.0, 28.0],
+                            [180.0, design::scale::CONTROL_H],
                             egui::TextEdit::singleline(&mut self.action_tag).hint_text("tag"),
                         );
                         ui.end_row();
@@ -701,7 +701,7 @@ impl AutomationPage {
                     ActionKind::SendNote => {
                         design::field_label(ui, "Note body");
                         ui.add_sized(
-                            [260.0, 28.0],
+                            [260.0, design::scale::CONTROL_H],
                             egui::TextEdit::singleline(&mut self.action_note)
                                 .hint_text("note body"),
                         );

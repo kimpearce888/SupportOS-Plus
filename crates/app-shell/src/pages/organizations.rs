@@ -5,7 +5,6 @@ use super::{ConfirmRequest, NavRequest, i64_field, opt_str_field, str_field};
 use crate::design::{self, AvatarSize, BadgeTone, ButtonVariant};
 use crate::icons::Icon;
 
-const ROW_HEIGHT: f32 = 32.0;
 const LIST_CAP: usize = 200;
 
 pub struct OrganizationsPage {
@@ -215,7 +214,7 @@ impl OrganizationsPage {
             |ui| {
                 let mut edit = self.filter_edit.clone();
                 let response = ui.add_sized(
-                    [260.0, 28.0],
+                    [260.0, design::scale::CONTROL_H],
                     egui::TextEdit::singleline(&mut edit).hint_text("Filter by name…"),
                 );
                 if response.changed() {
@@ -229,7 +228,7 @@ impl OrganizationsPage {
             self.reload(db);
         }
         if let Some(err) = &self.error {
-            design::error_text(ui, &format!("error: {err}"));
+            design::error_note(ui, err);
         }
         if let Some(msg) = &self.message {
             design::status_line(ui, true, msg);
@@ -254,7 +253,7 @@ impl OrganizationsPage {
                 "organizations",
                 &["Organization", "Domains", "Customers", "Conversations", ""],
                 orgs.len(),
-                ROW_HEIGHT,
+                design::scale::ROW_H,
                 |ui, i| {
                     let (pick_id, edit_req, delete_req) = org_row(ui, &orgs[i]);
                     if pick_id.is_some() {
@@ -371,7 +370,7 @@ impl OrganizationsPage {
                 design::form_row(ui, "Name", |ui| {
                     let mut name = self.new_name.clone();
                     let response = ui.add_sized(
-                        [240.0, 28.0],
+                        [240.0, design::scale::CONTROL_H],
                         egui::TextEdit::singleline(&mut name).hint_text("Name"),
                     );
                     if response.changed() {
@@ -382,7 +381,7 @@ impl OrganizationsPage {
                     let mut domains = self.new_domains.clone();
                     let response = ui
                         .add_sized(
-                            [240.0, 28.0],
+                            [240.0, design::scale::CONTROL_H],
                             egui::TextEdit::singleline(&mut domains).hint_text("acme.com, acme.io"),
                         )
                         .on_hover_text("comma-separated domains");
@@ -488,7 +487,7 @@ fn org_row(
         true,
     );
     ui.allocate_ui_with_layout(
-        egui::vec2(200.0, ROW_HEIGHT),
+        egui::vec2(200.0, design::scale::ROW_H),
         egui::Layout::left_to_right(egui::Align::Center),
         |ui| {
             if design::button(ui, "Open", ButtonVariant::Outline)
@@ -657,7 +656,7 @@ fn dt_cell(ui: &mut egui::Ui, width: f32, text: egui::RichText, align_right: boo
     } else {
         egui::Layout::left_to_right(egui::Align::Center)
     };
-    ui.allocate_ui_with_layout(egui::vec2(width, ROW_HEIGHT), layout, |ui| {
+    ui.allocate_ui_with_layout(egui::vec2(width, design::scale::ROW_H), layout, |ui| {
         ui.add(egui::Label::new(text).truncate());
     });
 }

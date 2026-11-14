@@ -688,7 +688,7 @@ impl CustomObjectsPage {
             design::page_counter(ui, &format!("{} types", self.types.len()));
         });
         if let Some(err) = &self.error {
-            design::error_text(ui, &format!("error: {err}"));
+            design::error_note(ui, err);
         }
         design::divider(ui);
 
@@ -804,7 +804,7 @@ impl CustomObjectsPage {
             |ui| {
                 let mut q = self.object_query.clone();
                 let response = ui.add_sized(
-                    [220.0, 28.0],
+                    [220.0, design::scale::CONTROL_H],
                     egui::TextEdit::singleline(&mut q).hint_text("search objects…"),
                 );
                 if response.changed() {
@@ -922,7 +922,7 @@ impl CustomObjectsPage {
                                 )
                                 .on_hover_text("what to link this object to");
                                 ui.add_sized(
-                                    [80.0, 28.0],
+                                    [80.0, design::scale::CONTROL_H],
                                     egui::TextEdit::singleline(&mut draft.id)
                                         .hint_text("target id"),
                                 )
@@ -930,7 +930,7 @@ impl CustomObjectsPage {
                                     "the row id of the customer, organization, conversation…",
                                 );
                                 ui.add_sized(
-                                    [120.0, 28.0],
+                                    [120.0, design::scale::CONTROL_H],
                                     egui::TextEdit::singleline(&mut draft.note)
                                         .hint_text("note (optional)"),
                                 );
@@ -1006,7 +1006,7 @@ impl CustomObjectsPage {
             |ui| {
                 let title_label = design::field_label(ui, "Title");
                 ui.add_sized(
-                    [ui.available_width(), 28.0],
+                    [ui.available_width(), design::scale::CONTROL_H],
                     egui::TextEdit::singleline(&mut self.new_object_title)
                         .hint_text("object title"),
                 )
@@ -1014,7 +1014,7 @@ impl CustomObjectsPage {
                 for (idx, key) in keys.iter().enumerate() {
                     let label = design::field_label(ui, &format!("{key}:"));
                     ui.add_sized(
-                        [180.0, 28.0],
+                        [180.0, design::scale::CONTROL_H],
                         egui::TextEdit::singleline(&mut self.new_object_fields[idx].1),
                     )
                     .labelled_by(label.id);
@@ -1037,14 +1037,14 @@ impl CustomObjectsPage {
                         )
                         .on_hover_text("what to link the new object to");
                         ui.add_sized(
-                            [90.0, 28.0],
+                            [90.0, design::scale::CONTROL_H],
                             egui::TextEdit::singleline(&mut link_id).hint_text("target id"),
                         )
                         .on_hover_text(
                             "the row id to link — e.g. the customer id; leave empty for no link",
                         );
                         ui.add_sized(
-                            [140.0, 28.0],
+                            [140.0, design::scale::CONTROL_H],
                             egui::TextEdit::singleline(&mut link_note).hint_text("note (optional)"),
                         );
                     });
@@ -1088,14 +1088,14 @@ impl CustomObjectsPage {
             design::form_grid(ui, "co-new-type", |ui| {
                 let name_label = design::field_label(ui, "Name");
                 ui.add_sized(
-                    [220.0, 28.0],
+                    [220.0, design::scale::CONTROL_H],
                     egui::TextEdit::singleline(&mut self.new_type_name).hint_text("type name"),
                 )
                 .labelled_by(name_label.id);
                 ui.end_row();
                 let desc_label = design::field_label(ui, "Description");
                 ui.add_sized(
-                    [260.0, 28.0],
+                    [260.0, design::scale::CONTROL_H],
                     egui::TextEdit::singleline(&mut self.new_type_description)
                         .hint_text("what this type collects"),
                 )
@@ -1143,13 +1143,13 @@ impl CustomObjectsPage {
                         .show(ui, |ui| {
                             let key_label = design::field_label(ui, "Key");
                             ui.add_sized(
-                                [120.0, 28.0],
+                                [120.0, design::scale::CONTROL_H],
                                 egui::TextEdit::singleline(&mut key).hint_text("key"),
                             )
                             .labelled_by(key_label.id);
                             let label_label = design::field_label(ui, "Label");
                             ui.add_sized(
-                                [120.0, 28.0],
+                                [120.0, design::scale::CONTROL_H],
                                 egui::TextEdit::singleline(&mut label).hint_text("label"),
                             )
                             .labelled_by(label_label.id);
@@ -1170,7 +1170,7 @@ impl CustomObjectsPage {
                             ui.checkbox(&mut self.new_fields[idx].required, "Required");
                             if self.new_fields[idx].field_type == FieldType::Select {
                                 ui.add_sized(
-                                    [180.0, 28.0],
+                                    [180.0, design::scale::CONTROL_H],
                                     egui::TextEdit::singleline(&mut options),
                                 )
                                 .on_hover_text("comma-separated options")

@@ -453,7 +453,7 @@ impl IssueRadarPage {
             self.tab = Tab::from_index(i);
         }
         if let Some(err) = &self.error {
-            design::error_text(ui, &format!("error: {err}"));
+            design::error_note(ui, err);
         }
 
         match self.tab {
@@ -956,7 +956,7 @@ impl IssueRadarPage {
                         ui.horizontal(|ui| {
                             design::field_label(ui, "Link conversation");
                             ui.add_sized(
-                                [120.0, 28.0],
+                                [120.0, design::scale::CONTROL_H],
                                 egui::TextEdit::singleline(&mut self.link_conversation_id),
                             )
                             .on_hover_text("local conversation id");
@@ -1004,7 +1004,10 @@ impl IssueRadarPage {
             design::card_titled(ui, "Edit known issue", None, |ui| {
                 design::form_grid(ui, "radar-edit-known", |ui| {
                     design::field_label(ui, "Title");
-                    ui.add_sized([260.0, 28.0], egui::TextEdit::singleline(&mut title));
+                    ui.add_sized(
+                        [260.0, design::scale::CONTROL_H],
+                        egui::TextEdit::singleline(&mut title),
+                    );
                     ui.end_row();
                     design::field_label(ui, "Symptoms");
                     ui.add(egui::TextEdit::multiline(&mut symptoms).desired_width(f32::INFINITY));
@@ -1108,7 +1111,7 @@ impl IssueRadarPage {
             design::form_grid(ui, "radar-new-known", |ui| {
                 design::field_label(ui, "Title");
                 ui.add_sized(
-                    [260.0, 28.0],
+                    [260.0, design::scale::CONTROL_H],
                     egui::TextEdit::singleline(&mut self.new_title),
                 );
                 ui.end_row();
@@ -1144,7 +1147,7 @@ impl IssueRadarPage {
                 ui.end_row();
                 design::field_label(ui, "Conversation ids");
                 ui.add_sized(
-                    [260.0, 28.0],
+                    [260.0, design::scale::CONTROL_H],
                     egui::TextEdit::singleline(&mut self.new_conversation_ids),
                 )
                 .on_hover_text("comma-separated local conversation ids");

@@ -633,7 +633,7 @@ pub(crate) fn build_article_draft_user(
 ) -> String {
     let mut sources = String::new();
     for (i, c) in resolutions.iter().enumerate() {
-        let subject = c.subject.as_deref().unwrap_or("(no subject)");
+        let subject = c.subject.as_deref().unwrap_or(crate::catalog::NO_SUBJECT);
         let customer_line = if c.customer_question.is_empty() {
             String::new()
         } else {

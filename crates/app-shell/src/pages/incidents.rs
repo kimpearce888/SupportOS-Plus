@@ -8,8 +8,6 @@ use super::{ConfirmRequest, NavRequest, i64_field, opt_str_field, str_field};
 use crate::design::{self, BadgeTone, ButtonVariant};
 use crate::icons::Icon;
 
-const ROW_HEIGHT: f32 = 32.0;
-
 pub(crate) const INCIDENT_STATUSES: [&str; 5] = [
     "investigating",
     "identified",
@@ -452,7 +450,7 @@ impl IncidentsPage {
             design::page_counter(ui, &format!("{} incidents", self.rows.len()));
         });
         if let Some(err) = &self.error {
-            design::error_text(ui, &format!("error: {err}"));
+            design::error_note(ui, err);
         }
         if let Some(note) = &self.notice {
             design::hint_text(ui, note);
@@ -480,7 +478,7 @@ impl IncidentsPage {
                 "incidents",
                 &["Code", "Title", "Severity", "Status", "Conversations", ""],
                 rows.len(),
-                ROW_HEIGHT,
+                design::scale::ROW_H,
                 |ui, i| {
                     if let Some(id) = incident_row(ui, &rows[i]) {
                         pick = Some(id);
@@ -635,7 +633,7 @@ impl IncidentsPage {
         }
         let mut q = self.filter_query.clone();
         ui.add_sized(
-            [180.0, 28.0],
+            [180.0, design::scale::CONTROL_H],
             egui::TextEdit::singleline(&mut q).hint_text("search incidents…"),
         );
         self.filter_query = q;
@@ -816,7 +814,7 @@ impl IncidentsPage {
                 design::form_row(ui, "link #", |ui| {
                     let mut link = link_conversation;
                     let response = ui.add_sized(
-                        [90.0, 28.0],
+                        [90.0, design::scale::CONTROL_H],
                         egui::TextEdit::singleline(&mut link).hint_text("id"),
                     );
                     if response.changed() {
@@ -918,7 +916,7 @@ impl IncidentsPage {
             design::form_grid(ui, "incident-new", |ui| {
                 design::field_label(ui, "Title");
                 ui.add_sized(
-                    [260.0, 28.0],
+                    [260.0, design::scale::CONTROL_H],
                     egui::TextEdit::singleline(&mut self.new_title).hint_text("incident title"),
                 );
                 ui.end_row();
@@ -951,7 +949,7 @@ impl IncidentsPage {
                 ui.end_row();
                 design::field_label(ui, "Conversation ids");
                 ui.add_sized(
-                    [260.0, 28.0],
+                    [260.0, design::scale::CONTROL_H],
                     egui::TextEdit::singleline(&mut self.new_conversation_ids)
                         .hint_text("comma-separated ids"),
                 )
@@ -1001,14 +999,14 @@ fn incident_row(ui: &mut egui::Ui, row: &serde_json::Value) -> Option<i64> {
         false,
     );
     ui.allocate_ui_with_layout(
-        egui::vec2(110.0, ROW_HEIGHT),
+        egui::vec2(110.0, design::scale::ROW_H),
         egui::Layout::left_to_right(egui::Align::Center),
         |ui| {
             design::badge(ui, &severity, severity_tone(&severity));
         },
     );
     ui.allocate_ui_with_layout(
-        egui::vec2(120.0, ROW_HEIGHT),
+        egui::vec2(120.0, design::scale::ROW_H),
         egui::Layout::left_to_right(egui::Align::Center),
         |ui| {
             design::badge(ui, &status, incident_status_tone(&status));
@@ -1025,7 +1023,7 @@ fn incident_row(ui: &mut egui::Ui, row: &serde_json::Value) -> Option<i64> {
     );
     let mut picked: Option<i64> = None;
     ui.allocate_ui_with_layout(
-        egui::vec2(70.0, ROW_HEIGHT),
+        egui::vec2(70.0, design::scale::ROW_H),
         egui::Layout::left_to_right(egui::Align::Center),
         |ui| {
             if design::button(ui, "Open", ButtonVariant::Outline)
@@ -1078,7 +1076,7 @@ fn dt_cell(ui: &mut egui::Ui, width: f32, text: egui::RichText, align_right: boo
     } else {
         egui::Layout::left_to_right(egui::Align::Center)
     };
-    ui.allocate_ui_with_layout(egui::vec2(width, ROW_HEIGHT), layout, |ui| {
+    ui.allocate_ui_with_layout(egui::vec2(width, design::scale::ROW_H), layout, |ui| {
         ui.add(egui::Label::new(text).truncate());
     });
 }

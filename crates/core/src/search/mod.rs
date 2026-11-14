@@ -442,7 +442,7 @@ pub fn search_with_semantics(
                     id: entity_id,
                     title: format!(
                         "#{number} {}",
-                        subject.unwrap_or_else(|| "(no subject)".into())
+                        subject.unwrap_or_else(|| crate::catalog::NO_SUBJECT.into())
                     ),
                     subtitle: status.unwrap_or_default(),
                     snippet: text,

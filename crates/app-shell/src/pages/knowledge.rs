@@ -700,7 +700,7 @@ impl KnowledgePage {
                 design::form_grid(ui, "knowledge-import-form", |ui| {
                     let title_label = design::field_label(ui, "Title");
                     ui.add_sized(
-                        [260.0, 28.0],
+                        [260.0, design::scale::CONTROL_H],
                         egui::TextEdit::singleline(&mut self.import.title),
                     )
                     .labelled_by(title_label.id);
@@ -717,7 +717,7 @@ impl KnowledgePage {
                     ui.end_row();
                     let source_label = design::field_label(ui, "Source name");
                     ui.add_sized(
-                        [260.0, 28.0],
+                        [260.0, design::scale::CONTROL_H],
                         egui::TextEdit::singleline(&mut self.import.source_name),
                     )
                     .labelled_by(source_label.id);
@@ -1251,7 +1251,9 @@ impl KnowledgePage {
                         |ui| {
                             for (i, c) in citations.iter().enumerate() {
                                 let number = c["number"].as_i64().unwrap_or_default();
-                                let subject = c["subject"].as_str().unwrap_or("(no subject)");
+                                let subject = c["subject"]
+                                    .as_str()
+                                    .unwrap_or(spp_core::catalog::NO_SUBJECT);
                                 let excerpt = c["excerpt"].as_str().unwrap_or("");
                                 ui.label(
                                     egui::RichText::new(format!(
@@ -1529,7 +1531,7 @@ impl KnowledgePage {
         ui.horizontal(|ui| {
             let mut search = self.search_edit.clone();
             let response = ui.add_sized(
-                [320.0, 28.0],
+                [320.0, design::scale::CONTROL_H],
                 egui::TextEdit::singleline(&mut search).hint_text("Search help center…"),
             );
             if response.changed() {
@@ -1624,9 +1626,14 @@ impl KnowledgePage {
                         .color(t.foreground),
                 );
                 ui.label(
-                    egui::RichText::new(article.collection_name.as_deref().unwrap_or("—"))
-                        .size(13.0)
-                        .color(t.foreground),
+                    egui::RichText::new(
+                        article
+                            .collection_name
+                            .as_deref()
+                            .unwrap_or(design::MISSING_VALUE),
+                    )
+                    .size(13.0)
+                    .color(t.foreground),
                 );
                 let tone = match article.status.as_str() {
                     "published" => BadgeTone::Success,
@@ -1658,9 +1665,15 @@ impl KnowledgePage {
                 ui,
                 &format!(
                     "{} · {} · updated {}",
-                    article.collection_name.as_deref().unwrap_or("—"),
+                    article
+                        .collection_name
+                        .as_deref()
+                        .unwrap_or(design::MISSING_VALUE),
                     article.status,
-                    article.updated_at.as_deref().unwrap_or("—")
+                    article
+                        .updated_at
+                        .as_deref()
+                        .unwrap_or(design::MISSING_VALUE)
                 ),
             );
             design::divider(ui);
@@ -1759,8 +1772,11 @@ impl KnowledgePage {
             |ui| {
                 design::form_grid(ui, "knowledge-doc-edit-form", |ui| {
                     let title_label = design::field_label(ui, "Title");
-                    ui.add_sized([260.0, 28.0], egui::TextEdit::singleline(&mut form.title))
-                        .labelled_by(title_label.id);
+                    ui.add_sized(
+                        [260.0, design::scale::CONTROL_H],
+                        egui::TextEdit::singleline(&mut form.title),
+                    )
+                    .labelled_by(title_label.id);
                     ui.end_row();
                     design::field_label(ui, "Visibility");
                     ui.horizontal(|ui| {

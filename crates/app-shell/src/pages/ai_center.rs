@@ -646,7 +646,7 @@ impl AiCenterPage {
         ui.horizontal(|ui| {
             let mut question = self.copilot_input.clone();
             let response = ui.add_sized(
-                [ui.available_width() - 120.0, 28.0],
+                [ui.available_width() - 120.0, design::scale::CONTROL_H],
                 egui::TextEdit::singleline(&mut question).hint_text("Ask the copilot…"),
             );
             if response.changed() {
@@ -1250,7 +1250,7 @@ impl AiCenterPage {
         ui.horizontal(|ui| {
             design::field_label(ui, "API key");
             ui.add_sized(
-                [280.0, 28.0],
+                [280.0, design::scale::CONTROL_H],
                 egui::TextEdit::singleline(&mut self.key_edit_value).password(true),
             );
             if design::button(ui, "Save Key", ButtonVariant::Primary).clicked() {
@@ -1373,28 +1373,31 @@ impl AiCenterPage {
             .show(ui, |ui| {
                 design::field_label(ui, "Name");
                 ui.add_sized(
-                    [220.0, 28.0],
+                    [220.0, design::scale::CONTROL_H],
                     egui::TextEdit::singleline(&mut self.add_name),
                 );
                 ui.end_row();
                 design::field_label(ui, "Base URL");
-                ui.add_sized([280.0, 28.0], egui::TextEdit::singleline(&mut self.add_url));
+                ui.add_sized(
+                    [280.0, design::scale::CONTROL_H],
+                    egui::TextEdit::singleline(&mut self.add_url),
+                );
                 ui.end_row();
                 design::field_label(ui, "API key");
                 ui.add_sized(
-                    [280.0, 28.0],
+                    [280.0, design::scale::CONTROL_H],
                     egui::TextEdit::singleline(&mut self.add_key).password(true),
                 );
                 ui.end_row();
                 design::field_label(ui, "$ / mtok prompt:");
                 ui.add_sized(
-                    [120.0, 28.0],
+                    [120.0, design::scale::CONTROL_H],
                     egui::TextEdit::singleline(&mut self.add_price_prompt),
                 );
                 ui.end_row();
                 design::field_label(ui, "$ / mtok completion:");
                 ui.add_sized(
-                    [120.0, 28.0],
+                    [120.0, design::scale::CONTROL_H],
                     egui::TextEdit::singleline(&mut self.add_price_completion),
                 );
                 ui.end_row();
@@ -1908,13 +1911,17 @@ impl AiCenterPage {
                             egui::RichText::new(
                                 job.conversation_id
                                     .map(|id| format!("#{id}"))
-                                    .unwrap_or_else(|| "—".into()),
+                                    .unwrap_or_else(|| design::MISSING_VALUE.into()),
                             )
                             .color(t.foreground),
                         );
                         ui.monospace(
-                            egui::RichText::new(job.model.clone().unwrap_or_else(|| "—".into()))
-                                .color(t.foreground),
+                            egui::RichText::new(
+                                job.model
+                                    .clone()
+                                    .unwrap_or_else(|| design::MISSING_VALUE.into()),
+                            )
+                            .color(t.foreground),
                         );
                         ui.monospace(
                             egui::RichText::new(job.created_at.as_str()).color(t.foreground),

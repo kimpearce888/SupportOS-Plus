@@ -568,7 +568,7 @@ impl DashboardPage {
         ui.add_space(10.0);
 
         if let Some(err) = &self.error {
-            design::error_text(ui, &format!("error: {err}"));
+            design::error_note(ui, err);
         }
 
         let data = match &self.data {
@@ -786,13 +786,13 @@ fn channel_metrics_table(ui: &mut egui::Ui, rows: &[ChannelMetric]) {
                     ui,
                     &row.first_response_avg_min
                         .map(|v| v.to_string())
-                        .unwrap_or_else(|| "—".into()),
+                        .unwrap_or_else(|| design::MISSING_VALUE.into()),
                 );
                 design::td_num(
                     ui,
                     &row.resolution_avg_min
                         .map(|v| v.to_string())
-                        .unwrap_or_else(|| "—".into()),
+                        .unwrap_or_else(|| design::MISSING_VALUE.into()),
                 );
             },
         );
@@ -836,13 +836,13 @@ fn comparison_table(ui: &mut egui::Ui, rows: &[MailboxComparison]) {
                     ui,
                     &row.first_response_avg_min
                         .map(|v| v.to_string())
-                        .unwrap_or_else(|| "—".into()),
+                        .unwrap_or_else(|| design::MISSING_VALUE.into()),
                 );
                 design::td_num(
                     ui,
                     &row.resolution_avg_min
                         .map(|v| v.to_string())
-                        .unwrap_or_else(|| "—".into()),
+                        .unwrap_or_else(|| design::MISSING_VALUE.into()),
                 );
                 design::td_num(ui, &row.great_ratings.to_string());
                 design::td_num(ui, &row.total_ratings.to_string());

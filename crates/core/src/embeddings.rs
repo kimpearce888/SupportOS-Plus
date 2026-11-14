@@ -154,7 +154,9 @@ pub(crate) fn chunk_conversation(conn: &Connection, conversation_id: i64) -> Res
     let mut header_lines: Vec<String> = vec![format!(
         "#{} {}",
         conv.number,
-        conv.subject.as_deref().unwrap_or("(no subject)")
+        conv.subject
+            .as_deref()
+            .unwrap_or(crate::catalog::NO_SUBJECT)
     )];
     if let Some(customer) = conv.customer.as_deref().filter(|c| !c.is_empty()) {
         header_lines.push(format!("Customer: {customer}"));

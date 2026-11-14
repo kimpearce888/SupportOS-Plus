@@ -1084,7 +1084,7 @@ impl SettingsPage {
                     design::success_text(ui, message);
                 }
                 if let Some(err) = &self.error {
-                    design::error_text(ui, &format!("error: {err}"));
+                    design::error_note(ui, err);
                 }
                 if ui.small_button("Dismiss").clicked() {
                     self.message = None;
@@ -1178,7 +1178,7 @@ impl SettingsPage {
                 ui.end_row();
                 let lang_label = design::field_label(ui, "Agent language");
                 ui.add_sized(
-                    [220.0, 28.0],
+                    [220.0, design::scale::CONTROL_H],
                     egui::TextEdit::singleline(&mut general.agent_language),
                 )
                 .labelled_by(lang_label.id);
@@ -1544,7 +1544,7 @@ impl SettingsPage {
                 design::form_grid(ui, "settings-hs-creds", |ui| {
                     let cid_label = design::field_label(ui, "Client id");
                     ui.add_sized(
-                        [320.0, 28.0],
+                        [320.0, design::scale::CONTROL_H],
                         egui::TextEdit::singleline(&mut self.hs_client_id)
                             .hint_text("Help Scout custom app — client ID"),
                     )
@@ -1552,7 +1552,7 @@ impl SettingsPage {
                     ui.end_row();
                     let secret_label = design::field_label(ui, "Client secret");
                     ui.add_sized(
-                        [320.0, 28.0],
+                        [320.0, design::scale::CONTROL_H],
                         egui::TextEdit::singleline(&mut self.hs_client_secret)
                             .password(mask)
                             .hint_text("leave blank to keep the stored value"),
@@ -1561,7 +1561,7 @@ impl SettingsPage {
                     ui.end_row();
                     let whs_label = design::field_label(ui, "Webhook secret");
                     ui.add_sized(
-                        [320.0, 28.0],
+                        [320.0, design::scale::CONTROL_H],
                         egui::TextEdit::singleline(&mut self.hs_webhook_secret)
                             .password(mask)
                             .hint_text("verifies incoming Help Scout webhooks"),
@@ -1575,7 +1575,7 @@ impl SettingsPage {
                     ui.end_row();
                     let docs_label = design::field_label(ui, "Docs API key");
                     ui.add_sized(
-                        [320.0, 28.0],
+                        [320.0, design::scale::CONTROL_H],
                         egui::TextEdit::singleline(&mut self.hs_docs_api_key)
                             .password(mask)
                             .hint_text("optional — leave blank to keep the stored value"),
@@ -2089,7 +2089,7 @@ impl SettingsPage {
                 design::form_grid(ui, "settings-lmstudio", |ui| {
                     let base_label = design::field_label(ui, "Base URL");
                     ui.add_sized(
-                        [320.0, 28.0],
+                        [320.0, design::scale::CONTROL_H],
                         egui::TextEdit::singleline(&mut self.lmstudio_base_url)
                             .hint_text("http://localhost:1234/v1"),
                     )
@@ -2101,7 +2101,7 @@ impl SettingsPage {
                     ui.end_row();
                     let chat_label = design::field_label(ui, "Chat model");
                     ui.add_sized(
-                        [320.0, 28.0],
+                        [320.0, design::scale::CONTROL_H],
                         egui::TextEdit::singleline(&mut self.lmstudio_chat_model)
                             .hint_text("e.g. qwen2.5-7b-instruct"),
                     )
@@ -2113,7 +2113,7 @@ impl SettingsPage {
                     ui.end_row();
                     let embed_label = design::field_label(ui, "Embedding model");
                     ui.add_sized(
-                        [320.0, 28.0],
+                        [320.0, design::scale::CONTROL_H],
                         egui::TextEdit::singleline(&mut self.lmstudio_embedding_model)
                             .hint_text("e.g. text-embedding-nomic-embed-text-v1.5"),
                     )
@@ -2334,12 +2334,18 @@ impl SettingsPage {
         design::card_titled_wide(ui, &format!("Edit: {}", row.name), None, |ui| {
             design::form_grid(ui, "settings-hours-edit", |ui| {
                 let tz_label = design::field_label(ui, "Timezone");
-                ui.add_sized([220.0, 28.0], egui::TextEdit::singleline(&mut row.timezone))
-                    .labelled_by(tz_label.id);
+                ui.add_sized(
+                    [220.0, design::scale::CONTROL_H],
+                    egui::TextEdit::singleline(&mut row.timezone),
+                )
+                .labelled_by(tz_label.id);
                 ui.end_row();
                 let days_label = design::field_label(ui, "Days (0=Sun…6=Sat)");
-                ui.add_sized([220.0, 28.0], egui::TextEdit::singleline(&mut row.days))
-                    .labelled_by(days_label.id);
+                ui.add_sized(
+                    [220.0, design::scale::CONTROL_H],
+                    egui::TextEdit::singleline(&mut row.days),
+                )
+                .labelled_by(days_label.id);
                 ui.end_row();
                 let start_label = design::field_label(ui, "Start (minutes)");
                 ui.add(egui::DragValue::new(&mut row.start_minute).range(0..=1440))

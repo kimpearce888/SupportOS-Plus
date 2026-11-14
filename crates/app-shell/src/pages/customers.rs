@@ -7,8 +7,6 @@ use super::{NavRequest, i64_field, opt_str_field, relative_time, str_field};
 use crate::design::{self, AvatarSize, BadgeTone, ButtonVariant};
 use crate::icons::Icon;
 
-const ROW_HEIGHT: f32 = 32.0;
-
 const CUSTOMERS_PAGE_SIZE: i64 = 50;
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -360,7 +358,7 @@ impl CustomersPage {
             self.reload_search(db);
         }
         if let Some(err) = &self.error {
-            design::error_text(ui, &format!("error: {err}"));
+            design::error_note(ui, err);
         }
         ui.add_space(design::scale::space::SP2);
 
@@ -379,7 +377,7 @@ impl CustomersPage {
                 "customers",
                 &["Name", "Email", "Conversations", "Last Contact", ""],
                 rows.len(),
-                ROW_HEIGHT,
+                design::scale::ROW_H,
                 |ui, i| {
                     let row = &rows[i];
                     let t = design::tokens(ui);
@@ -395,7 +393,7 @@ impl CustomersPage {
                     dt_cell(
                         ui,
                         230.0,
-                        egui::RichText::new(row.email.as_deref().unwrap_or("—"))
+                        egui::RichText::new(row.email.as_deref().unwrap_or(design::MISSING_VALUE))
                             .size(design::scale::text::BODY)
                             .color(t.foreground),
                         false,
@@ -423,7 +421,7 @@ impl CustomersPage {
                         false,
                     );
                     ui.allocate_ui_with_layout(
-                        egui::vec2(70.0, ROW_HEIGHT),
+                        egui::vec2(70.0, design::scale::ROW_H),
                         egui::Layout::left_to_right(egui::Align::Center),
                         |ui| {
                             if design::button(ui, "Open", ButtonVariant::Outline)
@@ -566,7 +564,13 @@ impl Default for CustomersPage {
 }
 
 fn record_meta(contact: &ContactCard) -> String {
-    let mut parts = vec![contact.email.as_deref().unwrap_or("—").to_string()];
+    let mut parts = vec![
+        contact
+            .email
+            .as_deref()
+            .unwrap_or(design::MISSING_VALUE)
+            .to_string(),
+    ];
     if let Some(phone) = &contact.phone {
         parts.push(phone.clone());
     }
@@ -855,9 +859,13 @@ fn conversations_ui(
                 let response = ui
                     .add(
                         egui::Label::new(
-                            egui::RichText::new(item.subject.as_deref().unwrap_or("(no subject)"))
-                                .size(design::scale::text::CONTROL)
-                                .color(t.primary),
+                            egui::RichText::new(
+                                item.subject
+                                    .as_deref()
+                                    .unwrap_or(spp_core::catalog::NO_SUBJECT),
+                            )
+                            .size(design::scale::text::CONTROL)
+                            .color(t.primary),
                         )
                         .sense(egui::Sense::click()),
                     )
@@ -871,9 +879,11 @@ fn conversations_ui(
                 let (tone, label) = design::status_tone(item.status.as_str());
                 design::badge(ui, label, tone);
                 ui.label(
-                    egui::RichText::new(item.updated_at.as_deref().unwrap_or("—"))
-                        .size(design::scale::text::CONTROL)
-                        .color(t.muted_foreground),
+                    egui::RichText::new(
+                        item.updated_at.as_deref().unwrap_or(design::MISSING_VALUE),
+                    )
+                    .size(design::scale::text::CONTROL)
+                    .color(t.muted_foreground),
                 );
             },
         );
@@ -895,7 +905,7 @@ fn dt_cell(ui: &mut egui::Ui, width: f32, text: egui::RichText, align_right: boo
     } else {
         egui::Layout::left_to_right(egui::Align::Center)
     };
-    ui.allocate_ui_with_layout(egui::vec2(width, ROW_HEIGHT), layout, |ui| {
+    ui.allocate_ui_with_layout(egui::vec2(width, design::scale::ROW_H), layout, |ui| {
         ui.add(egui::Label::new(text).truncate());
     });
 }

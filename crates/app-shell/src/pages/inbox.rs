@@ -1165,7 +1165,7 @@ impl InboxPage {
 
         let t = design::tokens(ui);
         if let Some(err) = &self.status {
-            design::error_text(ui, &format!("error: {err}"));
+            design::error_note(ui, err);
         }
         if !db.with_read(provider_connected) {
             design::hint_text(
@@ -1610,7 +1610,9 @@ impl InboxPage {
                     let subject = format!(
                         "#{}  {}",
                         item.number,
-                        item.subject.as_deref().unwrap_or("(no subject)"),
+                        item.subject
+                            .as_deref()
+                            .unwrap_or(spp_core::catalog::NO_SUBJECT),
                     );
                     let response = egui::Frame::new()
                         .fill(fill)
@@ -1798,7 +1800,10 @@ impl InboxPage {
         let subject = format!(
             "#{}  {}",
             detail.number,
-            detail.subject.as_deref().unwrap_or("(no subject)")
+            detail
+                .subject
+                .as_deref()
+                .unwrap_or(spp_core::catalog::NO_SUBJECT)
         );
         let who = match detail.customer_email.as_deref() {
             Some(email) if !email.trim().is_empty() => {
@@ -1882,7 +1887,7 @@ impl InboxPage {
     ) {
         design::card_titled(ui, "Conversation", None, |ui| {
             fn row_label(ui: &mut egui::Ui, text: &str) {
-                ui.allocate_ui(egui::vec2(64.0, 28.0), |ui| {
+                ui.allocate_ui(egui::vec2(64.0, design::scale::CONTROL_H), |ui| {
                     ui.vertical(|ui| {
                         ui.label(
                             egui::RichText::new(text)
@@ -3070,13 +3075,15 @@ impl InboxPage {
                     let change = if let Some(to) = row.to_state.as_deref() {
                         Some(format!(
                             "{} → {}",
-                            row.from_state.as_deref().unwrap_or("—"),
+                            row.from_state.as_deref().unwrap_or(design::MISSING_VALUE),
                             to
                         ))
                     } else if let Some(to) = row.to_priority.as_deref() {
                         Some(format!(
                             "priority {} → {}",
-                            row.from_priority.as_deref().unwrap_or("—"),
+                            row.from_priority
+                                .as_deref()
+                                .unwrap_or(design::MISSING_VALUE),
                             to
                         ))
                     } else {
@@ -3140,7 +3147,7 @@ impl InboxPage {
                             let value = deterministic
                                 .get(key)
                                 .map(|v| v.to_string())
-                                .unwrap_or_else(|| "—".into());
+                                .unwrap_or_else(|| design::MISSING_VALUE.into());
                             design::field_label(ui, label);
                             ui.label(
                                 egui::RichText::new(value.as_str())
@@ -3255,7 +3262,7 @@ fn recipient_row_static(ui: &mut egui::Ui, label: &str, value: &str) {
     ui.horizontal(|ui| {
         recipient_label(ui, label);
         let w = ui.available_width();
-        ui.allocate_ui(egui::vec2(w, 28.0), |ui| {
+        ui.allocate_ui(egui::vec2(w, design::scale::CONTROL_H), |ui| {
             egui::Frame::new()
                 .fill(egui::Color32::TRANSPARENT)
                 .stroke(egui::Stroke::new(1.0, t.border))
@@ -3285,7 +3292,7 @@ fn recipient_row_input(ui: &mut egui::Ui, label: &str, buf: &mut String) {
         recipient_label(ui, label);
         let w = ui.available_width();
         ui.add_sized(
-            [w, 28.0],
+            [w, design::scale::CONTROL_H],
             egui::TextEdit::singleline(buf).hint_text("comma-separated emails"),
         );
     });

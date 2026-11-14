@@ -19,3 +19,5 @@ pub use graph::{GraphHumanRelation, GraphNodeKind};
 pub use notifications::NotificationType;
 pub use operations::OperationsTileKey;
 pub use reporting::{ReportDimensionKey, ReportMetricKey};
+
+pub const NO_SUBJECT: &str = "(no subject)";

@@ -1119,7 +1119,7 @@ fn repeated_unresolved_findings(
                     json!({
                         "thread_id": 0, "author_type": "customer",
                         "excerpt": format!("Conversation #{number}: {} ({status})",
-                            subject.as_deref().unwrap_or("(no subject)")),
+                            subject.as_deref().unwrap_or(crate::catalog::NO_SUBJECT)),
                         "at": at
                     })
                 })

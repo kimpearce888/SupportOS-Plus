@@ -257,7 +257,7 @@ impl NotificationsPage {
             self.tab = *tab;
         }
         if let Some(err) = &self.error {
-            design::error_text(ui, &format!("error: {err}"));
+            design::error_note(ui, err);
         }
         design::divider(ui);
 

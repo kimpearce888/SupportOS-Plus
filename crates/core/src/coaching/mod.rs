@@ -9,6 +9,7 @@ use crate::error::Result;
 
 pub(crate) const COACHING_NOTE: &str = "Advisory only - coaching never blocks or modifies the send. Every finding cites its evidence; heuristics are labeled as heuristics.";
 const PROMPT_VERSION: &str = "agent_coaching_v1";
+const EXCERPT_CAP: usize = 240;
 
 fn check_label(kind: &str) -> &'static str {
     match kind {
@@ -421,7 +422,7 @@ fn coerce_ai_layer(content: &str) -> Option<Value> {
             Some(c) if c.is_object() => json!({
                 "verdict": verdict_of(&c["verdict"], &["none", "possible", "likely"]).unwrap_or_else(|| "possible".into()),
                 "reasoning": c.get("reasoning").and_then(|v| v.as_str()).unwrap_or("").chars().take(500).collect::<String>(),
-                "excerpt": c.get("excerpt").and_then(|v| v.as_str()).unwrap_or("").chars().take(240).collect::<String>(),
+                "excerpt": c.get("excerpt").and_then(|v| v.as_str()).unwrap_or("").chars().take(EXCERPT_CAP).collect::<String>(),
             }),
             _ => Value::Null,
         },
@@ -432,7 +433,7 @@ fn coerce_ai_layer(content: &str) -> Option<Value> {
             Some(c) if c.is_object() => json!({
                 "verdict": verdict_of(&c["verdict"], &["no", "possible", "yes"]).unwrap_or_else(|| "possible".into()),
                 "reasoning": c.get("reasoning").and_then(|v| v.as_str()).unwrap_or("").chars().take(500).collect::<String>(),
-                "excerpt": c.get("excerpt").and_then(|v| v.as_str()).unwrap_or("").chars().take(240).collect::<String>(),
+                "excerpt": c.get("excerpt").and_then(|v| v.as_str()).unwrap_or("").chars().take(EXCERPT_CAP).collect::<String>(),
             }),
             _ => Value::Null,
         },

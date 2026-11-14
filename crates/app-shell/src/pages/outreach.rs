@@ -567,7 +567,7 @@ impl OutreachPage {
             design::success_text(ui, &format!("status: {message}"));
         }
         if let Some(err) = &self.error {
-            design::error_text(ui, &format!("error: {err}"));
+            design::error_note(ui, err);
         }
         design::divider(ui);
 
@@ -740,7 +740,7 @@ impl OutreachPage {
             let f64_or_dash = |v: Option<&serde_json::Value>| -> String {
                 match v.and_then(|f| f.as_f64()) {
                     Some(n) => format!("{n}"),
-                    None => "—".to_string(),
+                    None => design::MISSING_VALUE.to_string(),
                 }
             };
             design::form_grid(ui, "outreach-report", |ui| {
@@ -792,14 +792,14 @@ impl OutreachPage {
             design::form_grid(ui, "outreach-new", |ui| {
                 let name_label = design::field_label(ui, "Name");
                 ui.add_sized(
-                    [240.0, 28.0],
+                    [240.0, design::scale::CONTROL_H],
                     egui::TextEdit::singleline(&mut self.new_name).hint_text("campaign name"),
                 )
                 .labelled_by(name_label.id);
                 ui.end_row();
                 let subject_label = design::field_label(ui, "Subject");
                 ui.add_sized(
-                    [280.0, 28.0],
+                    [280.0, design::scale::CONTROL_H],
                     egui::TextEdit::singleline(&mut self.new_subject).hint_text("email subject"),
                 )
                 .labelled_by(subject_label.id);
@@ -815,7 +815,7 @@ impl OutreachPage {
                 let mailbox_label = design::field_label(ui, "Mailbox");
                 if mailboxes.is_empty() {
                     ui.add_sized(
-                        [140.0, 28.0],
+                        [140.0, design::scale::CONTROL_H],
                         egui::TextEdit::singleline(&mut self.new_mailbox),
                     )
                     .on_hover_text("local mailbox id (see Settings)")
@@ -860,7 +860,7 @@ impl OutreachPage {
                         .labelled_by(segment_label.id);
                 } else if segments.is_empty() {
                     ui.add_sized(
-                        [140.0, 28.0],
+                        [140.0, design::scale::CONTROL_H],
                         egui::TextEdit::singleline(&mut self.new_segment_json),
                     )
                     .on_hover_text("saved segment id — required guard")
@@ -1043,7 +1043,7 @@ impl OutreachPage {
             design::form_grid(ui, "outreach-new-segment", |ui| {
                 let name_label = design::field_label(ui, "Name");
                 ui.add_sized(
-                    [220.0, 28.0],
+                    [220.0, design::scale::CONTROL_H],
                     egui::TextEdit::singleline(&mut self.new_segment_name)
                         .hint_text("segment name"),
                 )
@@ -1051,7 +1051,7 @@ impl OutreachPage {
                 ui.end_row();
                 let description_label = design::field_label(ui, "Description");
                 ui.add_sized(
-                    [240.0, 28.0],
+                    [240.0, design::scale::CONTROL_H],
                     egui::TextEdit::singleline(&mut self.new_segment_description)
                         .hint_text("what this segment is for (optional)"),
                 )
@@ -1116,7 +1116,7 @@ impl OutreachPage {
                 design::form_grid(ui, "outreach-dnc-new", |ui| {
                     let search_label = design::field_label(ui, "Search");
                     ui.add_sized(
-                        [180.0, 28.0],
+                        [180.0, design::scale::CONTROL_H],
                         egui::TextEdit::singleline(&mut self.dnc_query)
                             .hint_text("customer name or email"),
                     )
@@ -1147,7 +1147,7 @@ impl OutreachPage {
                     ui.end_row();
                     let reason_label = design::field_label(ui, "Reason");
                     ui.add_sized(
-                        [220.0, 28.0],
+                        [220.0, design::scale::CONTROL_H],
                         egui::TextEdit::singleline(&mut self.new_dnc_reason)
                             .hint_text("why (optional)"),
                     )

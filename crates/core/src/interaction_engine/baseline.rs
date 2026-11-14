@@ -744,7 +744,11 @@ fn build_timeline(conv_rows: &[CustomerConversation]) -> Vec<TimelineEntry> {
         let g = by_month.entry(month).or_insert((0, Vec::new(), Vec::new()));
         g.0 += 1;
         g.1.push(c.id);
-        g.2.push(c.subject.clone().unwrap_or_else(|| "(no subject)".into()));
+        g.2.push(
+            c.subject
+                .clone()
+                .unwrap_or_else(|| crate::catalog::NO_SUBJECT.into()),
+        );
     }
     by_month
         .into_iter()

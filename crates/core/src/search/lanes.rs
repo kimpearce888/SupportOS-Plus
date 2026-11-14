@@ -107,7 +107,7 @@ pub(crate) fn search_conversations(
                 id,
                 title: format!(
                     "#{number} {}",
-                    subject.unwrap_or_else(|| "(no subject)".into())
+                    subject.unwrap_or_else(|| crate::catalog::NO_SUBJECT.into())
                 ),
                 subtitle: [
                     r.get::<_, String>(6)?,
@@ -145,7 +145,7 @@ fn recent_conversations(conn: &Connection, limit: i64) -> Result<Vec<SearchHit>>
                 title: format!(
                     "#{number} {}",
                     r.get::<_, Option<String>>(2)?
-                        .unwrap_or_else(|| "(no subject)".into())
+                        .unwrap_or_else(|| crate::catalog::NO_SUBJECT.into())
                 ),
                 subtitle: r.get(4)?,
                 snippet: r.get::<_, Option<String>>(3)?.unwrap_or_default(),

@@ -205,7 +205,7 @@ impl DiagnosticsPage {
             self.message = None;
         }
         if let Some(err) = &self.error {
-            design::error_text(ui, &format!("error: {err}"));
+            design::error_note(ui, err);
             self.error = None;
         }
 
@@ -384,15 +384,17 @@ fn audit_trail_card_ui(ui: &mut egui::Ui, audit: &[AuditRow]) {
                 );
                 ui.monospace(
                     egui::RichText::new(
-                        row.conversation_id
-                            .map_or_else(|| "—".to_string(), |cid| cid.to_string()),
+                        row.conversation_id.map_or_else(
+                            || design::MISSING_VALUE.to_string(),
+                            |cid| cid.to_string(),
+                        ),
                     )
                     .size(12.5),
                 );
                 let (tone, label) = if row.ai_involvement {
                     (BadgeTone::Ai, "ai")
                 } else {
-                    (BadgeTone::Neutral, "—")
+                    (BadgeTone::Neutral, design::MISSING_VALUE)
                 };
                 design::badge(ui, label, tone);
             },

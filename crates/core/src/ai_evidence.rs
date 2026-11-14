@@ -157,7 +157,7 @@ pub fn build(
                     };
                     Ok(HistoryEntry {
                         number,
-                        subject: subject.unwrap_or_else(|| "(no subject)".into()),
+                        subject: subject.unwrap_or_else(|| crate::catalog::NO_SUBJECT.into()),
                         summary: summary_source.chars().take(200).collect(),
                         days_ago: at.as_deref().map(days_ago).unwrap_or(0),
                     })
@@ -277,7 +277,7 @@ pub fn build(
 
     Ok(Some(EvidenceContext {
         conversation_number: number,
-        subject: subject.unwrap_or_else(|| "(no subject)".into()),
+        subject: subject.unwrap_or_else(|| crate::catalog::NO_SUBJECT.into()),
         customer_name,
         customer_history: history,
         threads,
@@ -524,7 +524,7 @@ pub(crate) fn find_similar(
                 .row
                 .subject
                 .clone()
-                .unwrap_or_else(|| "(no subject)".into()),
+                .unwrap_or_else(|| crate::catalog::NO_SUBJECT.into()),
             resolution,
             date: c.row.remote_created_at.clone(),
             status: c.row.status.clone(),

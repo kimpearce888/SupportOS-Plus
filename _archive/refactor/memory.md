@@ -442,6 +442,45 @@ session ends by adding what the next session must not have to rediscover.
     it), and the region tracker's test-flagging is directionally
     right only (assert!-bearing sites prove their own test regions).
 
+- **D-26 (session 17, R4.4).** Magic-values end state — six folds
+  landed (166 sites), and the STANDING RULES for judging future literal
+  repetition (the tenth consecutive census correction: 7,823 prod
+  numeric + 17,350 prod string occurrences held only six same-policy
+  families):
+  - **The fallback-vs-prose line for repeated UI strings:** strings
+    reused as DATA (compared against, defaulted to, threaded as
+    values — '(no subject)', '—') are POLICY and fold (catalog when
+    cross-crate per R3.6 placement, design when shell-local per
+    D-19); strings rendered ONCE as words (button labels 'Cancel'/
+    'Edit'/'Delete') are PROSE and keep — the renderer is the single
+    source, the word is the datum (Q-06 holds the owner option).
+  - **Pixel dims fold only where the site's semantic ROLE matches
+    the token's role:** a 28.0 that sizes a single-line control is
+    CONTROL_H's policy; an AvatarSize::Md => 28.0 datum or a +28.0
+    horizontal pad is NOT (D-17 discipline applied per-site, value
+    equality is necessary but not sufficient).
+  - **Repeated-const duplication is foldable even when the value is
+    already named:** three identical page-local `ROW_HEIGHT = 32.0`
+    decls were ONE policy with three definitions — folded to
+    design::scale::ROW_H (same crate → design home).
+  - **Cap values with same-value coincidences across module trees**
+    (240: coaching excerpts vs search snippets vs analysis excerpts)
+    fold only the same-module family (module-local const; visible
+    to child modules via their `use super::*`); the coincidences
+    keep as literals with the ruling recorded.
+  - **Keeps that will recur in any future literal scan:** civil-date
+    algorithm constants (146_097/719_468/365/3600/86400 — algorithm
+    data); HTTP status literals (wire protocol, self-documenting —
+    R3.6's DDL ruling extended); SQL LIMIT caps (per-query policy +
+    SQL text); rgb() components (palette token DATA); serde attribute
+    strings ('Option::is_none'/'snake_case' — macro-machinery
+    spelling); wire-vocab strings (invariant 5); domain-word
+    comparisons (== "high" across six free-form wire fields —
+    different dimensions sharing English words).
+  - The census machinery (r44_census.py) adds to r43's walk: string
+    VALUE collection, sanitized-text numeric scan, `.take(N)` and
+    SQL-`LIMIT N` overlays, and a const-initializer inventory (to
+    distinguish already-named values from raw call-site literals).
 
 ## Facts (F-xx)
 
@@ -750,3 +789,10 @@ session ends by adding what the next session must not have to rediscover.
   vocabulary-shaped). If the owner wants it gone, the deletion is:
   the enum + impl + `pub use copilot::CopilotTool;` root re-export;
   the same question applies to GraphHumanRelation::parse (R3.6 note).
+- **Q-06 (session 17, R4.4).** UI action-label prose (`"Cancel"` ×17,
+  `"Edit"` ×13, `"Delete"` ×12 — 42 sites, all at design::button/ui.button
+  call sites) was ruled a KEEP under D-26's fallback-vs-prose line. If the
+  owner wants the standard action labels single-sourced (e.g. design
+  consts CANCEL/EDIT/DELETE_LABEL), the fold is mechanical and
+  pixel-neutral; recorded here as the standing owner option.
+

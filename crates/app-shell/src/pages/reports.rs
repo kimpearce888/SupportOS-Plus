@@ -385,7 +385,7 @@ impl ReportsPage {
         }
         ui.add_space(6.0);
         if let Some(err) = &self.error {
-            design::error_text(ui, &format!("error: {err}"));
+            design::error_note(ui, err);
         }
 
         let (why, questions) = (self.why_contacting.clone(), self.top_questions.clone());
@@ -544,7 +544,7 @@ impl ReportsPage {
                     "waiting oldest (min)",
                 ],
                 report.mailboxes.len(),
-                28.0,
+                design::scale::CONTROL_H,
                 |ui, i| {
                     let t = design::tokens(ui);
                     let row = &report.mailboxes[i];
@@ -564,7 +564,7 @@ impl ReportsPage {
                         &row.first_response
                             .avg_business_min
                             .map(|v| v.to_string())
-                            .unwrap_or_else(|| "—".into()),
+                            .unwrap_or_else(|| design::MISSING_VALUE.into()),
                     );
                     design::td_num(
                         ui,
@@ -575,14 +575,14 @@ impl ReportsPage {
                         &row.resolution
                             .avg_business_min
                             .map(|v| v.to_string())
-                            .unwrap_or_else(|| "—".into()),
+                            .unwrap_or_else(|| design::MISSING_VALUE.into()),
                     );
                     design::td_num(
                         ui,
                         &row.waiting
                             .oldest_business_min
                             .map(|v| v.to_string())
-                            .unwrap_or_else(|| "—".into()),
+                            .unwrap_or_else(|| design::MISSING_VALUE.into()),
                     );
                 },
             );
@@ -1065,7 +1065,7 @@ impl ReportsPage {
                                             });
                                         match delta {
                                             Some(d) => design::td_num(ui, &format!("{d:+.1}")),
-                                            None => design::td_num(ui, "—"),
+                                            None => design::td_num(ui, design::MISSING_VALUE),
                                         }
                                     }
                                 },
@@ -1238,7 +1238,7 @@ impl ReportsPage {
                             &health
                                 .avg_first_response_minutes
                                 .map(|m| format!("{m:.0} min"))
-                                .unwrap_or_else(|| "—".into()),
+                                .unwrap_or_else(|| design::MISSING_VALUE.into()),
                             None,
                         );
                         design::metric_card(
@@ -1247,7 +1247,7 @@ impl ReportsPage {
                             &health
                                 .resolution_rate
                                 .map(|r| format!("{:.1}%", r * 100.0))
-                                .unwrap_or_else(|| "—".into()),
+                                .unwrap_or_else(|| design::MISSING_VALUE.into()),
                             None,
                         );
                     });
@@ -1268,7 +1268,7 @@ impl ReportsPage {
                             "avg QA score",
                             &eff.avg_qa_score
                                 .map(|s| format!("{s:.2}"))
-                                .unwrap_or_else(|| "—".into()),
+                                .unwrap_or_else(|| design::MISSING_VALUE.into()),
                             None,
                         );
                         design::metric_card(
@@ -1355,7 +1355,7 @@ impl ReportsPage {
                                     .get("message_count")
                                     .and_then(serde_json::Value::as_u64)
                                     .map(|v| v.to_string())
-                                    .unwrap_or_else(|| "—".into()),
+                                    .unwrap_or_else(|| design::MISSING_VALUE.into()),
                             );
                             design::td_num(
                                 ui,
@@ -1363,7 +1363,7 @@ impl ReportsPage {
                                     .get("resolution_hours")
                                     .and_then(serde_json::Value::as_f64)
                                     .map(|v| format!("{v:.1} h"))
-                                    .unwrap_or_else(|| "—".into()),
+                                    .unwrap_or_else(|| design::MISSING_VALUE.into()),
                             );
                             design::td_num(
                                 ui,
@@ -1371,7 +1371,7 @@ impl ReportsPage {
                                     .get("reopen_count")
                                     .and_then(serde_json::Value::as_u64)
                                     .map(|v| v.to_string())
-                                    .unwrap_or_else(|| "—".into()),
+                                    .unwrap_or_else(|| design::MISSING_VALUE.into()),
                             );
                             design::td_num(
                                 ui,
@@ -1379,7 +1379,7 @@ impl ReportsPage {
                                     .get("escalated")
                                     .and_then(serde_json::Value::as_bool)
                                     .map(|b| if b { "yes" } else { "no" })
-                                    .unwrap_or("—"),
+                                    .unwrap_or(design::MISSING_VALUE),
                             );
                         },
                     );
@@ -1439,13 +1439,13 @@ impl ReportsPage {
                         |ui, i| {
                             let node = &nodes[i];
                             ui.label(node.kind.as_str());
-                            ui.label(node.label.as_deref().unwrap_or("—"));
+                            ui.label(node.label.as_deref().unwrap_or(design::MISSING_VALUE));
                             design::td_num(
                                 ui,
                                 &node
                                     .entity_id
                                     .map(|e| e.to_string())
-                                    .unwrap_or_else(|| "—".into()),
+                                    .unwrap_or_else(|| design::MISSING_VALUE.into()),
                             );
                             design::td_num(ui, &node.created_at);
                             ui.horizontal(|ui| {
@@ -1786,7 +1786,7 @@ impl ReportsPage {
             "p1-happiness-list",
             &["Rating", "Conversation", "Customer", "Comment"],
             recent.len(),
-            28.0,
+            design::scale::CONTROL_H,
             |ui, i| {
                 let r = &recent[i];
                 let rating = str_field(r, "rating");
@@ -1818,7 +1818,9 @@ impl ReportsPage {
                     }
                     _ => design::td_num(
                         ui,
-                        &number.map(|n| n.to_string()).unwrap_or_else(|| "—".into()),
+                        &number
+                            .map(|n| n.to_string())
+                            .unwrap_or_else(|| design::MISSING_VALUE.into()),
                     ),
                 }
                 ui.label(str_field(r, "customer"));

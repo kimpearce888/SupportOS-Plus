@@ -411,7 +411,7 @@ impl OperationsPage {
             self.tab = *tab;
         }
         if let Some(err) = &self.error {
-            design::error_text(ui, &format!("error: {err}"));
+            design::error_note(ui, err);
         }
 
         match self.tab {
@@ -525,7 +525,7 @@ impl OperationsPage {
                         "Agent", "Open", "Waiting", "Capacity", "Load", "Pressure", "Actions",
                     ],
                     agents.len(),
-                    28.0,
+                    design::scale::CONTROL_H,
                     |ui, i| {
                         let t = design::tokens(ui);
                         let agent = &agents[i];
