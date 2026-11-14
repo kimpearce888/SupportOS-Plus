@@ -8,24 +8,25 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 ## CURRENT POINTER
 
 - Next task: **R4.2 — decomposition** (top-20 largest functions split
-  to the §5.3 soft cap of 40 lines — see plan §7 R4). R4.1 executed in
-  session 13 (naming census + surgical renames, D-22; CI row rides
-  that push — next session MUST confirm green before starting R4.2).
-  R4.2 notes for the executor: CENSUS FIRST (top-20 by line count from
-  a scanner, not from memory); the D-13 too_many_lines keeps (inbox.rs
-  ui() ×3 + design/mod.rs) and the F-04 split candidates overlap this
-  batch deliberately — the splits must be pixel-neutral (D-05: kittest
-  goldens are CI-only per F-06, so the discipline is extract-fn along
-  existing seams + battery + CI drift gate); kittest suite file names
-  and test fn names stay stable (invariant 5); new code is
-  comment-free (constraint 3).
+  to the §5.3 soft cap of 40 lines — see plan §7 R4). R4.1 CI-VERIFIED
+  (session 13): run#344 (id 43569924684) green on `1b653d4`, all four
+  lanes incl. the kittest drift gate (renames pixel-neutral by
+  construction). R4.2 notes for the executor: CENSUS FIRST (top-20 by
+  line count from a scanner, not from memory); the D-13 too_many_lines
+  keeps (inbox.rs ui() ×3 + design/mod.rs) and the F-04 split
+  candidates overlap this batch deliberately — the splits must be
+  pixel-neutral (D-05: kittest goldens are CI-only per F-06, so the
+  discipline is extract-fn along existing seams + battery + CI drift
+  gate); kittest suite file names and test fn names stay stable
+  (invariant 5); new code is comment-free (constraint 3).
 - Pre-flight [session 13]: run#343 green on `66f3968` (the session-12
   addendum head — the standard docs-only preflight gate). R4.1
-  executed on that green base; its CI row rides the R4.1 push.
+  executed on that green base and is now itself CI-VERIFIED (run#344).
+  Green base for R4.2: this addendum head's own docs-only run (the
+  standard next-session preflight gate).
 - Session counter: 13 completed (R1 terminal; R2 TERMINAL; R3 TERMINAL
   — R3.1 run#332, R3.2 run#335, R3.3 run#337, R3.4 run#339, R3.5
-  zero-motion run#341, R3.6 run#342; R4.1 battery-green, CI rides
-  this push).
+  zero-motion run#341, R3.6 run#342; R4.1 run#344).
 - Environment: session 13 was a FULL reset again — repo re-cloned via
   github-reconnect.sh; toolchain SURVIVED at /home/z/my-project/
   {rustup,cargo-home} (handover §3 updated to this durable path);
@@ -60,7 +61,7 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 | R3.4 page scaffolding | terminal (session 11) | census: hosting layer ALREADY shared (design:: hosts/page_header; 21/23 pages); the real repeat = the "Sync now" toolbar fragment byte-identical ×4 (dashboard/customers/reports/organizations) → `sync_health::sync_now_button` (button+hover+match+3 note strings in ONE place; re-read flag returns for the caller-side page-specific invalidate()); inbox variant, ensure_loaded latches, RANGES chip loops, LIST_CAP hint censused as keeps (R3.4 verdict table); +41/−97 across 5 files; battery green (520/528/293+2/56); strip-check 206/206; CI run#339 green on `9edd9b9` — see complete.md |
 | R3.5 PageKey tables | terminal (session 12) | census: ZERO folds land — the attribute layer is already single-sourced (label() str site, Icon::for_page Icon site, apply_invalidations field-dispatch, render-dispatch heterogeneous payloads — four disjoint payload shapes, no ≥2 same-shape pair); titles/nav-labels are decoupled roles (2 intentional divergences); NAV_GROUPS + all() already tables; drill-slug pair queued to R3.6 — see complete.md |
 | R3.6 cross-crate vocabulary | terminal (session 12) | census: ZERO core↔catalog const duplication (plan letter overcounted — 6th consecutive correction); real debt = 8 inline-parse twins of existing catalog parse fns (GraphNodeKind ×7 + AiAttributeKey ×1) + the drill-slug wire pair → `catalog::routes` (5 consts, new module); +24/−44 +6 (net −20); battery green (520/528/293+2/56, strip-check 207/207) — see complete.md |
-| R4.1 naming | done (session 13) | census (r41_census.py): 341 bool decls (272 prod) + 118 bool-returning fns + 478 short-id kinds + 232 suspicious-word hits; SEVENTH consecutive census correction — the tree's naming was overwhelmingly honest; 10 surgical renames + 1 deletion (aa_get, D-18 rule): temp→temperature, already→already_exists/already_queued, has→has_column, known/conversation→*_exists, palette_take→query_committed, right→align_right ×3, drill→drillable, assistant→from_assistant, ins→stmt ×2; keep rulings in the R4.1 verdict table (wire vocab / truthy adjectives / predicate phrases / flag idioms / established short vocabulary); dt_cell ×3 fold candidate recorded, not acted; battery green (520/528/293+2/56, clippy x2, gate, icons, strip-check 207/207); CI row rides this push — see complete.md |
+| R4.1 naming | terminal (session 13) | census (r41_census.py): 341 bool decls (272 prod) + 118 bool-returning fns + 478 short-id kinds + 232 suspicious-word hits; SEVENTH consecutive census correction — the tree's naming was overwhelmingly honest; 10 surgical renames + 1 deletion (aa_get, D-18 rule): temp→temperature, already→already_exists/already_queued, has→has_column, known/conversation→*_exists, palette_take→query_committed, right→align_right ×3, drill→drillable, assistant→from_assistant, ins→stmt ×2; keep rulings in the R4.1 verdict table; dt_cell ×3 fold candidate recorded, not acted; battery green (520/528/293+2/56, clippy x2, gate, icons, strip-check 207/207); CI run#344 green on `1b653d4` — see complete.md |
 | R4.2–R4.5 clean code | pending | see plan §7 R4 |
 | R5.1–R5.3 guardrails | pending (optional, stage-gated) | |
 | R6.1–R6.2 polish + close | pending | |
@@ -291,9 +292,10 @@ The plan's letter ("booleans read is_/has_; no non-domain-standard abbreviations
 - Diff class review: 13 code files, +77/−51 (progress.md +30
   ledger) — every hunk a word-level rename or the aa_get deletion;
   no behavior, no wire, no golden contact.
-- Commit `refactor(R4.1): naming …` + push; CI row rides this push
-  (four lanes incl. the kittest drift gate — renames are
-  pixel-neutral by construction).
+- Commit `refactor(R4.1): naming …` + push; CI run#344 (id 43569924684)
+  GREEN on `1b653d4`, all four lanes incl. the kittest drift gate
+  (renames pixel-neutral by construction); ledger addendum pushed
+  same-session (R4.1 terminal; R4.2 queued with decomposition notes).
 - memory.md: D-22 added (naming end state + standing rules);
   handover §3 toolchain path corrected to /home/z/my-project/.
 
