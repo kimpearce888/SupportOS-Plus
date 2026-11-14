@@ -22,12 +22,14 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 - Pre-flight [session 12]: run#340 green on `cf5faa7` (preflight gate);
   R3.5 zero-motion ledger head `3074b5e` CI-VERIFIED — run#341 (id
   43535457579) green, all four lanes; R3.6 executed on that green base
-  same-session (two-batch session). R3.6's head rides this session's
-  push; the addendum convention hands its CI verification to monitoring
-  below.
+  same-session (two-batch session). R3.6 head `c04be80` CI-VERIFIED —
+  run#342 (id 43541154258) green, all four lanes incl. the kittest
+  drift gate (the routes fold is behavior-neutral on goldens). Green
+  base for R4.1: this addendum head's own docs-only run (the standard
+  next-session preflight gate).
 - Session counter: 12 completed (R1 terminal; R2 stage TERMINAL; R3
   stage TERMINAL — R3.1 run#332, R3.2 run#335, R3.3 run#337, R3.4
-  run#339, R3.5 zero-motion run#341, R3.6 CI row rides this push).
+  run#339, R3.5 zero-motion run#341, R3.6 run#342).
 - Environment: session 12 partial-reset only — the canonical clone at
   /home/z/SupportOS-Plus SURVIVED (G-12 intact); toolchain via the §3
   partial-reset exports; rustc 1.99.1 verified; credentials active;
