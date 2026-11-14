@@ -19,14 +19,16 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
   for the >2K-line files) queues behind it.
 - Pre-flight [session 16]: run#349 (id 43621514210) green on `71f462d`
   (the session-15 addendum head — the standard docs-only preflight
-  gate). R4.3 executed on that green base; its CI verification rides
-  this push (all four lanes; the kittest drift gate is the pixel
-  proof for the zero-UI-motion batch — visibility prefixes and dead
-  code touch no widget calls by construction).
+  gate). R4.3 executed on that green base and is now itself CI-VERIFIED
+  (same session): run#350 (id 43633543056) green on `f005d49`, all four
+  lanes incl. the kittest snapshot drift gate — 203 goldens
+  byte-identical, pixel-neutrality confirmed for the prefix-only batch.
+  R4.3 TERMINAL; see `complete.md`. Green base for R4.4: this addendum
+  head's own docs-only run (the standard next-session preflight gate).
 - Session counter: 16 completed (R1 terminal; R2 TERMINAL; R3 TERMINAL
   — R3.1 run#332, R3.2 run#335, R3.3 run#337, R3.4 run#339, R3.5
   zero-motion run#341, R3.6 run#342; R4.1 run#344; R4.2-a run#346;
-  R4.2-b run#348 — R4.2 TERMINAL; R4.3 rides this push).
+  R4.2-b run#348 — R4.2 TERMINAL; R4.3 run#350 — R4.3 TERMINAL).
 - Environment: session 16 was ANOTHER full reset — repo re-cloned via
   github-reconnect.sh; toolchain SURVIVED at /tmp/my-project/
   {rustup,cargo-home} (exports re-applied per bash call per §3); core
@@ -67,7 +69,7 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 | R4.1 naming | terminal (session 13) | census (r41_census.py): 341 bool decls (272 prod) + 118 bool-returning fns + 478 short-id kinds + 232 suspicious-word hits; SEVENTH consecutive census correction — the tree's naming was overwhelmingly honest; 10 surgical renames + 1 deletion (aa_get, D-18 rule): temp→temperature, already→already_exists/already_queued, has→has_column, known/conversation→*_exists, palette_take→query_committed, right→align_right ×3, drill→drillable, assistant→from_assistant, ins→stmt ×2; keep rulings in the R4.1 verdict table; dt_cell ×3 fold candidate recorded, not acted; battery green (520/528/293+2/56, clippy x2, gate, icons, strip-check 207/207); CI run#344 green on `1b653d4` — see complete.md |
 | R4.2 decomposition (batch a) | done (session 14) | census (r42_census.py, cfg-aware fn-span scanner): 3,277 prod fns / 991 test fns; top-20 censused; 6 CORE mega-fns split (execute 1051→79 dispatch + 22 tool fns; derived_edges_touching 686→26 + 11 Kind fns + 4 module helpers + 2 epilogue fns; apply_m046 405→15 manifest + ensure_fk + 10 data consts; execute_job 3 fat arms→3 methods incl. embed×3 fold; build_support_health_report 465→34 manifest + 9 domain fns; analyze_friction 410→manifest + 6 finding fns + finding helper); 6 keeps + 11 queued to R4.2-b (verdict table below); battery green (520/528/293+2/56, clippy ×2, gate, icons, strip 207/207); CI run#346 green on `fa03cad` (all 4 lanes incl. kittest drift gate); D-23 |
 | R4.2 decomposition (batch b) | done (session 15) | all 11 queued fns split: execute_outbound 390→~86-line dispatcher + 6 send_* arm methods + payload_num/payload_str_or module fns (closures promoted per the batch-a recipe); sync_resource 331→19-arm dispatcher table + 16 sync_* methods (conversations/threads delegations + the `customers` since-seam + the unknown-resource fallback stay inline); incidents ui 527→~180 dispatcher + filter_controls/empty_list_ui/lifecycle_card_ui/linked_column_ui/info_column_ui methods + incident_row/incident_detail_header module fns; ai_center hub_ui 481→35-line dispatcher + 8 methods (endpoints card/row/key-edit/price/add-form/roles/features/ledger); organizations ui 393→~170 dispatcher + org_form_card_ui method + org_row/org_detail_header_ui/members_card_ui module fns; inbox list_ui→search_filter_ui/list_toolbar_ui/conversation_rows_ui methods, copilot_pane_ui→copilot_cards_ui/copilot_lmstudio_ui/assistant_ui methods, composer_pane_ui→enqueue_composer_tool/apply_composer_act/mention_popup_ui methods + composer_tool_row module fn + ToolAction enum hoisted to module scope; settings helpscout_ui→4 card methods; diagnostics ui→event_log_card_ui method + audit_trail/sync_reports/outbound_deliveries_card_ui module fns; design composer→composer_header_row/composer_footer_row module fns; ALL 4 too_many_lines allows deleted (every post-split fn under the 100-line threshold — clippy -D warnings green); battery green at EXACT baselines (520/528/293+2/56, clippy ×2, gate, icons, strip 207/207); pixel-neutrality verified locally by the widget-call multiset comparison (design::/ui. call multisets byte-identical old-vs-new on all 9 files after fixes — D-24); the CI kittest drift gate rides this push; D-23/D-24 |
-| R4.3 visibility | done (session 16) | census (r43_census.py, G-08 machinery + G-14 fix): 1,094 pub(prod) items censused against tree-wide consumers → 866 keep-pub + 222 downgrade candidates + 6 dead; applied 223 edits + 6 deletions; rustc-reachability compile loop (5 core rounds + 3 workspace rounds) restored ~140 exposure-proven keeps (pub fn/trait/field signatures, ancestor-module paths, bin-crate return flows); FINAL: pub surface 1,113→1,023 = 82 downgrades surviving (57 pub(crate) incl. 9 module caps + 8 pub(super) + 17 private) + 9 dead items deleted (6 censused + 3 cascade: CustomerTimelineEntry, fts_row, knowledge_store::search_knowledge phantom) + AiJobRow dead-field slim (error/latency_ms); battery green at EXACT baselines (520/528/293/56, clippy ×2, gate, icons, strip 207/207); diff 40 files +101/−321; D-25/G-14/G-15/Q-05 |
+| R4.3 visibility | terminal (session 16) | CI run#350 green — see `complete.md` |
 | R4.4–R4.5 clean code | pending | see plan §7 R4; R4.4 queued (census-first) |
 | R5.1–R5.3 guardrails | pending (optional, stage-gated) | |
 | R6.1–R6.2 polish + close | pending | |
@@ -356,8 +358,12 @@ internal error.
   prefix change, a module-cap line, a compiler-verified deletion, a
   dead-field slim, an unused-import cleanup, or a rustfmt reflow; no
   logic edits, no test changes (baselines exact).
-- Commits: code + ledger (D-08). CI rides this push; the addendum with
-  the run id follows the green.
+- Commits: code + ledger (D-08). CI closure (same session): run#350
+  (id 43633543056) completed / success on `f005d49` — all four lanes
+  (check fmt/clippy/test/deny; packages x86_64; packages arm64; kittest
+  snapshot locks drift gate, 203 goldens byte-identical). R4.3 TERMINAL;
+  this addendum rides the next docs-only run (the standard
+  next-session preflight gate).
 
 ### Session 15 — 2026-11-14
 - Pre-flight: run#347 green on the session-14 addendum head `a18a8ea`
