@@ -20,14 +20,17 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
   >2K-line files) queue behind it.
 - Pre-flight [session 15]: run#347 green on `a18a8ea` (the session-14
   addendum head — the standard docs-only preflight gate). R4.2-b
-  executed on that green base (battery green; CI row rides this push):
-  all 11 queued fns split — see the R4.2 verdict table's executed
-  rows and the session-15 log. Green base for R4.3: this head's own
-  CI run (monitor; addendum records it).
+  executed on that green base and is now itself CI-VERIFIED (same
+  session): run#348 (id 43619290868) green on `6eaf8c8`, all four
+  lanes incl. the kittest snapshot drift gate — 203 goldens
+  byte-identical, the definitive pixel-neutrality proof for all nine
+  extractions (D-24's multiset pre-gate predicted it). R4.2 TERMINAL
+  (a + b); see `complete.md`. Green base for R4.3: this addendum
+  head's own docs-only run (the standard next-session preflight gate).
 - Session counter: 15 completed (R1 terminal; R2 TERMINAL; R3 TERMINAL
   — R3.1 run#332, R3.2 run#335, R3.3 run#337, R3.4 run#339, R3.5
   zero-motion run#341, R3.6 run#342; R4.1 run#344; R4.2-a run#346;
-  R4.2-b rides this push).
+  R4.2-b run#348 — R4.2 TERMINAL).
 - Environment: session 15 was ANOTHER full reset — repo re-cloned via
   github-reconnect.sh; toolchain SURVIVED again at /tmp/my-project/
   {rustup,cargo-home} (export RUSTUP_HOME=/tmp/my-project/rustup
@@ -356,8 +359,12 @@ internal error.
   deleted with clippy -D warnings green proving every post-split fn
   under the 100-line threshold; no test changes (520/528/293+2/56 at
   EXACT baselines).
-- Commits: this push (code + ledger, battery-green). CI: rides the
-  push — monitor; the addendum will record the run number.
+- Commits: `6eaf8c8` (code + ledger, battery-green). CI: run#348
+  (id 43619290868) completed / success on `6eaf8c8`, all four lanes —
+  check (fmt/clippy/test/deny), packages x86_64, packages arm64,
+  and the kittest snapshot drift gate (203 goldens byte-identical —
+  the pixel-neutrality proof). R4.2 closed terminal; this addendum
+  rides run#349 (docs-only).
 
 ### Session 14 — 2026-11-14
 - Pre-flight: run#345 green on the session-13 addendum head `155c277`
