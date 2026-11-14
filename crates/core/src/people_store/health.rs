@@ -69,10 +69,48 @@ pub(super) fn build_support_health_report(
 ) -> Result<Value> {
     let mut metrics: Vec<Value> = Vec::new();
     let mut flags: Vec<Value> = Vec::new();
-    let ev = |extra_sql: &str, extra: &[rusqlite::types::Value]| -> Vec<i64> {
-        evidence_ids(conn, conv_scope, subject_id, extra_sql, extra)
-    };
+    metrics.extend(volume_metrics(conn, subject_kind, subject_id, conv_scope));
+    let (m, f) = waiting_metrics(conn, subject_id, conv_scope);
+    metrics.extend(m);
+    flags.extend(f);
+    metrics.extend(first_response_metrics(conn, subject_id, conv_scope));
+    let (m, f) = bad_rating_metrics(conn, subject_id, rating_scope);
+    metrics.extend(m);
+    flags.extend(f);
+    let (m, f) = escalation_metrics(conn, subject_id, conv_scope);
+    metrics.extend(m);
+    flags.extend(f);
+    let (m, f) = customer_effort_metrics(conn, subject_id, conv_scope);
+    metrics.extend(m);
+    flags.extend(f);
+    let (m, f) = repeated_issue_metrics(conn, subject_id, conv_scope);
+    metrics.extend(m);
+    flags.extend(f);
+    let (m, f) = unresolved_known_metrics(conn, subject_id, conv_scope);
+    metrics.extend(m);
+    flags.extend(f);
+    let (m, f, incident_exposure) = incident_metrics(conn, subject_id, conv_scope, incident_scope);
+    metrics.extend(m);
+    flags.extend(f);
+    Ok(json!({
+        "subject_kind": subject_kind,
+        "subject_id": subject_id,
+        "subject_label": subject_label,
+        "metrics": metrics,
+        "flags": flags,
+        "incident_exposure": incident_exposure,
+        "generated_at": chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string(),
+        "note": "Operational facts with evidence only. No psychological or personal judgments; no aggregate \"score\" by design (plan Phase 24).",
+    }))
+}
 
+fn volume_metrics(
+    conn: &Connection,
+    subject_kind: &str,
+    subject_id: i64,
+    conv_scope: &str,
+) -> Vec<Value> {
+    let mut metrics: Vec<Value> = Vec::new();
     let open_convs: i64 = conn
         .query_row(
             &format!(
@@ -111,7 +149,7 @@ pub(super) fn build_support_health_report(
         json!(open_convs),
         open_convs.to_string(),
         &format!("Conversations currently in status \"active\" for this {subject_kind}."),
-        ev("AND c.status = 'active'", &[]),
+        evidence_ids(conn, conv_scope, subject_id, "AND c.status = 'active'", &[]),
         "known",
     ));
     metrics.push(health_metric(
@@ -120,7 +158,7 @@ pub(super) fn build_support_health_report(
         json!(total_convs),
         total_convs.to_string(),
         &format!("Total conversations ever synced for this {subject_kind}."),
-        ev("", &[]),
+        evidence_ids(conn, conv_scope, subject_id, "", &[]),
         "known",
     ));
     metrics.push(health_metric(
@@ -129,13 +167,25 @@ pub(super) fn build_support_health_report(
         json!(volume_90),
         volume_90.to_string(),
         "Conversations created in the last 90 days.",
-        ev(
+        evidence_ids(
+            conn,
+            conv_scope,
+            subject_id,
             "AND julianday(c.created_at) >= julianday('now', '-90 days')",
             &[],
         ),
         "known",
     ));
+    metrics
+}
 
+fn waiting_metrics(
+    conn: &Connection,
+    subject_id: i64,
+    conv_scope: &str,
+) -> (Vec<Value>, Vec<Value>) {
+    let mut metrics: Vec<Value> = Vec::new();
+    let mut flags: Vec<Value> = Vec::new();
     let (waiting_count, waiting_avg_days, waiting_max_days): (i64, Option<f64>, Option<f64>) = conn
         .query_row(
             &format!(
@@ -150,7 +200,10 @@ pub(super) fn build_support_health_report(
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .unwrap_or((0, None, None));
-    let waiting_evidence = ev(
+    let waiting_evidence = evidence_ids(
+        conn,
+        conv_scope,
+        subject_id,
         "AND c.status = 'active' AND c.customer_waiting_since IS NOT NULL",
         &[],
     );
@@ -175,7 +228,7 @@ pub(super) fn build_support_health_report(
             json!(avg_days),
             format!("{avg_days:.1} days"),
             "Average calendar days waiting across currently-open conversations (not business hours).",
-            ev(
+            evidence_ids(conn, conv_scope, subject_id,
                 "AND c.status = 'active' AND c.customer_waiting_since IS NOT NULL",
                 &[],
             ),
@@ -200,7 +253,11 @@ pub(super) fn build_support_health_report(
             ));
         }
     }
+    (metrics, flags)
+}
 
+fn first_response_metrics(conn: &Connection, subject_id: i64, conv_scope: &str) -> Vec<Value> {
+    let mut metrics: Vec<Value> = Vec::new();
     let (fr_avg_hours, fr_n): (Option<f64>, i64) = conn
         .query_row(
             &format!(
@@ -226,13 +283,22 @@ pub(super) fn build_support_health_report(
             "unknown".to_string()
         },
         "Average calendar hours between the first customer message and the first agent reply (last 90 days). Business-hours SLA timing lives on each conversation.",
-        ev(
+        evidence_ids(conn, conv_scope, subject_id,
             "AND c.first_response_at IS NOT NULL AND c.first_customer_message_at IS NOT NULL AND julianday(c.created_at) >= julianday('now', '-90 days')",
             &[],
         ),
         if fr_n > 0 { "known" } else { "unknown" },
     ));
+    metrics
+}
 
+fn bad_rating_metrics(
+    conn: &Connection,
+    subject_id: i64,
+    rating_scope: &str,
+) -> (Vec<Value>, Vec<Value>) {
+    let mut metrics: Vec<Value> = Vec::new();
+    let mut flags: Vec<Value> = Vec::new();
     let bad_count: i64 = conn
         .query_row(
             &format!(
@@ -274,7 +340,16 @@ pub(super) fn build_support_health_report(
             bad_evidence,
         ));
     }
+    (metrics, flags)
+}
 
+fn escalation_metrics(
+    conn: &Connection,
+    subject_id: i64,
+    conv_scope: &str,
+) -> (Vec<Value>, Vec<Value>) {
+    let mut metrics: Vec<Value> = Vec::new();
+    let mut flags: Vec<Value> = Vec::new();
     let escalated_sql = "AND EXISTS (SELECT 1 FROM conversation_tags ct JOIN tags t ON t.id = ct.tag_id WHERE ct.conversation_id = c.id AND t.name = 'escalated')";
     let escalations: i64 = conn
         .query_row(
@@ -292,7 +367,7 @@ pub(super) fn build_support_health_report(
         json!(escalations),
         escalations.to_string(),
         "Conversations carrying the \"escalated\" tag (all time, Help Scout mirror).",
-        ev(escalated_sql, &[]),
+        evidence_ids(conn, conv_scope, subject_id, escalated_sql, &[]),
         "known",
     ));
     if escalations >= 2 {
@@ -301,10 +376,19 @@ pub(super) fn build_support_health_report(
             "Escalation history",
             "info",
             format!("{escalations} conversations were escalated historically."),
-            ev(escalated_sql, &[]),
+            evidence_ids(conn, conv_scope, subject_id, escalated_sql, &[]),
         ));
     }
+    (metrics, flags)
+}
 
+fn customer_effort_metrics(
+    conn: &Connection,
+    subject_id: i64,
+    conv_scope: &str,
+) -> (Vec<Value>, Vec<Value>) {
+    let mut metrics: Vec<Value> = Vec::new();
+    let mut flags: Vec<Value> = Vec::new();
     let avg_msgs: Option<f64> = conn
         .query_row(
             &format!(
@@ -332,7 +416,7 @@ pub(super) fn build_support_health_report(
             "unknown".to_string()
         },
         "Average number of customer messages per conversation in the last 90 days. A high value often means more back-and-forth to get resolved - an operational proxy, not a judgment about anyone.",
-        ev("AND julianday(c.created_at) >= julianday('now', '-90 days')", &[]),
+        evidence_ids(conn, conv_scope, subject_id, "AND julianday(c.created_at) >= julianday('now', '-90 days')", &[]),
         if avg_msgs > 0.0 { "partial" } else { "unknown" },
     ));
     if avg_msgs >= 5.0 {
@@ -343,10 +427,19 @@ pub(super) fn build_support_health_report(
             format!(
                 "An average of {avg_msgs:.1} customer messages per conversation in the last 90 days."
             ),
-            ev("AND julianday(c.created_at) >= julianday('now', '-90 days')", &[]),
+            evidence_ids(conn, conv_scope, subject_id, "AND julianday(c.created_at) >= julianday('now', '-90 days')", &[]),
         ));
     }
+    (metrics, flags)
+}
 
+fn repeated_issue_metrics(
+    conn: &Connection,
+    subject_id: i64,
+    conv_scope: &str,
+) -> (Vec<Value>, Vec<Value>) {
+    let mut metrics: Vec<Value> = Vec::new();
+    let mut flags: Vec<Value> = Vec::new();
     let repeated: Option<(String, i64)> = conn
         .query_row(
             &format!(
@@ -378,7 +471,7 @@ pub(super) fn build_support_health_report(
             "none".to_string()
         },
         "Most-repeated issue cluster for this subject (conversations within one cluster). \"None\" is honest when no cluster repeats.",
-        ev(
+        evidence_ids(conn, conv_scope, subject_id,
             "AND EXISTS (SELECT 1 FROM issue_cluster_conversations icm WHERE icm.conversation_id = c.id)",
             &[],
         ),
@@ -390,13 +483,22 @@ pub(super) fn build_support_health_report(
             "Repeated issue",
             "warning",
             format!("{repeated_n} conversations in the \"{repeated_title}\" issue cluster."),
-            ev(
+            evidence_ids(conn, conv_scope, subject_id,
                 "AND EXISTS (SELECT 1 FROM issue_cluster_conversations icm JOIN issue_clusters ic ON ic.id = icm.cluster_id WHERE icm.conversation_id = c.id AND ic.name = ?)",
                 &[rusqlite::types::Value::Text(repeated_title.clone())],
             ),
         ));
     }
+    (metrics, flags)
+}
 
+fn unresolved_known_metrics(
+    conn: &Connection,
+    subject_id: i64,
+    conv_scope: &str,
+) -> (Vec<Value>, Vec<Value>) {
+    let mut metrics: Vec<Value> = Vec::new();
+    let mut flags: Vec<Value> = Vec::new();
     let unresolved_sql = "AND c.status = 'active' AND EXISTS (SELECT 1 FROM known_issue_links kil JOIN known_issues ki ON ki.id = kil.known_issue_id WHERE kil.conversation_id = c.id AND ki.status != 'resolved')";
     let unresolved_count: i64 = conn
         .query_row(
@@ -414,7 +516,7 @@ pub(super) fn build_support_health_report(
         json!(unresolved_count),
         unresolved_count.to_string(),
         "Open conversations linked to known issues that are not yet resolved.",
-        ev(unresolved_sql, &[]),
+        evidence_ids(conn, conv_scope, subject_id, unresolved_sql, &[]),
         "known",
     ));
     if unresolved_count >= 1 {
@@ -425,10 +527,20 @@ pub(super) fn build_support_health_report(
             format!(
                 "{unresolved_count} open conversation(s) tied to known issues that are not resolved."
             ),
-            ev(unresolved_sql, &[]),
+            evidence_ids(conn, conv_scope, subject_id, unresolved_sql, &[]),
         ));
     }
+    (metrics, flags)
+}
 
+fn incident_metrics(
+    conn: &Connection,
+    subject_id: i64,
+    conv_scope: &str,
+    incident_scope: &str,
+) -> (Vec<Value>, Vec<Value>, Vec<Value>) {
+    let mut metrics: Vec<Value> = Vec::new();
+    let mut flags: Vec<Value> = Vec::new();
     struct IncidentRow {
         incident_id: i64,
         code: Option<String>,
@@ -461,7 +573,10 @@ pub(super) fn build_support_health_report(
         },
     )
     .unwrap_or_default();
-    let incident_evidence = ev(
+    let incident_evidence = evidence_ids(
+        conn,
+        conv_scope,
+        subject_id,
         "AND EXISTS (SELECT 1 FROM incident_conversations ic JOIN incidents i ON i.id = ic.incident_id WHERE ic.conversation_id = c.id AND i.status != 'resolved')",
         &[],
     );
@@ -496,7 +611,7 @@ pub(super) fn build_support_health_report(
                     inc.title.clone().unwrap_or_default(),
                     inc.status
                 ),
-                ev(
+                evidence_ids(conn, conv_scope, subject_id,
                     "AND EXISTS (SELECT 1 FROM incident_conversations ic JOIN incidents i ON i.id = ic.incident_id WHERE ic.conversation_id = c.id AND i.status != 'resolved' AND i.id = ?)",
                     &[rusqlite::types::Value::Integer(inc.incident_id)],
                 ),
@@ -511,15 +626,5 @@ pub(super) fn build_support_health_report(
             })
         })
         .collect();
-
-    Ok(json!({
-        "subject_kind": subject_kind,
-        "subject_id": subject_id,
-        "subject_label": subject_label,
-        "metrics": metrics,
-        "flags": flags,
-        "incident_exposure": incident_exposure,
-        "generated_at": chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string(),
-        "note": "Operational facts with evidence only. No psychological or personal judgments; no aggregate \"score\" by design (plan Phase 24).",
-    }))
+    (metrics, flags, incident_exposure)
 }

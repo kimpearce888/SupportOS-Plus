@@ -616,3 +616,38 @@ session ends by adding what the next session must not have to rediscover.
   risk — must ride a golden-verified batch), oauth_state range-newtype
   (R3-territory), execute.rs outer-arm re-nesting. Default (standing
   unless overridden): D-15's keeps.
+
+- **D-23 (session 14, R4.2-a).** Decomposition end state — the census
+  (r42_census.py: 3,277 production fns) found the tree's oversized fns
+  in five classes, each with its own verdict shape (the eighth
+  consecutive plan-letter correction — "top-20 to the 40-line soft cap"
+  is not one operation):
+  - **Match dispatches** (`execute` 26 tool arms; `derived_edges_touching`
+    11 Kind arms) → extract per-arm fns with exactly the params the arm
+    uses; the dispatcher becomes a thin table. Arms that are already
+    1-line delegations ARE dispatch data — they stay (execute_job's ~37
+    post-split lines are 40 arms of data, not debt).
+  - **Guard-scaffold repeats** (apply_m046's 10× `if !fk_declared {
+    rebuild_table(&Rebuild{…})?; }`) → ONE helper (`ensure_fk`) + the
+    specs become `Rebuild<'static>` data consts + a manifest fn.
+  - **Sequential accumulators** (health metrics; friction findings) →
+    per-domain fns RETURNING tuples / Vecs (never `&mut` out-parameters
+    — §5.3); closures deleted, call sites call the module fn with conn.
+  - **Flat manifests** (db_breadth's add()/create tables; sync_schema's
+    guarded migration sequence; icons.rs `draw`'s 34-arm table) → KEEP:
+    each line is one declarative datum; per-datum sub-fns are artificial
+    seams (indirection without abstraction).
+  - **State machines / conversation loops** (analyze_interaction
+    two-stage pipeline; copilot chat round loop) → KEEP: extraction
+    means a context struct = re-architecture, not decomposition.
+  - **The execute_job early-return rule (binding for R4.2-b):** a match
+    arm containing `return Ok(())` after `jobs::fail` CANNOT be
+    extracted naively — the return skips job completion (complete/
+    complete_with_result) and the "Job completed" trace; in a method it
+    would fall through to completion. Only arms without early returns
+    extract; the fail-path arms stay inline in the dispatcher.
+  - **UI T-composition twins** (the 11 queued fns) are R4.2-b: extract
+    section renderers along existing seams; pixel-neutral by
+    construction (identical widget-call sequence); the CI kittest
+    drift gate is the verifier (F-06); delete a D-13
+    too_many_lines allow only when its fn drops under the threshold.

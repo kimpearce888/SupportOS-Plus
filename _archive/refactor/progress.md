@@ -1,38 +1,47 @@
 # Refactor Progress — Live State
 
-Last updated: session 12 (2026-11-14). Update rule: every session updates
+Last updated: session 14 (2026-11-14). Update rule: every session updates
 this file before ending. Statuses: `pending` / `in_progress` / `done` /
 `terminal` (done + closed in `complete.md`) / `dropped` (with reason in
 `memory.md`).
 
 ## CURRENT POINTER
 
-- Next task: **R4.2 — decomposition** (top-20 largest functions split
-  to the §5.3 soft cap of 40 lines — see plan §7 R4). R4.1 CI-VERIFIED
-  (session 13): run#344 (id 43569924684) green on `1b653d4`, all four
-  lanes incl. the kittest drift gate (renames pixel-neutral by
-  construction). R4.2 notes for the executor: CENSUS FIRST (top-20 by
-  line count from a scanner, not from memory); the D-13 too_many_lines
-  keeps (inbox.rs ui() ×3 + design/mod.rs) and the F-04 split
-  candidates overlap this batch deliberately — the splits must be
-  pixel-neutral (D-05: kittest goldens are CI-only per F-06, so the
-  discipline is extract-fn along existing seams + battery + CI drift
-  gate); kittest suite file names and test fn names stay stable
-  (invariant 5); new code is comment-free (constraint 3).
-- Pre-flight [session 13]: run#343 green on `66f3968` (the session-12
-  addendum head — the standard docs-only preflight gate). R4.1
-  executed on that green base and is now itself CI-VERIFIED (run#344).
-  Green base for R4.2: this addendum head's own docs-only run (the
-  standard next-session preflight gate).
-- Session counter: 13 completed (R1 terminal; R2 TERMINAL; R3 TERMINAL
+- Next task: **R4.2-b — decomposition continuation: the UI T-composition
+  twins + the two remaining dispatch fns** (see the R4.2 verdict table for
+  the exact queue). R4.2-a landed in session 14 (battery green; CI row
+  rides the push): six CORE mega-fn splits, zero app-shell source contact
+  (pixel-neutral by construction). R4.2-b notes for the executor: the
+  queue is incidents.rs ui (527), ai_center hub_ui (481), organizations
+  ui (393), inbox copilot_pane_ui (389, D-13), settings helpscout_ui
+  (330), diagnostics ui (322), inbox list_ui (322, D-13), inbox
+  composer_pane_ui (239, D-13), design/mod.rs composer (D-13), plus
+  workers/mod.rs execute_outbound (386) and sync_engine/loops.rs
+  sync_resource (333) via the execute_job-proven recipe (extract only arms
+  WITHOUT early `return Ok(())` — those skips job completion and must
+  stay inline; D-23). UI discipline: extract-fn along existing section
+  seams, pixel-neutral by construction (identical widget-call sequence),
+  kittest goldens are the CI drift gate (F-06: no local Vulkan); suite
+  file names and test fn names stay stable (invariant 5); delete the
+  arm's `#[allow(clippy::too_many_lines)]` only when its fn is under the
+  lint threshold after the split; new code comment-free (constraint 3).
+- Pre-flight [session 14]: run#345 green on `155c277` (the session-13
+  addendum head — the standard docs-only preflight gate). R4.2-a executed
+  on that green base; its own CI verification is the addendum gate for
+  the next session.
+- Session counter: 14 completed (R1 terminal; R2 TERMINAL; R3 TERMINAL
   — R3.1 run#332, R3.2 run#335, R3.3 run#337, R3.4 run#339, R3.5
-  zero-motion run#341, R3.6 run#342; R4.1 run#344).
-- Environment: session 13 was a FULL reset again — repo re-cloned via
-  github-reconnect.sh; toolchain SURVIVED at /home/z/my-project/
-  {rustup,cargo-home} (handover §3 updated to this durable path);
-  cold-cache battery ~30 min total (clippy lanes fast in check mode,
-  codegen test lanes ~8–10 min each); disk tripped 93% at the
-  app-shell link lane — G-05 incremental cleanup applied post-run.
+  zero-motion run#341, R3.6 run#342; R4.1 run#344; R4.2-a rides this
+  push).
+- Environment: session 14 was ANOTHER full reset — repo re-cloned via
+  github-reconnect.sh; toolchain SURVIVED at /tmp/my-project/
+  {rustup,cargo-home} (the persistent-dir location MOVED this reset —
+  handover §3's path is stale again; export RUSTUP_HOME=/tmp/my-project/
+  rustup CARGO_HOME=/tmp/my-project/cargo-home PATH=/tmp/my-project/
+  cargo-home/bin:$PATH in EVERY bash call); cold core-crate check ~7 min
+  first time; warm lanes fast; the workspace test lane EXCEEDS a single
+  600s tool call (split it: core --lib, core --tests, xtask; app-shell
+  covered by the first partial) — G-05 applied twice (disk tripped 81%).
 
 ## Task states
 
@@ -62,7 +71,8 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 | R3.5 PageKey tables | terminal (session 12) | census: ZERO folds land — the attribute layer is already single-sourced (label() str site, Icon::for_page Icon site, apply_invalidations field-dispatch, render-dispatch heterogeneous payloads — four disjoint payload shapes, no ≥2 same-shape pair); titles/nav-labels are decoupled roles (2 intentional divergences); NAV_GROUPS + all() already tables; drill-slug pair queued to R3.6 — see complete.md |
 | R3.6 cross-crate vocabulary | terminal (session 12) | census: ZERO core↔catalog const duplication (plan letter overcounted — 6th consecutive correction); real debt = 8 inline-parse twins of existing catalog parse fns (GraphNodeKind ×7 + AiAttributeKey ×1) + the drill-slug wire pair → `catalog::routes` (5 consts, new module); +24/−44 +6 (net −20); battery green (520/528/293+2/56, strip-check 207/207) — see complete.md |
 | R4.1 naming | terminal (session 13) | census (r41_census.py): 341 bool decls (272 prod) + 118 bool-returning fns + 478 short-id kinds + 232 suspicious-word hits; SEVENTH consecutive census correction — the tree's naming was overwhelmingly honest; 10 surgical renames + 1 deletion (aa_get, D-18 rule): temp→temperature, already→already_exists/already_queued, has→has_column, known/conversation→*_exists, palette_take→query_committed, right→align_right ×3, drill→drillable, assistant→from_assistant, ins→stmt ×2; keep rulings in the R4.1 verdict table; dt_cell ×3 fold candidate recorded, not acted; battery green (520/528/293+2/56, clippy x2, gate, icons, strip-check 207/207); CI run#344 green on `1b653d4` — see complete.md |
-| R4.2–R4.5 clean code | pending | see plan §7 R4 |
+| R4.2 decomposition (batch a) | in_progress (session 14) | census (r42_census.py, cfg-aware fn-span scanner): 3,277 prod fns / 991 test fns; top-20 censused; 6 CORE mega-fns split (execute 1051→79 dispatch + 22 tool fns; derived_edges_touching 686→26 + 11 Kind fns + 4 module helpers + 2 epilogue fns; apply_m046 405→15 manifest + ensure_fk + 10 data consts; execute_job 3 fat arms→3 methods incl. embed×3 fold; build_support_health_report 465→34 manifest + 9 domain fns; analyze_friction 410→manifest + 6 finding fns + finding helper); 6 keeps + 11 queued to R4.2-b (verdict table below); battery green (520/528/293+2/56, clippy ×2, gate, icons, strip 207/207); CI row rides this push; D-23 |
+| R4.3–R4.5 clean code | pending | see plan §7 R4 |
 | R5.1–R5.3 guardrails | pending (optional, stage-gated) | |
 | R6.1–R6.2 polish + close | pending | |
 
@@ -251,7 +261,81 @@ The plan's letter ("booleans read is_/has_; no non-domain-standard abbreviations
 
 **Census finding recorded, not acted (wrong change class for R4.1 — same pattern as D-18's deferred truncation note):** dt_cell exists as 3 byte-similar private copies (customers.rs:892 / incidents.rs:1041 / organizations.rs:608) — a cross-page helper fold candidate (R3.4-family); the rename above is applied to all three copies identically, the fold itself awaits its own batch if ordered.
 
+### R4.2 — decomposition, batch a (session 14; census-first per standing discipline — scanner r42_census.py in tool-results: cfg-aware char-level fn-span lexer over all 207 .rs files; 3,277 production fns / 991 test fns; the first scanner run mis-flagged impl-level fns after top-level `#[cfg(test)] mod` blocks — boundary-line gate added and re-run)
+
+Top-20 by line span (census order) and the batch-a disposition:
+
+| fn | span | verdict | outcome |
+|---|---|---|---|
+| ai_tools/execute.rs `execute` | 1051 | split | 26-arm tool dispatch → 22 `tool_<name>` fns (params = exactly what each arm uses; conn/args/limit/index variants); dispatcher now 79 lines; every arm body moved verbatim (early `return json!` arms keep semantics — the arm value IS the fn result) |
+| support_graph/derived.rs `derived_edges_touching` | 686 | split | match-kind dispatch → 11 `<kind>_edges` fns + 2 epilogue fns (incident_related / custom_object_links) + closures promoted to module fns (one_i64, many_i64, product_id_by_name, mirror) + BRANCH_CAP to module const; dispatcher 26 lines; per-arm `Result` preserves the `?` abort order |
+| pages/incidents.rs `ui` | 527 | queued (R4.2-b) | UI T-composition twin — zero app-shell contact in batch a |
+| workers/execute.rs `execute_job` | 495 | split (partial) | 3 fat arms → methods along the file's own run_*_job seam: sync_conversation_ratings_job (63→thin arm+55-line fn), embed_chunks_job (3 structurally-identical embed arms folded to ONE fn-pointer-parameterized method — the fn's own DRY win), automation_approval_job (57); early-`return Ok(())` arms stay inline (that return SKIPS job completion — extraction would change the fail-path contract; D-23); post-split ~376 = 40-arm dispatch table, thin arms are dispatch data |
+| migrations/db_breadth.rs `add_missing_reference_columns` | 489 | keep | flat schema manifest — every line is one declarative `add()` call; per-table sub-fns would be artificial seams over data (same class as icons::draw); the `add` helper is already the shared seam |
+| pages/ai_center.rs `hub_ui` | 481 | queued (R4.2-b) | UI twin |
+| people_store/health.rs `build_support_health_report` | 465 | split | 9 metric-domain fns (volume/waiting/first_response/bad_rating/escalation/customer_effort/repeated_issue/unresolved_known/incident) returning metrics / (metrics,flags) / (metrics,flags,exposure) tuples — no out-parameters (§5.3); the `ev` closure deleted, call sites → `evidence_ids(conn, conv_scope, subject_id, …)`; dispatcher = 34-line manifest + the report json |
+| quality/mod.rs `analyze_friction` | 410 | split | 6 finding fns (repeated_customer_explanations / repeated_agent_questions / troubleshooting_loop / repeated_handoffs / repeated_unresolved / duplicated_request) each returning `Vec<finding-tuple>`; `push` closure → `finding()` helper fn; persistence + report mapping stay in the dispatcher |
+| migrations/mirror_parity.rs `apply_m046` | 405 | split | 10 `if !fk_declared { rebuild_table }` scaffolds → ONE `ensure_fk` helper + 10 `M046_<TABLE>: Rebuild<'static>` data consts; apply_m046 is now a 15-line manifest (rebuild_customers + 10 ensure_fk + version stamp); m044/m045 keep their unconditional rebuild form (no guard to fold) |
+| icons.rs `draw` | 396 | keep | 34-arm icon dispatch table, arms 3-28 lines each — the arms ARE the data; per-icon fns with geometry params would add signature noise for zero abstraction gain |
+| sync_schema.rs `apply_inner` | 396 | keep | guarded one-shot migration sequence — flat manifest class |
+| pages/organizations.rs `ui` | 393 | queued (R4.2-b) | UI twin |
+| pages/inbox.rs `copilot_pane_ui` | 389 | queued (R4.2-b) | D-13 too_many_lines site — UI twin |
+| workers/mod.rs `execute_outbound` | 386 | queued (R4.2-b) | execute_job-proven recipe applies (arm extraction; early-return arms stay) |
+| ai_pipeline/interaction.rs `analyze_interaction` | 376 | keep | two-stage LLM state machine (stage1 heuristic merge → stage2 rec) with dense local threading (obs/latencies/usage/merged/stored/stage_current) — extraction needs a context struct = re-architecture, not decomposition; one level of abstraction already holds (the pipeline) |
+| migrations/db_breadth.rs `create_missing_reference_tables` | 342 | keep | flat schema manifest class |
+| sync_engine/loops.rs `sync_resource` | 333 | queued (R4.2-b) | dispatch-arm recipe applies |
+| pages/settings.rs `helpscout_ui` | 330 | queued (R4.2-b) | UI twin |
+| copilot.rs `chat` | 324 | keep | single conversation loop — one abstraction level (rounds of chat); extraction threads 9 accumulators for no gain |
+| pages/diagnostics.rs `ui` | 322 | queued (R4.2-b) | UI twin |
+
+Batch-a mechanics: all six splits executed by line-boundary Python
+transforms (tool-results r42_split1..6.py) with hard asserts on every
+boundary; bodies moved verbatim except the documented rewrites (closure
+→ module fn with conn param; `push(` → `out.push(finding(` with the
+paren-balance fix; fn-pointer fold for the embed trio). Compile-check
+after each split (cold core check ~7 min once, then ~6-8 s incremental).
+Two clippy needlessly-borrow fixes post-extraction (`arg_i64(&args,` →
+`arg_i64(args,` ×13 in the tool fns; `repeated_spans(&customer,` →
+`repeated_spans(customer,`). fmt --all applied once (write mode), one
+trailing-whitespace strip (regex-introduced) that had tripped a rustfmt
+internal error.
+
 ## Session log
+
+### Session 14 — 2026-11-14
+- Pre-flight: run#345 green on the session-13 addendum head `155c277`
+  (the standard docs-only preflight gate) — R4.2-a's green base.
+- Environment: full reset again (repo wiped + toolchain home MOVED to
+  /tmp/my-project/{rustup,cargo-home} — handover §3's session-13 path
+  is stale; exports re-verified). Re-cloned via github-reconnect.sh.
+- R4.2-a executed (decomposition, census-first): scanner r42_census.py
+  (cfg-aware char-level fn-span lexer; first run had the impl-after-
+  cfg(test)-mod false-positive — fixed with a boundary-line gate).
+  3,277 production fns censused; the top-20 read in full; dispositions
+  in the R4.2 verdict table: 6 core mega-fns split (execute 1051→79+22
+  tool fns; derived_edges_touching 686→26+13 edge fns; apply_m046
+  405→15 manifest+ensure_fk+10 consts; execute_job 3 fat arms→3
+  methods + the embed×3 fold; build_support_health_report 465→34
+  manifest+9 domain fns; analyze_friction 410→manifest+6 finding fns),
+  6 keeps with written rulings (flat manifests / dispatch tables /
+  state machines / conversation loop), 11 queued to R4.2-b (the UI
+  T-composition twins incl. all four D-13 too_many_lines sites +
+  execute_outbound + sync_resource via the proven dispatch recipe).
+  ZERO app-shell source contact → pixel-neutral by construction; the
+  kittest drift gate rides CI as usual.
+- Battery (per-component after the workspace lane hit the 600s tool
+  cap): gate clean, fmt --check, clippy workspace + sandbox (-D
+  warnings), core lib 520 ✓, core integration stubs ✓, sandbox 528 ✓,
+  app-shell 293+2 ✓ (26 kittest binaries at 0 local tests — F-10
+  normal), catalog 0 ✓, xtask 56 ✓, verify-icons ✓, strip-comments
+  --check 207/207 ✓. G-05 disk cleanup applied twice (81% peak).
+- Diff class review: 6 core files, +2649/−2297 — every hunk is a
+  mechanical move (arm/fn extraction), a documented closure→fn
+  promotion, the ensure_fk fold, or the embed fn-pointer fold; no
+  logic edits, no signature changes to any pub surface, no test
+  changes (the 520-test suite is the semantic proof).
+- Commits: `refactor(R4.2): decomposition — …` (this push). CI row
+  rides the push; the addendum records it next session.
 
 ### Session 13 — 2026-11-14
 - Pre-flight: run#343 green on the session-12 addendum head `66f3968`

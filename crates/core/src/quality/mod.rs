@@ -767,6 +767,15 @@ fn direct_complaint_re() -> &'static regex::Regex {
     })
 }
 
+fn finding(
+    kind: &str,
+    severity: &str,
+    evidence: Vec<Value>,
+    detail: String,
+) -> (String, String, Vec<Value>, String) {
+    (kind.to_string(), severity.to_string(), evidence, detail)
+}
+
 pub(crate) fn analyze_friction(conn: &Connection, conversation_id: i64) -> Vec<Value> {
     let conv: Option<(i64, Option<i64>)> = conn
         .query_row(
@@ -785,343 +794,16 @@ pub(crate) fn analyze_friction(conn: &Connection, conversation_id: i64) -> Vec<V
 
     let now = now_iso();
     let mut findings: Vec<(String, String, Vec<Value>, String)> = Vec::new();
-    let mut push = |kind: &str, severity: &str, evidence: Vec<Value>, detail: String| {
-        findings.push((kind.to_string(), severity.to_string(), evidence, detail));
-    };
-
-    let customer_repeats = repeated_spans(&customer, MIN_REPEAT_WORDS);
-    if !customer_repeats.is_empty() {
-        let mut sorted = customer_repeats;
-        sorted.sort_by_key(|s| std::cmp::Reverse(s.thread_ids.len()));
-        let best = &sorted[0];
-        let evidence: Vec<Value> = best
-            .thread_ids
-            .iter()
-            .filter_map(|tid| customer.iter().find(|m| m.thread_id == *tid))
-            .map(|m| {
-                json!({
-                    "thread_id": m.thread_id, "author_type": "customer",
-                    "excerpt": excerpt_of(&m.text, 160), "at": m.at
-                })
-            })
-            .collect();
-        push(
-            "repeated_customer_explanations",
-            if best.thread_ids.len() >= 3 {
-                "high"
-            } else {
-                "moderate"
-            },
-            evidence,
-            format!(
-                "The customer re-stated the same {MIN_REPEAT_WORDS}+ word span across {} messages (\"{}\"). Detected by repeated-span matching across customer messages; a heuristic, not a judgment.",
-                best.thread_ids.len(),
-                excerpt_of(&best.span, 80)
-            ),
-        );
-    }
-
-    let mut question_groups: Vec<(String, Vec<AgentQuestion>)> = Vec::new();
-    let mut group_index: std::collections::HashMap<String, usize> =
-        std::collections::HashMap::new();
-    for m in &agents {
-        for q in split_after_question(&m.text) {
-            let q = q.trim();
-            if !q.ends_with('?') {
-                continue;
-            }
-            let norm = normalize_span(q);
-            if norm.len() < 4 {
-                continue;
-            }
-            let key = norm.join(" ");
-            match group_index.get(&key) {
-                Some(&i) => {
-                    if !question_groups[i]
-                        .1
-                        .iter()
-                        .any(|(tid, _, _)| *tid == m.thread_id)
-                    {
-                        question_groups[i]
-                            .1
-                            .push((m.thread_id, m.at.clone(), q.to_string()));
-                    }
-                }
-                None => {
-                    group_index.insert(key.clone(), question_groups.len());
-                    question_groups.push((key, vec![(m.thread_id, m.at.clone(), q.to_string())]));
-                }
-            }
-        }
-    }
-    if let Some((_, group)) = question_groups.into_iter().find(|(_, l)| l.len() >= 2) {
-        let evidence: Vec<Value> = group
-            .iter()
-            .map(|(tid, at, q)| {
-                json!({
-                    "thread_id": tid, "author_type": "agent",
-                    "excerpt": excerpt_of(q, 160), "at": at
-                })
-            })
-            .collect();
-        push(
-            "repeated_agent_questions",
-            if group.len() >= 3 { "high" } else { "moderate" },
-            evidence,
-            format!(
-                "The agent asked the same question in {} replies (\"{}\"). Detected by normalized question-sentence matching; a heuristic.",
-                group.len(),
-                excerpt_of(
-                    group
-                        .first()
-                        .map(|(_, _, q)| q.as_str())
-                        .unwrap_or_default(),
-                    80
-                )
-            ),
-        );
-    }
-
-    let mut saw_agent_reply = false;
-    let mut loop_restatements: Vec<(i64, String, Option<String>)> = Vec::new();
-    for t in &threads {
-        if t.kind == "reply" {
-            saw_agent_reply = true;
-        } else if t.kind == "customer"
-            && saw_agent_reply
-            && loop_problem_re().is_match(&t.text)
-            && !is_closing_acknowledgment(&t.text)
-        {
-            loop_restatements.push((t.thread_id, t.text.clone(), t.at.clone()));
-        }
-    }
-    if loop_restatements.len() >= 2 {
-        let evidence: Vec<Value> = loop_restatements
-            .iter()
-            .map(|(tid, text, at)| {
-                json!({
-                    "thread_id": tid, "author_type": "customer",
-                    "excerpt": excerpt_of(text, 160), "at": at
-                })
-            })
-            .collect();
-        push(
-            "troubleshooting_loop",
-            if loop_restatements.len() >= 3 {
-                "high"
-            } else {
-                "moderate"
-            },
-            evidence,
-            format!(
-                "After agent replies, the customer restated the unresolved problem {} times (issue-shaped language after an agent reply). Detected by problem-restatement patterns; a heuristic.",
-                loop_restatements.len()
-            ),
-        );
-    }
-
-    let handoffs: Vec<(Option<String>, Option<String>)> = crate::db::query_rows(
+    findings.extend(repeated_customer_explanations_findings(&customer));
+    findings.extend(repeated_agent_questions_findings(&agents));
+    findings.extend(troubleshooting_loop_findings(&threads));
+    findings.extend(repeated_handoff_findings(conn, conversation_id));
+    findings.extend(repeated_unresolved_findings(
         conn,
-        "SELECT occurred_at, metadata FROM activity_events
-             WHERE conversation_id = ?1 AND event_type = 'assignment_changed'
-             ORDER BY occurred_at ASC",
-        params![conversation_id],
-        |r| Ok((r.get(0)?, r.get(1)?)),
-    )
-    .unwrap_or_default();
-    let history_complete: bool = conn
-        .query_row(
-            "SELECT activity_history_complete FROM conversations WHERE id = ?1",
-            params![conversation_id],
-            |r| r.get::<_, i64>(0),
-        )
-        .map(|v| v == 1)
-        .unwrap_or(false);
-    if handoffs.len() >= 3 {
-        let evidence: Vec<Value> = handoffs
-            .iter()
-            .take(6)
-            .map(|(at, metadata)| {
-                json!({
-                    "thread_id": 0, "author_type": "agent",
-                    "excerpt": match metadata.as_deref() {
-                        Some(m) if !m.is_empty() =>
-                            format!("Assignment change: {}", excerpt_of(m, 100)),
-                        _ => "Assignment change".to_string(),
-                    },
-                    "at": at
-                })
-            })
-            .collect();
-        push(
-            "repeated_handoffs",
-            if handoffs.len() >= 4 {
-                "high"
-            } else {
-                "moderate"
-            },
-            evidence,
-            format!(
-                "{} assignment changes observed in the local event history{}. Detected deterministically from recorded conversation events.",
-                handoffs.len(),
-                if history_complete {
-                    ""
-                } else {
-                    " (pre-sync history is unknown - Help Scout exposes no historical event log)"
-                }
-            ),
-        );
-    }
-
-    if let Some(customer_local) = customer_local_id {
-        let related: Vec<RelatedConversation> = crate::db::query_rows(
-            conn,
-            "SELECT c2.id, c2.number, c2.subject, c2.status,
-                    COALESCE(c2.remote_created_at, c2.created_at)
-                 FROM conversations c2
-                 WHERE c2.customer_local_id = ?1 AND c2.deleted_at IS NULL AND c2.id <> ?2
-                   AND COALESCE(c2.remote_created_at, c2.created_at) >= strftime('%Y-%m-%dT%H:%M:%fZ','now','-90 days')
-                   AND EXISTS (SELECT 1 FROM conversation_tags ct1
-                               JOIN conversation_tags ct2 ON ct2.conversation_id = c2.id
-                               JOIN tags tg ON tg.id = ct1.tag_id AND tg.id = ct2.tag_id
-                               WHERE ct1.conversation_id = ?2)
-                 ORDER BY c2.created_at DESC LIMIT 10",
-            params![customer_local, conversation_id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
-        )
-        .unwrap_or_default();
-        if related.len() >= 2 {
-            let shared_tag: Option<String> = conn
-                .query_row(
-                    "SELECT tg.name FROM tags tg
-                     WHERE EXISTS (SELECT 1 FROM conversation_tags ct1
-                                    WHERE ct1.conversation_id = ?1
-                                      AND ct1.tag_id = tg.id)
-                       AND EXISTS (SELECT 1 FROM conversation_tags ct2
-                                     JOIN conversations c2 ON c2.id = ct2.conversation_id
-                                    WHERE ct2.tag_id = tg.id
-                                      AND c2.customer_local_id = ?2
-                                      AND c2.deleted_at IS NULL
-                                      AND c2.id <> ?1
-                                      AND COALESCE(c2.remote_created_at, c2.created_at)
-                                          >= strftime('%Y-%m-%dT%H:%M:%fZ','now','-90 days'))
-                     ORDER BY tg.name LIMIT 1",
-                    params![conversation_id, customer_local],
-                    |r| r.get(0),
-                )
-                .ok();
-            let evidence: Vec<Value> = related
-                .iter()
-                .take(4)
-                .map(|(_, number, subject, status, at)| {
-                    json!({
-                        "thread_id": 0, "author_type": "customer",
-                        "excerpt": format!("Conversation #{number}: {} ({status})",
-                            subject.as_deref().unwrap_or("(no subject)")),
-                        "at": at
-                    })
-                })
-                .collect();
-            push(
-                "repeated_unresolved_interactions",
-                if related.len() >= 3 {
-                    "high"
-                } else {
-                    "moderate"
-                },
-                evidence,
-                format!(
-                    "The customer opened {} conversations in the last 90 days sharing the tag{} - the same problem keeps returning. Customer-level pattern detected from the local mirror; association, not causation.",
-                    related.len() + 1,
-                    shared_tag
-                        .as_deref()
-                        .map(|t| format!(" \"{t}\""))
-                        .unwrap_or_default()
-                ),
-            );
-        }
-    }
-
-    let mut dup_requests: Vec<(i64, String, Option<String>)> = Vec::new();
-    let mut supplied = (false, false, false);
-    let digits_re = regex::Regex::new(r"\b\d{4,}\b").expect("digits regex");
-    let email_re = regex::Regex::new(r"[\w.+-]+@[\w-]+\.[\w.]+").expect("email regex");
-    let error_re = regex::Regex::new(r"(?i)error|fail|exception|crash").expect("error regex");
-    let ask_pattern = regex::Regex::new(
-        r"(?i)\?|could you (send|share|provide|confirm)|please (send|share|provide|confirm)",
-    )
-    .expect("ask-pattern regex");
-    let order_re = regex::Regex::new(
-        r"(?i)\border\b|\binvoice\b|account\s*(id|number)?|reference\b|ticket number",
-    )
-    .expect("order regex");
-    let email_ask_re = regex::Regex::new(r"(?i)email").expect("email-ask regex");
-    let error_ask_re =
-        regex::Regex::new(r"(?i)error|log|trace|screenshot").expect("error-ask regex");
-    for t in &threads {
-        if t.kind == "customer" {
-            if digits_re.is_match(&t.text) {
-                supplied.0 = true;
-            }
-            if email_re.is_match(&t.text) {
-                supplied.1 = true;
-            }
-            if error_re.is_match(&t.text) {
-                supplied.2 = true;
-            }
-        } else if t.kind == "reply" {
-            let asks_category = ask_pattern.is_match(&t.text)
-                && (if order_re.is_match(&t.text) {
-                    supplied.0
-                } else if email_ask_re.is_match(&t.text) {
-                    supplied.1
-                } else if error_ask_re.is_match(&t.text) {
-                    supplied.2
-                } else {
-                    false
-                });
-            if asks_category {
-                dup_requests.push((t.thread_id, t.text.clone(), t.at.clone()));
-            }
-        }
-    }
-    let direct_complaints: Vec<&ThreadLite> = customer
-        .iter()
-        .copied()
-        .filter(|m| direct_complaint_re().is_match(&m.text))
-        .collect();
-    if !dup_requests.is_empty() || !direct_complaints.is_empty() {
-        let mut evidence: Vec<Value> = Vec::new();
-        for (tid, text, at) in dup_requests.iter().take(3) {
-            evidence.push(json!({
-                "thread_id": tid, "author_type": "agent",
-                "excerpt": excerpt_of(text, 160), "at": at
-            }));
-        }
-        for c in direct_complaints.iter().take(3) {
-            evidence.push(json!({
-                "thread_id": c.thread_id, "author_type": "customer",
-                "excerpt": excerpt_of(&c.text, 160), "at": c.at
-            }));
-        }
-        let total_evidence = dup_requests.len() + direct_complaints.len();
-        push(
-            "duplicated_information_requests",
-            if total_evidence >= 3 { "high" } else { "low" },
-            evidence,
-            format!(
-                "The agent asked for information (order-style ids, emails, dates, error codes) the customer had already supplied,{}. Detected by entity-overlap and direct-phrase matching; a heuristic.",
-                if !direct_complaints.is_empty() {
-                    format!(
-                        " and/or the customer said they were re-sending it ({} direct mentions)",
-                        direct_complaints.len()
-                    )
-                } else {
-                    String::new()
-                }
-            ),
-        );
-    }
+        customer_local_id,
+        conversation_id,
+    ));
+    findings.extend(duplicated_request_findings(&threads, &customer));
 
     for (kind, severity, evidence, detail) in &findings {
         let _ = conn.execute(
@@ -1176,6 +858,380 @@ pub(crate) fn analyze_friction(conn: &Connection, conversation_id: i64) -> Vec<V
             })
         })
         .collect()
+}
+
+fn repeated_customer_explanations_findings(
+    customer: &[&ThreadLite],
+) -> Vec<(String, String, Vec<Value>, String)> {
+    let mut out: Vec<(String, String, Vec<Value>, String)> = Vec::new();
+    let customer_repeats = repeated_spans(customer, MIN_REPEAT_WORDS);
+    if !customer_repeats.is_empty() {
+        let mut sorted = customer_repeats;
+        sorted.sort_by_key(|s| std::cmp::Reverse(s.thread_ids.len()));
+        let best = &sorted[0];
+        let evidence: Vec<Value> = best
+            .thread_ids
+            .iter()
+            .filter_map(|tid| customer.iter().find(|m| m.thread_id == *tid))
+            .map(|m| {
+                json!({
+                    "thread_id": m.thread_id, "author_type": "customer",
+                    "excerpt": excerpt_of(&m.text, 160), "at": m.at
+                })
+            })
+            .collect();
+        out.push(finding(
+            "repeated_customer_explanations",
+            if best.thread_ids.len() >= 3 {
+                "high"
+            } else {
+                "moderate"
+            },
+            evidence,
+            format!(
+                "The customer re-stated the same {MIN_REPEAT_WORDS}+ word span across {} messages (\"{}\"). Detected by repeated-span matching across customer messages; a heuristic, not a judgment.",
+                best.thread_ids.len(),
+                excerpt_of(&best.span, 80)
+            ),
+        ));
+    }
+    out
+}
+
+fn repeated_agent_questions_findings(
+    agents: &[&ThreadLite],
+) -> Vec<(String, String, Vec<Value>, String)> {
+    let mut out: Vec<(String, String, Vec<Value>, String)> = Vec::new();
+    let mut question_groups: Vec<(String, Vec<AgentQuestion>)> = Vec::new();
+    let mut group_index: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+    for m in agents {
+        for q in split_after_question(&m.text) {
+            let q = q.trim();
+            if !q.ends_with('?') {
+                continue;
+            }
+            let norm = normalize_span(q);
+            if norm.len() < 4 {
+                continue;
+            }
+            let key = norm.join(" ");
+            match group_index.get(&key) {
+                Some(&i) => {
+                    if !question_groups[i]
+                        .1
+                        .iter()
+                        .any(|(tid, _, _)| *tid == m.thread_id)
+                    {
+                        question_groups[i]
+                            .1
+                            .push((m.thread_id, m.at.clone(), q.to_string()));
+                    }
+                }
+                None => {
+                    group_index.insert(key.clone(), question_groups.len());
+                    question_groups.push((key, vec![(m.thread_id, m.at.clone(), q.to_string())]));
+                }
+            }
+        }
+    }
+    if let Some((_, group)) = question_groups.into_iter().find(|(_, l)| l.len() >= 2) {
+        let evidence: Vec<Value> = group
+            .iter()
+            .map(|(tid, at, q)| {
+                json!({
+                    "thread_id": tid, "author_type": "agent",
+                    "excerpt": excerpt_of(q, 160), "at": at
+                })
+            })
+            .collect();
+        out.push(finding(
+            "repeated_agent_questions",
+            if group.len() >= 3 { "high" } else { "moderate" },
+            evidence,
+            format!(
+                "The agent asked the same question in {} replies (\"{}\"). Detected by normalized question-sentence matching; a heuristic.",
+                group.len(),
+                excerpt_of(
+                    group
+                        .first()
+                        .map(|(_, _, q)| q.as_str())
+                        .unwrap_or_default(),
+                    80
+                )
+            ),
+        ));
+    }
+    out
+}
+
+fn troubleshooting_loop_findings(
+    threads: &[ThreadLite],
+) -> Vec<(String, String, Vec<Value>, String)> {
+    let mut out: Vec<(String, String, Vec<Value>, String)> = Vec::new();
+    let mut saw_agent_reply = false;
+    let mut loop_restatements: Vec<(i64, String, Option<String>)> = Vec::new();
+    for t in threads {
+        if t.kind == "reply" {
+            saw_agent_reply = true;
+        } else if t.kind == "customer"
+            && saw_agent_reply
+            && loop_problem_re().is_match(&t.text)
+            && !is_closing_acknowledgment(&t.text)
+        {
+            loop_restatements.push((t.thread_id, t.text.clone(), t.at.clone()));
+        }
+    }
+    if loop_restatements.len() >= 2 {
+        let evidence: Vec<Value> = loop_restatements
+            .iter()
+            .map(|(tid, text, at)| {
+                json!({
+                    "thread_id": tid, "author_type": "customer",
+                    "excerpt": excerpt_of(text, 160), "at": at
+                })
+            })
+            .collect();
+        out.push(finding(
+            "troubleshooting_loop",
+            if loop_restatements.len() >= 3 {
+                "high"
+            } else {
+                "moderate"
+            },
+            evidence,
+            format!(
+                "After agent replies, the customer restated the unresolved problem {} times (issue-shaped language after an agent reply). Detected by problem-restatement patterns; a heuristic.",
+                loop_restatements.len()
+            ),
+        ));
+    }
+    out
+}
+
+fn repeated_handoff_findings(
+    conn: &Connection,
+    conversation_id: i64,
+) -> Vec<(String, String, Vec<Value>, String)> {
+    let mut out: Vec<(String, String, Vec<Value>, String)> = Vec::new();
+    let handoffs: Vec<(Option<String>, Option<String>)> = crate::db::query_rows(
+        conn,
+        "SELECT occurred_at, metadata FROM activity_events
+             WHERE conversation_id = ?1 AND event_type = 'assignment_changed'
+             ORDER BY occurred_at ASC",
+        params![conversation_id],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )
+    .unwrap_or_default();
+    let history_complete: bool = conn
+        .query_row(
+            "SELECT activity_history_complete FROM conversations WHERE id = ?1",
+            params![conversation_id],
+            |r| r.get::<_, i64>(0),
+        )
+        .map(|v| v == 1)
+        .unwrap_or(false);
+    if handoffs.len() >= 3 {
+        let evidence: Vec<Value> = handoffs
+            .iter()
+            .take(6)
+            .map(|(at, metadata)| {
+                json!({
+                    "thread_id": 0, "author_type": "agent",
+                    "excerpt": match metadata.as_deref() {
+                        Some(m) if !m.is_empty() =>
+                            format!("Assignment change: {}", excerpt_of(m, 100)),
+                        _ => "Assignment change".to_string(),
+                    },
+                    "at": at
+                })
+            })
+            .collect();
+        out.push(finding(
+            "repeated_handoffs",
+            if handoffs.len() >= 4 {
+                "high"
+            } else {
+                "moderate"
+            },
+            evidence,
+            format!(
+                "{} assignment changes observed in the local event history{}. Detected deterministically from recorded conversation events.",
+                handoffs.len(),
+                if history_complete {
+                    ""
+                } else {
+                    " (pre-sync history is unknown - Help Scout exposes no historical event log)"
+                }
+            ),
+        ));
+    }
+    out
+}
+
+fn repeated_unresolved_findings(
+    conn: &Connection,
+    customer_local_id: Option<i64>,
+    conversation_id: i64,
+) -> Vec<(String, String, Vec<Value>, String)> {
+    let mut out: Vec<(String, String, Vec<Value>, String)> = Vec::new();
+    if let Some(customer_local) = customer_local_id {
+        let related: Vec<RelatedConversation> = crate::db::query_rows(
+            conn,
+            "SELECT c2.id, c2.number, c2.subject, c2.status,
+                    COALESCE(c2.remote_created_at, c2.created_at)
+                 FROM conversations c2
+                 WHERE c2.customer_local_id = ?1 AND c2.deleted_at IS NULL AND c2.id <> ?2
+                   AND COALESCE(c2.remote_created_at, c2.created_at) >= strftime('%Y-%m-%dT%H:%M:%fZ','now','-90 days')
+                   AND EXISTS (SELECT 1 FROM conversation_tags ct1
+                               JOIN conversation_tags ct2 ON ct2.conversation_id = c2.id
+                               JOIN tags tg ON tg.id = ct1.tag_id AND tg.id = ct2.tag_id
+                               WHERE ct1.conversation_id = ?2)
+                 ORDER BY c2.created_at DESC LIMIT 10",
+            params![customer_local, conversation_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+        )
+        .unwrap_or_default();
+        if related.len() >= 2 {
+            let shared_tag: Option<String> = conn
+                .query_row(
+                    "SELECT tg.name FROM tags tg
+                     WHERE EXISTS (SELECT 1 FROM conversation_tags ct1
+                                    WHERE ct1.conversation_id = ?1
+                                      AND ct1.tag_id = tg.id)
+                       AND EXISTS (SELECT 1 FROM conversation_tags ct2
+                                     JOIN conversations c2 ON c2.id = ct2.conversation_id
+                                    WHERE ct2.tag_id = tg.id
+                                      AND c2.customer_local_id = ?2
+                                      AND c2.deleted_at IS NULL
+                                      AND c2.id <> ?1
+                                      AND COALESCE(c2.remote_created_at, c2.created_at)
+                                          >= strftime('%Y-%m-%dT%H:%M:%fZ','now','-90 days'))
+                     ORDER BY tg.name LIMIT 1",
+                    params![conversation_id, customer_local],
+                    |r| r.get(0),
+                )
+                .ok();
+            let evidence: Vec<Value> = related
+                .iter()
+                .take(4)
+                .map(|(_, number, subject, status, at)| {
+                    json!({
+                        "thread_id": 0, "author_type": "customer",
+                        "excerpt": format!("Conversation #{number}: {} ({status})",
+                            subject.as_deref().unwrap_or("(no subject)")),
+                        "at": at
+                    })
+                })
+                .collect();
+            out.push(finding(
+                "repeated_unresolved_interactions",
+                if related.len() >= 3 {
+                    "high"
+                } else {
+                    "moderate"
+                },
+                evidence,
+                format!(
+                    "The customer opened {} conversations in the last 90 days sharing the tag{} - the same problem keeps returning. Customer-level pattern detected from the local mirror; association, not causation.",
+                    related.len() + 1,
+                    shared_tag
+                        .as_deref()
+                        .map(|t| format!(" \"{t}\""))
+                        .unwrap_or_default()
+                ),
+            ));
+        }
+    }
+    out
+}
+
+fn duplicated_request_findings(
+    threads: &[ThreadLite],
+    customer: &[&ThreadLite],
+) -> Vec<(String, String, Vec<Value>, String)> {
+    let mut out: Vec<(String, String, Vec<Value>, String)> = Vec::new();
+    let mut dup_requests: Vec<(i64, String, Option<String>)> = Vec::new();
+    let mut supplied = (false, false, false);
+    let digits_re = regex::Regex::new(r"\b\d{4,}\b").expect("digits regex");
+    let email_re = regex::Regex::new(r"[\w.+-]+@[\w-]+\.[\w.]+").expect("email regex");
+    let error_re = regex::Regex::new(r"(?i)error|fail|exception|crash").expect("error regex");
+    let ask_pattern = regex::Regex::new(
+        r"(?i)\?|could you (send|share|provide|confirm)|please (send|share|provide|confirm)",
+    )
+    .expect("ask-pattern regex");
+    let order_re = regex::Regex::new(
+        r"(?i)\border\b|\binvoice\b|account\s*(id|number)?|reference\b|ticket number",
+    )
+    .expect("order regex");
+    let email_ask_re = regex::Regex::new(r"(?i)email").expect("email-ask regex");
+    let error_ask_re =
+        regex::Regex::new(r"(?i)error|log|trace|screenshot").expect("error-ask regex");
+    for t in threads {
+        if t.kind == "customer" {
+            if digits_re.is_match(&t.text) {
+                supplied.0 = true;
+            }
+            if email_re.is_match(&t.text) {
+                supplied.1 = true;
+            }
+            if error_re.is_match(&t.text) {
+                supplied.2 = true;
+            }
+        } else if t.kind == "reply" {
+            let asks_category = ask_pattern.is_match(&t.text)
+                && (if order_re.is_match(&t.text) {
+                    supplied.0
+                } else if email_ask_re.is_match(&t.text) {
+                    supplied.1
+                } else if error_ask_re.is_match(&t.text) {
+                    supplied.2
+                } else {
+                    false
+                });
+            if asks_category {
+                dup_requests.push((t.thread_id, t.text.clone(), t.at.clone()));
+            }
+        }
+    }
+    let direct_complaints: Vec<&ThreadLite> = customer
+        .iter()
+        .copied()
+        .filter(|m| direct_complaint_re().is_match(&m.text))
+        .collect();
+    if !dup_requests.is_empty() || !direct_complaints.is_empty() {
+        let mut evidence: Vec<Value> = Vec::new();
+        for (tid, text, at) in dup_requests.iter().take(3) {
+            evidence.push(json!({
+                "thread_id": tid, "author_type": "agent",
+                "excerpt": excerpt_of(text, 160), "at": at
+            }));
+        }
+        for c in direct_complaints.iter().take(3) {
+            evidence.push(json!({
+                "thread_id": c.thread_id, "author_type": "customer",
+                "excerpt": excerpt_of(&c.text, 160), "at": c.at
+            }));
+        }
+        let total_evidence = dup_requests.len() + direct_complaints.len();
+        out.push(finding(
+            "duplicated_information_requests",
+            if total_evidence >= 3 { "high" } else { "low" },
+            evidence,
+            format!(
+                "The agent asked for information (order-style ids, emails, dates, error codes) the customer had already supplied,{}. Detected by entity-overlap and direct-phrase matching; a heuristic.",
+                if !direct_complaints.is_empty() {
+                    format!(
+                        " and/or the customer said they were re-sending it ({} direct mentions)",
+                        direct_complaints.len()
+                    )
+                } else {
+                    String::new()
+                }
+            ),
+        ));
+    }
+    out
 }
 
 pub(crate) fn rebuild_friction(conn: &Connection) -> (usize, usize) {

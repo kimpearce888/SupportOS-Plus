@@ -92,133 +92,22 @@ impl WorkerManager {
                 "sync_conversation_ratings" => {
                     let rating_id = num("ratingId");
                     let conv_remote = num("conversationId").or_else(|| num("remoteId"));
-                    if let Some(rating_id) = rating_id {
-                        match self.provider.get_rating(rating_id).await {
-                            Ok(Some(r)) => {
-                                let (inserted, conv_local, conv_number, customer_local) = {
-                                    let conn = self.lock();
-                                    let conv_local = r
-                                        .conversation_id
-                                        .and_then(|id| if id > 0 { crate::sync_engine::conversation_local_id(&conn, id) } else { None });
-                                    let conv_number = conv_local.and_then(|local| {
-                                        conn.query_row(
-                                            "SELECT number FROM conversations WHERE id = ?1",
-                                            rusqlite::params![local],
-                                            |row| row.get::<_, i64>(0),
-                                        )
-                                        .ok()
-                                    });
-                                    let customer_local = r
-                                        .customer_id
-                                        .and_then(|id| if id > 0 { crate::sync_engine::local_id(&conn, "customers", id) } else { None });
-                                    let user_local = r
-                                        .user_id
-                                        .and_then(|id| if id > 0 { crate::sync_engine::local_id(&conn, "users", id) } else { None });
-                                    (
-                                        upsert_rating_row(&conn, &r, conv_local, customer_local, user_local)?,
-                                        conv_local,
-                                        conv_number,
-                                        customer_local,
-                                    )
-                                };
-                                if inserted {
-                                    crate::event_bus::notify_rating_received(
-                                        &self.bus,
-                                        r.rating.as_deref(),
-                                        conv_local,
-                                        conv_number,
-                                        customer_local,
-                                        r.customer_name.as_deref(),
-                                        r.comment.as_deref(),
-                                    );
-                                }
-                            }
-                            Ok(None) => {
-                                tracing::info!(
-                                    operation = "sync_conversation_ratings",
-                                    rating_id,
-                                    "rating absent platform-side - nothing to store"
-                                );
-                            }
-                            Err(e) => {
-                                return Err(e);
-                            }
-                        }
-                    }
-                    if let Some(conv_remote) = conv_remote {
-                        self.run_engine(|e| async move {
-                            e.sync_single_conversation(conv_remote).await.map(|_| ())
-                        })
-                        .await?;
-                    }
+                    self.sync_conversation_ratings_job(rating_id, conv_remote).await?;
                 }
                 "embed_knowledge_chunks" => {
-                    let conn = self.db.long_op_guard();
-                    let n = crate::embeddings::embed_pending_knowledge(
-                        &conn,
-                        self.qdrant.as_deref(),
-                    )
-                    .unwrap_or(0);
-                    tracing::debug!(operation = kind, embedded = n, "embedding pass");
-                    if crate::embeddings::pass_hit_cap(n)
-                        && !crate::jobs::has_pending(
-                            &conn,
-                            "embeddings",
-                            "embed_knowledge_chunks",
-                        )
-                        .unwrap_or(false)
-                    {
-                        let _ = crate::jobs::enqueue_on(
-                            &conn,
-                            "embeddings",
-                            "embed_knowledge_chunks",
-                            "{}",
-                            4,
-                            2,
-                        );
-                    }
+                    self.embed_chunks_job(
+                        kind,
+                        crate::embeddings::embed_pending_knowledge,
+                    );
                 }
                 "embed_docs_chunks" => {
-                    let conn = self.db.long_op_guard();
-                    let n = crate::embeddings::embed_pending_docs(
-                        &conn,
-                        self.qdrant.as_deref(),
-                    )
-                    .unwrap_or(0);
-                    tracing::debug!(operation = kind, embedded = n, "embedding pass");
-                    if crate::embeddings::pass_hit_cap(n)
-                        && !crate::jobs::has_pending(&conn, "embeddings", "embed_docs_chunks")
-                            .unwrap_or(false)
-                    {
-                        let _ =
-                            crate::jobs::enqueue_on(&conn, "embeddings", "embed_docs_chunks", "{}", 4, 2);
-                    }
+                    self.embed_chunks_job(kind, crate::embeddings::embed_pending_docs);
                 }
                 "embed_conversation_chunks" => {
-                    let conn = self.db.long_op_guard();
-                    let n = crate::embeddings::embed_pending_conversation_chunks(
-                        &conn,
-                        self.qdrant.as_deref(),
-                    )
-                    .unwrap_or(0);
-                    tracing::debug!(operation = kind, embedded = n, "embedding pass");
-                    if crate::embeddings::pass_hit_cap(n)
-                        && !crate::jobs::has_pending(
-                            &conn,
-                            "embeddings",
-                            "embed_conversation_chunks",
-                        )
-                        .unwrap_or(false)
-                    {
-                        let _ = crate::jobs::enqueue_on(
-                            &conn,
-                            "embeddings",
-                            "embed_conversation_chunks",
-                            "{}",
-                            4,
-                            2,
-                        );
-                    }
+                    self.embed_chunks_job(
+                        kind,
+                        crate::embeddings::embed_pending_conversation_chunks,
+                    );
                 }
                 "rebuild_search_index" => {
                     let conn = self.lock();
@@ -412,49 +301,7 @@ impl WorkerManager {
                         let action = payload.get("action").cloned();
                         let rule_id = num("ruleId");
                         let conversation_id = num("conversationId");
-                        if let (Some(action), Some(rule_id), Some(conversation_id)) =
-                            (action, rule_id, conversation_id)
-                        {
-                            let executed = {
-                                let mut conn = self.lock();
-                                crate::automation::execute_approved_action(
-                                    &mut conn,
-                                    conversation_id,
-                                    &action,
-                                )?
-                            };
-                            if executed {
-                                let kind = action
-                                    .get("kind")
-                                    .and_then(|k| k.as_str())
-                                    .unwrap_or_default()
-                                    .to_string();
-                                let conn = self.lock();
-                                crate::automation::record_approved_run(
-                                    &conn,
-                                    rule_id,
-                                    conversation_id,
-                                    &kind,
-                                )?;
-                            } else {
-                                let kind = action
-                                    .get("kind")
-                                    .and_then(|k| k.as_str())
-                                    .unwrap_or_default()
-                                    .to_string();
-                                let conn = self.lock();
-                                crate::automation::record_run(
-                                    &conn,
-                                    rule_id,
-                                    Some(conversation_id),
-                                    "skipped",
-                                    &format!(
-                                        "Approved action {kind} was not executed \
-                                         (no engine handler or missing parameters)"
-                                    ),
-                                )?;
-                            }
-                        }
+                        self.automation_approval_job(action, rule_id, conversation_id)?;
                     } else {
                         let conn = self.lock();
                         jobs::park_job(&conn, job_id)?;
@@ -496,6 +343,144 @@ impl WorkerManager {
             let _ = jobs::log_error(&conn, "workers", &format!("Job {kind} failed: {msg}"));
             tracing::warn!(operation = kind, error = %msg, retryable, "Job failed");
         }
+    }
+
+    async fn sync_conversation_ratings_job(
+        &self,
+        rating_id: Option<i64>,
+        conv_remote: Option<i64>,
+    ) -> Result<()> {
+        if let Some(rating_id) = rating_id {
+            match self.provider.get_rating(rating_id).await {
+                Ok(Some(r)) => {
+                    let (inserted, conv_local, conv_number, customer_local) = {
+                        let conn = self.lock();
+                        let conv_local = r.conversation_id.and_then(|id| {
+                            if id > 0 {
+                                crate::sync_engine::conversation_local_id(&conn, id)
+                            } else {
+                                None
+                            }
+                        });
+                        let conv_number = conv_local.and_then(|local| {
+                            conn.query_row(
+                                "SELECT number FROM conversations WHERE id = ?1",
+                                rusqlite::params![local],
+                                |row| row.get::<_, i64>(0),
+                            )
+                            .ok()
+                        });
+                        let customer_local = r.customer_id.and_then(|id| {
+                            if id > 0 {
+                                crate::sync_engine::local_id(&conn, "customers", id)
+                            } else {
+                                None
+                            }
+                        });
+                        let user_local = r.user_id.and_then(|id| {
+                            if id > 0 {
+                                crate::sync_engine::local_id(&conn, "users", id)
+                            } else {
+                                None
+                            }
+                        });
+                        (
+                            upsert_rating_row(&conn, &r, conv_local, customer_local, user_local)?,
+                            conv_local,
+                            conv_number,
+                            customer_local,
+                        )
+                    };
+                    if inserted {
+                        crate::event_bus::notify_rating_received(
+                            &self.bus,
+                            r.rating.as_deref(),
+                            conv_local,
+                            conv_number,
+                            customer_local,
+                            r.customer_name.as_deref(),
+                            r.comment.as_deref(),
+                        );
+                    }
+                }
+                Ok(None) => {
+                    tracing::info!(
+                        operation = "sync_conversation_ratings",
+                        rating_id,
+                        "rating absent platform-side - nothing to store"
+                    );
+                }
+                Err(e) => {
+                    return Err(e);
+                }
+            }
+        }
+        if let Some(conv_remote) = conv_remote {
+            self.run_engine(|e| async move {
+                e.sync_single_conversation(conv_remote).await.map(|_| ())
+            })
+            .await?;
+        }
+        Ok(())
+    }
+    fn embed_chunks_job(
+        &self,
+        kind: &str,
+        embed: fn(
+            &rusqlite::Connection,
+            Option<&crate::vectorstore_sqlitevec::VectorIndex>,
+        ) -> crate::error::Result<usize>,
+    ) {
+        let conn = self.db.long_op_guard();
+        let n = embed(&conn, self.qdrant.as_deref()).unwrap_or(0);
+        tracing::debug!(operation = kind, embedded = n, "embedding pass");
+        if crate::embeddings::pass_hit_cap(n)
+            && !crate::jobs::has_pending(&conn, "embeddings", kind).unwrap_or(false)
+        {
+            let _ = crate::jobs::enqueue_on(&conn, "embeddings", kind, "{}", 4, 2);
+        }
+    }
+    fn automation_approval_job(
+        &self,
+        action: Option<serde_json::Value>,
+        rule_id: Option<i64>,
+        conversation_id: Option<i64>,
+    ) -> Result<()> {
+        if let (Some(action), Some(rule_id), Some(conversation_id)) =
+            (action, rule_id, conversation_id)
+        {
+            let executed = {
+                let mut conn = self.lock();
+                crate::automation::execute_approved_action(&mut conn, conversation_id, &action)?
+            };
+            if executed {
+                let kind = action
+                    .get("kind")
+                    .and_then(|k| k.as_str())
+                    .unwrap_or_default()
+                    .to_string();
+                let conn = self.lock();
+                crate::automation::record_approved_run(&conn, rule_id, conversation_id, &kind)?;
+            } else {
+                let kind = action
+                    .get("kind")
+                    .and_then(|k| k.as_str())
+                    .unwrap_or_default()
+                    .to_string();
+                let conn = self.lock();
+                crate::automation::record_run(
+                    &conn,
+                    rule_id,
+                    Some(conversation_id),
+                    "skipped",
+                    &format!(
+                        "Approved action {kind} was not executed \
+                         (no engine handler or missing parameters)"
+                    ),
+                )?;
+            }
+        }
+        Ok(())
     }
 
     pub(super) fn on_after_initial_sync(&self) {
