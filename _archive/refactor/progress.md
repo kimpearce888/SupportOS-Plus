@@ -18,12 +18,16 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
   single-sites get verdict rows as keeps.
 - Pre-flight [session 11]: R3.4 executed on the green base `ae64a25`
   (run#338 green, all four lanes — the docs-only addendum head, the
-  standard next-session preflight gate). R3.4 head (this session's
-  commit) rides this push — CI row to be filled by the addendum once
-  green.
+  standard next-session preflight gate). R3.4 head `9edd9b9` is
+  CI-VERIFIED GREEN — run#339 (id 43528209006), all four lanes
+  success incl. the kittest drift gate (the pixel-neutral design held
+  on all goldens; addendum commit below). Green base for R3.5: the
+  addendum head's own docs-only run (the standard next-session
+  preflight gate).
 - Session counter: 11 completed (R1 terminal; R2 stage TERMINAL; R3.1
   terminal — run#332 green; R3.2 TERMINAL — run#335 green; R3.3
-  TERMINAL — run#337 green on `518ba64`; R3.4 terminal, CI pending).
+  TERMINAL — run#337 green on `518ba64`; R3.4 TERMINAL — run#339 green
+  on `9edd9b9`).
 - Environment: session 11's sandbox was reset again (the clone under
   /tmp/my-project gone — empty dir remnant; tool-results, rustup, and
   cargo-home under /tmp/my-project survived). Re-cloned to the
@@ -57,7 +61,7 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 | R3.1 error types | terminal (session 8) | census: FIVE types tree-wide, ZERO duplicate enums (root+boxed-subtype architecture already consolidated); 3 hand-rolled Display/Error impls → thiserror derives (byte-identical messages; AcquireError #[source] reproduces the hand-rolled source()); TranslateError enum→newtype (class dimension unread by its single consumer); app-shell +thiserror dep (lock: one edge line); D-16; CI run#332 green on `5ca31af` — see complete.md |
 | R3.2 SQL plumbing | terminal (session 9) | lenient row-collect tail consolidated into db::query_rows + db::rows_ok; 80 sites (73 census + 7 turbofish blind-spot); +657/−823 across 32 files; battery green (520/528/293+2/56); CI run#335 green on `5cc08fc` — see complete.md |
 | R3.3 HTTP/serde plumbing | terminal (session 10) | 4 LM-Studio send tails → `send_json` + `authorized` (byte-identical messages); 2 docs tails → `docs_request_json` (byte-identical friendly strings, verified by continuation-resolution); 122 flat key-indexed extraction sites → `json_fields::json_str`/`json_string` (new module, 9 LOC); 13 send-tails/6 builders/139 idioms censused, keeps recorded in the R3.3 verdict table; battery green (520/528/293+2/56); strip-check 206/206; CI run#337 green on `518ba64` — see complete.md |
-| R3.4 page scaffolding | terminal (session 11) | census: hosting layer ALREADY shared (design:: hosts/page_header; 21/23 pages); the real repeat = the "Sync now" toolbar fragment byte-identical ×4 (dashboard/customers/reports/organizations) → `sync_health::sync_now_button` (button+hover+match+3 note strings in ONE place; re-read flag returns for the caller-side page-specific invalidate()); inbox variant, ensure_loaded latches, RANGES chip loops, LIST_CAP hint censused as keeps (R3.4 verdict table); +41/−97 across 5 files; battery green (520/528/293+2/56); strip-check 206/206 — see complete.md |
+| R3.4 page scaffolding | terminal (session 11) | census: hosting layer ALREADY shared (design:: hosts/page_header; 21/23 pages); the real repeat = the "Sync now" toolbar fragment byte-identical ×4 (dashboard/customers/reports/organizations) → `sync_health::sync_now_button` (button+hover+match+3 note strings in ONE place; re-read flag returns for the caller-side page-specific invalidate()); inbox variant, ensure_loaded latches, RANGES chip loops, LIST_CAP hint censused as keeps (R3.4 verdict table); +41/−97 across 5 files; battery green (520/528/293+2/56); strip-check 206/206; CI run#339 green on `9edd9b9` — see complete.md |
 | R3.5–R3.6 DRY | pending | see plan §7 R3 |
 | R4.1–R4.5 clean code | pending | see plan §7 R4 |
 | R5.1–R5.3 guardrails | pending (optional, stage-gated) | |
@@ -230,7 +234,9 @@ Checks: cargo machete (v0.9.2, installed ad hoc) now reports only the 3 document
   in one write; recovered via git checkout + the fixed script
   (opened-flag guard); both runs re-verified with the Read tool.
   No repo damage persisted.
-- Commit: `refactor(R3.4)` (this session); CI rides the push.
+- Commit: `refactor(R3.4)` = `9edd9b9`; CI run#339 (id 43528209006)
+  verified green the same session — all four lanes success, kittest
+  drift gate green (pixel-neutral held on every golden).
 
 ### Session 10 — 2026-11-13
 - Pre-flight: run#336 green on `ac63c83` (all four jobs verified via
