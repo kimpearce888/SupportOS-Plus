@@ -10,6 +10,7 @@ pub mod graph;
 pub mod notifications;
 pub mod operations;
 pub mod reporting;
+pub mod routes;
 
 pub use activity::ResponseState;
 pub use attributes::{AI_ATTRIBUTE_SCHEMA_VERSION, AiAttributeKey, AttributeValueType};

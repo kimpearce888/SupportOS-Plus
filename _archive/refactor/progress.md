@@ -7,38 +7,32 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 
 ## CURRENT POINTER
 
-- Next task: **R3.6 — cross-crate vocabulary** (constants duplicated
-  between core and catalog move to catalog, its stated role — see plan
-  §7 R3 and memory F-02). CENSUS FIRST, same standing rule: enumerate
-  every vocabulary pair (constant names AND same-value string/number
-  literals) duplicated across crate boundaries, classify each, and fold
-  only where ≥2 crates genuinely share the same token with the same
-  meaning. Seed from the R3.5 census (verdict row below): the operations
-  drill-slug pair — core/src/operations.rs `page_drill("issues"/
-  "automation"/"diagnostics"/"sync-health"/"outreach")` produces the
-  wire vocabulary that app-shell/pages/operations.rs `page_key_from_drill`
-  parses; that pair is core↔app-shell (not core↔catalog), so the census
-  must also decide whether catalog (re-exported through core) is the
-  right home or whether the wire-contract stays duplicated-by-design.
-  Also census: catalog enums' `as_str`/label vocabularies vs any core or
-  app-shell twins (e.g. label/label-ish matches over catalog-owned
-  types), and core constants that catalog already owns copies of
-  (copilot.rs already imports MAX_TOOL_ROUNDS/MAX_TOOL_CALLS/
-  TOOL_RESULT_MAX_CHARS from catalog — verify no shadow twins remain).
-- Pre-flight [session 12]: run#340 green on the addendum head `cf5faa7`
-  (id 43531239531, all four lanes — the docs-only addendum head, the
-  standard next-session preflight gate). R3.5 head is the same tree
-  (zero code motion — census verdicts only) riding this commit.
-- Session counter: 12 completed (R1 terminal; R2 stage TERMINAL; R3.1
-  terminal — run#332 green; R3.2 TERMINAL — run#335 green; R3.3
-  TERMINAL — run#337 green on `518ba64`; R3.4 TERMINAL — run#339 green
-  on `9edd9b9`; R3.5 TERMINAL — zero-motion census batch, CI row rides
-  this session's ledger commit).
-- Environment: session 12 partial-reset only — the clone at
-  /home/z/SupportOS-Plus SURVIVED (handover §2 location, G-12) along
-  with tool-results and /tmp/my-project/{rustup,cargo-home}; toolchain
-  verified 1.99.1 via the §3 partial-reset exports. No rebuild needed
-  (tree code-identical to the CI-green base).
+- Next task: **R4.1 — naming** (modules, types, functions, variables
+  per plan §5.3 — see plan §7 R4). STAGE R3 IS CLOSED (R3.1–R3.6 all
+  terminal). R4 opens with the naming pass; CENSUS FIRST per the
+  standing discipline (six consecutive overcount corrections): enumerate
+  the naming deviations from §5.3 before changing anything, classify
+  each (pure rename vs API-visible churn), and remember invariant 5
+  (names that appear in wire formats/settings keys — R3.6 just
+  single-sourced the drill-slug routes; any rename touching wire or
+  persisted vocab needs a migration note, and most should be verdict-row
+  keeps). Watch the D-13 allow clusters: too_many_arguments fns are
+  R3.4-owned keeps — R4.1 renames may touch their signatures only
+  if the rename is otherwise mandatory.
+- Pre-flight [session 12]: run#340 green on `cf5faa7` (preflight gate);
+  R3.5 zero-motion ledger head `3074b5e` CI-VERIFIED — run#341 (id
+  43535457579) green, all four lanes; R3.6 executed on that green base
+  same-session (two-batch session). R3.6's head rides this session's
+  push; the addendum convention hands its CI verification to monitoring
+  below.
+- Session counter: 12 completed (R1 terminal; R2 stage TERMINAL; R3
+  stage TERMINAL — R3.1 run#332, R3.2 run#335, R3.3 run#337, R3.4
+  run#339, R3.5 zero-motion run#341, R3.6 CI row rides this push).
+- Environment: session 12 partial-reset only — the canonical clone at
+  /home/z/SupportOS-Plus SURVIVED (G-12 intact); toolchain via the §3
+  partial-reset exports; rustc 1.99.1 verified; credentials active;
+  battery ran on the warm base (470–474 s core lanes, 253–282 s
+  app-shell, catalog+xtask instant).
 
 ## Task states
 
@@ -66,7 +60,7 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 | R3.3 HTTP/serde plumbing | terminal (session 10) | 4 LM-Studio send tails → `send_json` + `authorized` (byte-identical messages); 2 docs tails → `docs_request_json` (byte-identical friendly strings, verified by continuation-resolution); 122 flat key-indexed extraction sites → `json_fields::json_str`/`json_string` (new module, 9 LOC); 13 send-tails/6 builders/139 idioms censused, keeps recorded in the R3.3 verdict table; battery green (520/528/293+2/56); strip-check 206/206; CI run#337 green on `518ba64` — see complete.md |
 | R3.4 page scaffolding | terminal (session 11) | census: hosting layer ALREADY shared (design:: hosts/page_header; 21/23 pages); the real repeat = the "Sync now" toolbar fragment byte-identical ×4 (dashboard/customers/reports/organizations) → `sync_health::sync_now_button` (button+hover+match+3 note strings in ONE place; re-read flag returns for the caller-side page-specific invalidate()); inbox variant, ensure_loaded latches, RANGES chip loops, LIST_CAP hint censused as keeps (R3.4 verdict table); +41/−97 across 5 files; battery green (520/528/293+2/56); strip-check 206/206; CI run#339 green on `9edd9b9` — see complete.md |
 | R3.5 PageKey tables | terminal (session 12) | census: ZERO folds land — the attribute layer is already single-sourced (label() str site, Icon::for_page Icon site, apply_invalidations field-dispatch, render-dispatch heterogeneous payloads — four disjoint payload shapes, no ≥2 same-shape pair); titles/nav-labels are decoupled roles (2 intentional divergences); NAV_GROUPS + all() already tables; drill-slug pair queued to R3.6 — see complete.md |
-| R3.6 cross-crate vocabulary | pending | see plan §7 R3 + CURRENT POINTER seed |
+| R3.6 cross-crate vocabulary | terminal (session 12) | census: ZERO core↔catalog const duplication (plan letter overcounted — 6th consecutive correction); real debt = 8 inline-parse twins of existing catalog parse fns (GraphNodeKind ×7 + AiAttributeKey ×1) + the drill-slug wire pair → `catalog::routes` (5 consts, new module); +24/−44 +6 (net −20); battery green (520/528/293+2/56, strip-check 207/207) — see complete.md |
 | R4.1–R4.5 clean code | pending | see plan §7 R4 |
 | R5.1–R5.3 guardrails | pending (optional, stage-gated) | |
 | R6.1–R6.2 polish + close | pending | |
@@ -207,6 +201,25 @@ Checks: cargo machete (v0.9.2, installed ad hoc) now reports only the 3 document
 
 **R3.5 verdict summary:** ZERO folds land — the plan's "match-arm duplication (label/route/etc.)" letter is already satisfied by construction: each PageKey attribute has exactly ONE 23-arm match with its own payload shape (str / Icon / field-dispatch / heterogeneous render), no two sites share a shape, and the nav/title/route consumers already route through the single sources (nav_row consumes label() + for_page; NAV_GROUPS drives membership; the drill slugs are a wire contract with an R3.6 pointer). Fourth consecutive census correction (R2.5 panics 30→4, R3.1 duplicate enums 0, R3.4 sync-fragment 5→4, R3.5 fold sites N→0) — the plan's R3 one-liners systematically overcount; the census discipline is load-bearing.
 
+### R3.6 — cross-crate vocabulary (session 12; census: r36_census.py const scanner + `as_str() ==` idiom sweep + alias discipline D-20d; scanner found 4 const-level coincidences — ALL keeps; the real duplication was the parse idiom and the drill-slug wire pair)
+
+| candidate | sites | verdict | outcome |
+|---|---|---|---|
+| `GraphNodeKind` inline-parse twins of the EXISTING `GraphNodeKind::parse` | 7 (core/support_graph ×4: other_kind_str loop, node_specs `.expect("12 kinds")`, target_kind, source_kind; core/ai_tools/execute.rs:918; core/reports validate_graph_node_kind; app-shell kind_from_str) | consolidate | all seven now call catalog's parse — the find-over-ALL-by-as_str idiom is byte-identical to `parse` by construction (catalog graph.rs:55); validate's `unknown graph node kind: {kind}` message preserved byte-identical via ok_or_else; kind_from_str kept as a 1-line local alias (1 prod caller + 3 test refs — deletion would churn 5 sites for zero gain) |
+| `AiAttributeKey` membership twin of the EXISTING `parse` | 1 (core/reports/mod.rs:984, `ALL.iter().any(as_str == key)` inside the closed-catalog check) | consolidate | → `AiAttributeKey::parse(key).is_some()` — identical semantics (parse = find by as_str over ALL); the `Attribute key '{key}' is not in the closed catalog.` message path untouched |
+| drill-slug wire vocabulary (5 tokens: issues/automation/diagnostics/sync-health/outreach) | core producer ×7 literals (page_drill calls) ↔ app-shell consumer 5-arm match | consolidate → catalog | new 5-line `catalog::routes` module (ISSUES/AUTOMATION/DIAGNOSTICS/SYNC_HEALTH/OUTREACH); core's 7 literals → consts; app-shell's `page_key_from_drill` match arms now bind the consts (const-in-pattern for &str verified by a rustc 1.99.1 probe before the edit); rationale: both sides must agree by construction (protocol, not role separation — the D-20 title ruling does NOT apply); pre-fold drift was silent (dead drill button); core's test region `drill_payloads_name_real_destinations` pins the wire VALUES (D-10 exempt literals stay) |
+| `kind_label` (core/support_graph:238) — display labels over GraphNodeKind | 1 | keep | wire-vs-display role separation (as_str slugs vs "Known issue" labels — the D-20 PageKey title ruling applies); no app-shell twin (labels flow core→app-shell via JSON) |
+| `tile_label` (app-shell/operations.rs:49) — display labels over OperationsTileKey | 1 | keep | same role ruling: catalog as_str is the wire vocab ("needs_first_response"), tile_label is display ("Needs first response") |
+| ResponseState derivation from actor_type (core/activity.rs:193) | 1 | keep | maps the DB actor vocabulary (customer/user/agent) onto ResponseState — domain logic, not a parse of ResponseState's own vocab |
+| ReportMetricKey/ReportDimensionKey inline parses (core/reports/config.rs:96,111) | 1 each | keep | single-crate single-site; adding catalog `parse` for a single consumer fails the ≥2 rule (Q-03 family: the owner can order the catalog parse API if wanted) |
+| `parse_type` for NotificationType (core/notifications.rs:146) | 1 | keep | same single-site rule |
+| DB CHECK constraint vocab (support_graph/mod.rs:26-27) duplicating GraphHumanRelation as_str slugs as SQL text | 1 | keep | schema DDL text; drift fails CLOSED and LOUD (inserts rejected at the constraint) — parameterizing DDL via format! over ALL is anti-DRY (D-17); leave the schema self-contained |
+| const-level coincidences: `"SupportOS-Plus"` (core HOOK_LABEL vs xtask PRODUCT_ID), `"supportos-plus"` (core DATA_DIR_NAME vs xtask DEB_PACKAGE/BINARY_NAME), `200` triple (segment MAX_NODE_COUNT / GRAPH_MAX_NEIGHBOR_EDGES / orgs LIST_CAP), `100_000` | 4 groups | keep | different policies that happen to share values (webhook label vs product id; XDG dir vs deb/binary name; three unrelated caps) — parameterizing unrelated policies is anti-DRY (D-17); xtask is build machinery, not shipped vocabulary |
+| `GraphHumanRelation::parse` — zero production callers | 1 | keep (note) | pub API surface with no consumer; recorded for R4.3's visibility pass, not a vocabulary fold |
+| edge_specs machine-edge vocab ("belongs_to"…) vs GraphHumanRelation | 1 table | keep | different domains: machine edges vs human relations — not twins |
+
+**R3.6 verdict summary:** the plan's letter ("constants duplicated between core and catalog") censused to ZERO const-level core↔catalog duplication (4 cross-crate groups, all coincidental/xtask); the REAL cross-crate vocabulary debt was (a) 8 inline-parse twins of catalog parse fns that already existed, and (b) the R3.5-seeded drill-slug wire pair. Executed: +24/−44 across 7 files + new 5-line catalog::routes (net −20); battery green at exact baselines (520/528/293+2/56, clippy x2, gate, icons, strip-check 207/207 — +1 file for routes.rs). STAGE R3 closes with this batch (R3.1–R3.6 all terminal).
+
 ## Session log
 
 ### Session 12 — 2026-11-14
@@ -231,11 +244,28 @@ Checks: cargo machete (v0.9.2, installed ad hoc) now reports only the 3 document
   consecutive plan-overcount correction. One cross-crate seed found
   for R3.6: the drill-slug vocabulary pair (core `page_drill` ↔
   app-shell `page_key_from_drill`).
-- Zero code motion → no local battery needed (tree code-identical
-  to the CI-green base; the ledger commit is docs-only per the
-  addendum convention, riding CI run as its own verification).
-- Commits: this session's ledger commit (R3.5 terminal + R3.6
-  pointer + memory D-20).
+- Zero code motion → no local battery needed for the R3.5 ledger commit
+  (tree code-identical to the CI-green base; the ledger commit is
+  docs-only per the addendum convention, riding CI run as its own
+  verification).
+- R3.6 executed same-session (two-batch session, the R1.2-R1.5
+  precedent): census via r36_census.py (const scanner: 4 cross-crate
+  groups, ALL keeps) + `as_str() ==` idiom sweep (the real debt: 8
+  inline-parse twins of catalog parse fns that ALREADY existed —
+  GraphNodeKind ×7, AiAttributeKey ×1) + the seeded drill-slug pair
+  (const-in-pattern for &str probed with a rustc 1.99.1 one-liner
+  BEFORE editing — it compiles, so the app-shell match kept its shape).
+  Folds: 8 parse twins → parse calls (validate_graph_node_kind's
+  message preserved byte-identical via ok_or_else; kind_from_str kept
+  as a 1-line local alias); drill slugs → new 5-line `catalog::routes`
+  module consumed by both sides. One rustfmt canonicalization en route
+  (the ok_or_else block). Full battery green at EXACT baselines:
+  gate clean, fmt clean, clippy x2, core 520 / sandbox 528 /
+  app-shell 293+2 / catalog+xtask 56, verify-icons verified,
+  strip-check 207/207 (was 206; +1 = routes.rs).
+- Commits: `3074b5e` (R3.5 ledger) + this session's R3.6 batch commit.
+- STAGE R3 CLOSED at R3.6 (R3.1–R3.6 terminal); R4.1 queued with the
+  census-first pointer.
 
 ### Session 11 — 2026-11-13
 - Pre-flight: run#338 green on `ae64a25` (all four lanes — the

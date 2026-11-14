@@ -915,8 +915,7 @@ pub fn execute(
             let Some(local_id) = arg_i64(&args, "local_id").filter(|v| *v > 0) else {
                 return json!({ "error": "Invalid local_id" });
             };
-            let Some(kind_enum) = GraphNodeKind::ALL.into_iter().find(|k| k.as_str() == kind)
-            else {
+            let Some(kind_enum) = GraphNodeKind::parse(&kind) else {
                 return json!({ "error": format!("Unknown node kind: {kind}") });
             };
             let Some(node_ref) = crate::support_graph::node_ref(conn, kind_enum, local_id)

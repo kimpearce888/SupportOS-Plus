@@ -330,9 +330,7 @@ impl Default for SupportGraphPage {
 }
 
 fn kind_from_str(kind: &str) -> Option<spp_core::catalog::GraphNodeKind> {
-    spp_core::catalog::GraphNodeKind::ALL
-        .into_iter()
-        .find(|k| k.as_str() == kind)
+    spp_core::catalog::GraphNodeKind::parse(kind)
 }
 
 fn result_row(

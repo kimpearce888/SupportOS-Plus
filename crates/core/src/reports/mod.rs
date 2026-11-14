@@ -981,9 +981,7 @@ pub fn run_builder_report(
     }
     if spec.requires_attribute {
         let key = config.filters.attribute_key.as_deref().unwrap_or_default();
-        let in_catalog = crate::catalog::AiAttributeKey::ALL
-            .iter()
-            .any(|k| k.as_str() == key);
+        let in_catalog = crate::catalog::AiAttributeKey::parse(key).is_some();
         if !in_catalog {
             return Err(format!(
                 "Attribute key '{key}' is not in the closed catalog."
@@ -1364,14 +1362,8 @@ pub struct GraphNode {
 }
 
 pub(crate) fn validate_graph_node_kind(kind: &str) -> Result<GraphNodeKind> {
-    for k in GraphNodeKind::ALL {
-        if k.as_str() == kind {
-            return Ok(k);
-        }
-    }
-    Err(crate::error::Error::Config(format!(
-        "unknown graph node kind: {kind}"
-    )))
+    GraphNodeKind::parse(kind)
+        .ok_or_else(|| crate::error::Error::Config(format!("unknown graph node kind: {kind}")))
 }
 
 pub fn add_graph_node(

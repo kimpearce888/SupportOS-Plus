@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::catalog::OperationsTileKey;
+use crate::catalog::routes::{AUTOMATION, DIAGNOSTICS, ISSUES, OUTREACH, SYNC_HEALTH};
 use crate::error::{Error, Result};
 use crate::saved_views::RESPONSE_STATE_SQL;
 
@@ -288,7 +289,7 @@ pub fn snapshot(conn: &Connection, mailbox_ids: Option<&[i64]>) -> Result<Operat
         "SLA at risk".into(),
         at_risk as u32,
         "warning",
-        page_drill("issues"),
+        page_drill(ISSUES),
         Some(if alerts.unconfigured_mailboxes.is_empty() {
             "Business minutes at 80%+ of the mailbox target (Issue Radar holds the detail)."
                 .to_string()
@@ -304,7 +305,7 @@ pub fn snapshot(conn: &Connection, mailbox_ids: Option<&[i64]>) -> Result<Operat
         "SLA breached".into(),
         breached as u32,
         "critical",
-        page_drill("issues"),
+        page_drill(ISSUES),
         Some(
             "Business minutes past the mailbox target (Issue Radar holds the detail).".to_string(),
         ),
@@ -353,7 +354,7 @@ pub fn snapshot(conn: &Connection, mailbox_ids: Option<&[i64]>) -> Result<Operat
         "Issue spike".into(),
         count_issue_spikes(conn)?,
         "warning",
-        page_drill("issues"),
+        page_drill(ISSUES),
         Some("Issue clusters trending up (Issue Radar detail).".to_string()),
     ));
     tiles.push(tile(
@@ -361,7 +362,7 @@ pub fn snapshot(conn: &Connection, mailbox_ids: Option<&[i64]>) -> Result<Operat
         "Automation approvals".into(),
         count_automation_approvals(conn)?,
         "warning",
-        page_drill("automation"),
+        page_drill(AUTOMATION),
         Some("Actions parked awaiting explicit human approval.".to_string()),
     ));
     tiles.push(tile(
@@ -369,7 +370,7 @@ pub fn snapshot(conn: &Connection, mailbox_ids: Option<&[i64]>) -> Result<Operat
         "Failed jobs (7d)".into(),
         count_failed_jobs(conn)?,
         "warning",
-        page_drill("diagnostics"),
+        page_drill(DIAGNOSTICS),
         Some("Background jobs that exhausted their retries in the last 7 days.".to_string()),
     ));
     let sync_problems = sync_problems(conn)?;
@@ -382,7 +383,7 @@ pub fn snapshot(conn: &Connection, mailbox_ids: Option<&[i64]>) -> Result<Operat
         } else {
             "info"
         },
-        page_drill("sync-health"),
+        page_drill(SYNC_HEALTH),
         Some(sync_problems.note),
     ));
     tiles.push(tile(
@@ -390,7 +391,7 @@ pub fn snapshot(conn: &Connection, mailbox_ids: Option<&[i64]>) -> Result<Operat
         "Campaign activity".into(),
         count_campaign_activity(conn)?,
         "info",
-        page_drill("outreach"),
+        page_drill(OUTREACH),
         Some("Campaigns queued/sending/paused right now.".to_string()),
     ));
 

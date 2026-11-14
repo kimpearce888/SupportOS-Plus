@@ -372,6 +372,31 @@ session ends by adding what the next session must not have to rediscover.
   (`use ... PageKey as K`) — every future census needs the manual
   alias sweep after the scanner pass.
 
+- **D-21 (session 12, R3.6).** Cross-crate vocabulary end state — the
+  plan's core↔catalog const duplication censused to ZERO (4 cross-crate
+  value groups, all coincidental or xtask build machinery); the real
+  debt was elsewhere and is now closed: (a) every inline
+  `ALL.iter().find(|k| k.as_str() == x)` idiom that twinns an EXISTING
+  catalog `parse` must call it instead — 8 sites folded (GraphNodeKind
+  ×7 incl. validate_graph_node_kind's ok_or_else form and app-shell's
+  kind_from_str 1-line alias; AiAttributeKey membership ×1); new
+  twins are construction debt (D-17's rule, extended to vocabulary).
+  (b) The drill-slug wire vocabulary lives in `catalog::routes`
+  (ISSUES/AUTOMATION/DIAGNOSTICS/SYNC_HEALTH/OUTREACH — 5 consts);
+  core's `page_drill` calls and app-shell's `page_key_from_drill` match
+  arms bind them; &str consts ARE usable as match-arm patterns on this
+  toolchain (probed before the edit) — that fact unlocks const-pattern
+  folds generally. (c) Kept-vocabulary rulings: wire vs display roles
+  (kind_label, tile_label vs as_str — the D-20 ruling extends to
+  catalog-owned types); DB CHECK-constraint slugs stay as DDL text
+  (drift fails closed+loud; format!-parameterizing DDL is anti-DRY);
+  single-crate single-site parses do not earn catalog `parse` fns
+  (ReportMetricKey/ReportDimensionKey/NotificationType — Q-03 family:
+  the owner can order the parse API if wanted). (d) The parse-twin
+  census idiom is `rg "as_str\(\) ==" across crates, then verify the
+  scrutinee type is catalog-owned and catalog has the matching parse —
+  cheaper and sharper than name-based const scanning.
+
 
 ## Facts (F-xx)
 

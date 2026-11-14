@@ -203,10 +203,7 @@ pub(crate) fn human_edges_touching(
 
     let mut out = Vec::with_capacity(raw.len());
     for (outgoing, relation, note, at, other_kind_str, other_id) in raw {
-        let Some(other_kind) = GraphNodeKind::ALL
-            .into_iter()
-            .find(|k| k.as_str() == other_kind_str)
-        else {
+        let Some(other_kind) = GraphNodeKind::parse(&other_kind_str) else {
             continue;
         };
         let other = node_ref_or_tombstone(conn, other_kind, other_id)?;
@@ -288,10 +285,7 @@ pub fn graph_stats(conn: &Connection) -> Result<Value> {
     let nodes: Vec<Value> = node_specs
         .iter()
         .map(|(kind, sql)| {
-            let kind = GraphNodeKind::ALL
-                .into_iter()
-                .find(|k| k.as_str() == *kind)
-                .expect("12 kinds");
+            let kind = GraphNodeKind::parse(kind).expect("12 kinds");
             json!({"kind": kind.as_str(), "label": kind_label(kind), "count": count(sql)})
         })
         .collect();
@@ -589,10 +583,7 @@ pub fn neighbors_json(
         )?;
         for row in rows {
             let (relation, note, at, target_kind, target_local_id) = row?;
-            let Some(tk) = GraphNodeKind::ALL
-                .into_iter()
-                .find(|k| k.as_str() == target_kind)
-            else {
+            let Some(tk) = GraphNodeKind::parse(&target_kind) else {
                 continue;
             };
             raw += 1;
@@ -632,10 +623,7 @@ pub fn neighbors_json(
         )?;
         for row in rows {
             let (relation, note, at, source_kind, source_local_id) = row?;
-            let Some(sk) = GraphNodeKind::ALL
-                .into_iter()
-                .find(|k| k.as_str() == source_kind)
-            else {
+            let Some(sk) = GraphNodeKind::parse(&source_kind) else {
                 continue;
             };
             raw += 1;

@@ -1,5 +1,6 @@
 use eframe::egui;
 use spp_core::catalog::OperationsTileKey;
+use spp_core::catalog::routes::{AUTOMATION, DIAGNOSTICS, ISSUES, OUTREACH, SYNC_HEALTH};
 use spp_core::db::DbHandle;
 use spp_core::workload::{CapacityModel, WorkloadSnapshot};
 
@@ -110,11 +111,11 @@ pub(crate) enum TileDrill {
 
 fn page_key_from_drill(page: &str) -> Option<PageKey> {
     match page {
-        "diagnostics" => Some(PageKey::Diagnostics),
-        "sync-health" => Some(PageKey::SyncHealth),
-        "automation" => Some(PageKey::Automation),
-        "issues" => Some(PageKey::IssueRadar),
-        "outreach" => Some(PageKey::Outreach),
+        DIAGNOSTICS => Some(PageKey::Diagnostics),
+        SYNC_HEALTH => Some(PageKey::SyncHealth),
+        AUTOMATION => Some(PageKey::Automation),
+        ISSUES => Some(PageKey::IssueRadar),
+        OUTREACH => Some(PageKey::Outreach),
         _ => None,
     }
 }
