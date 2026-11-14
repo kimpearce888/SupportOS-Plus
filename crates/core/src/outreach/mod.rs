@@ -1123,7 +1123,7 @@ pub fn create_outreach_campaign(
         params![name, subject, body, mailbox_local_id, serde_json::to_string(tags).unwrap_or_default(), segment_id, segment_snapshot],
     )?;
     let campaign_id = conn.last_insert_rowid();
-    let mut ins = conn.prepare(
+    let mut stmt = conn.prepare(
         "INSERT OR IGNORE INTO outreach_recipients
              (campaign_id, customer_local_id, customer_remote_id, email, snapshot)
          VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -1135,7 +1135,7 @@ pub fn create_outreach_campaign(
             "property_values": rec.get("properties").cloned().unwrap_or(serde_json::json!([])),
             "selected_at": now_iso(),
         });
-        ins.execute(params![
+        stmt.execute(params![
             campaign_id,
             rec.get("customer_local_id")
                 .and_then(|v| v.as_i64())

@@ -1213,14 +1213,14 @@ impl WorkerManager {
                 let called_ref = called.clone();
                 let usage_ref = usage_slot.clone();
                 let chat = |msgs: Vec<crate::ai_provider::ChatMessage>,
-                            temp: f64,
+                            temperature: f64,
                             max_tokens: u32|
                  -> TranslateChatFuture<'_> {
                     let called_ref = called_ref.clone();
                     let usage_ref = usage_ref.clone();
                     Box::pin(async move {
                         let res = backend_ref
-                            .chat_qa(msgs, temp, max_tokens, false)
+                            .chat_qa(msgs, temperature, max_tokens, false)
                             .await
                             .map_err(|e| e.to_string())?;
                         called_ref.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -1317,13 +1317,13 @@ impl WorkerManager {
             block_ai_pipeline(async {
                 let backend_ref = &backend;
                 let chat = |msgs: Vec<crate::ai_provider::ChatMessage>,
-                            temp: f64,
+                            temperature: f64,
                             max_tokens: u32,
                             json_mode: bool|
                  -> CoachingChatFuture<'_> {
                     Box::pin(async move {
                         let res = backend_ref
-                            .chat_qa(msgs, temp, max_tokens, json_mode)
+                            .chat_qa(msgs, temperature, max_tokens, json_mode)
                             .await
                             .map_err(|e| e.to_string())?;
                         Ok((res.content, res.model, res.latency_ms))

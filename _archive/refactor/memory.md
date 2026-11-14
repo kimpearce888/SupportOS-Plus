@@ -397,6 +397,51 @@ session ends by adding what the next session must not have to rediscover.
   scrutinee type is catalog-owned and catalog has the matching parse —
   cheaper and sharper than name-based const scanning.
 
+- **D-22 (session 13, R4.1).** Naming end state — the §5.3 rules
+  ("say what it is; booleans read is_/has_; no non-domain-standard
+  abbreviations") are now enforced as WRITTEN POLICY, not blanket
+  renames: the seventh consecutive census correction (341 bool decls,
+  118 bool-returning fns, 478 short-id kinds censused; context-read
+  every weak candidate) found the tree overwhelmingly honest. Standing
+  rules for future code:
+  - **A boolean name must READ as a complete predicate at its use
+    site** — is_/has_ is ONE way, not the only way: state
+    adjectives/participles (enabled, configured, loaded, escalated),
+    predicate nouns with verb force (exists), filter imperatives
+    (include_*, show_*), and domain flags (force, on, read) all
+    qualify; nouns-as-bools (conversation, assistant, drill) and
+    incomplete adverbs (already, known) do NOT — fix by completing the
+    phrase (conversation_exists, from_assistant, drillable).
+  - **Wire/persisted names (serde fields, DB columns, JSON keys,
+    settings keys) are vocabulary, not style** — invariant 5 outranks
+    §5.3; renaming them needs a migration note, and the default is a
+    verdict-row keep (ai_involvement, stream, SpanStyle flags, the
+    *_enabled settings family all keep).
+  - **Action fns returning success-bools** (upsert, ensure_collection,
+    verify_backup et al.) honestly name the ACTION; the bool return
+    contract is a type-level concern — do not rename the fn to
+    did_*; if the return contract ever needs tightening that is an
+    API restructure, not a naming fix.
+  - **Abbreviations are domain-relative:** measured against THIS
+    tree's established vocabulary (conn/db/stmt/conv/org/tx/rt/sig/
+    cfg/ctx/msg/req/res/idx/cc/bcc/href...), all keeps; a NEW
+    abbreviation that collides with another word's meaning (temp =
+    temperature vs temporary) or contradicts the established term for
+    the same concept (ins vs the 169-site stmt) is debt.
+  - **A module-local wrapper that only renames an existing std/API
+    fn** (aa_get → Map::get) is construction debt under D-18's
+    standing rule — delete it, call the API directly.
+  - Deferred census note (not acted, R4.1 scope): dt_cell exists as
+    3 byte-similar private copies (customers/incidents/organizations)
+    — cross-page fold candidate awaiting its own batch if ordered.
+  - Census tooling: r41_census.py (tool-results, not committed)
+    reuses the G-08-fixed strip machinery; its lesson for future
+    naming scans: enumerate then context-read, never trust a regex
+    verdict — the FN_BOOL pattern needs per-site verification (the
+    118 hits were 100% honest after reading, but only reading proved
+    it), and the region tracker's test-flagging is directionally
+    right only (assert!-bearing sites prove their own test regions).
+
 
 ## Facts (F-xx)
 

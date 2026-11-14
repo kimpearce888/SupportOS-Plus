@@ -42,11 +42,14 @@ battery, incremental afterwards.
 ## 3. Tooling facts
 
 - `cargo` needs `export PATH="$HOME/.cargo/bin:$PATH"` in every new shell.
-  Partial-reset case (session 11): if `~/.cargo` is gone but
-  `/tmp/my-project/{rustup,cargo-home}` survived, use those instead —
-  `export RUSTUP_HOME=/tmp/my-project/rustup CARGO_HOME=/tmp/my-project/cargo-home
-  PATH=/tmp/my-project/cargo-home/bin:$PATH` (1.99.1 toolchain + crate
-  registry cache ride along; saves the §2 toolchain download).
+  Partial-reset case (session 11; path updated session 13): if `~/.cargo`
+  is gone but the sandbox's persistent project dir survived, the toolchain
+  lives at `/home/z/my-project/{rustup,cargo-home}` —
+  `export RUSTUP_HOME=/home/z/my-project/rustup CARGO_HOME=/home/z/my-project/cargo-home
+  PATH=/home/z/my-project/cargo-home/bin:$PATH` (1.99.1 toolchain + crate
+  registry cache ride along; saves the §2 toolchain download; the exports
+  match audit/env.sh). NOTE: exports do NOT persist across bash tool
+  calls in this sandbox — export in EVERY command that runs cargo.
 - `python3` (3.12) is present — the no-simulation gate runs on it.
 - No Vulkan/lavapipe locally → the kittest snapshot suites are **CI-only**;
   never try to run them in the sandbox.

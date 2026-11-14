@@ -889,8 +889,8 @@ fn initials(name: &str) -> String {
         .to_uppercase()
 }
 
-fn dt_cell(ui: &mut egui::Ui, width: f32, text: egui::RichText, right: bool) {
-    let layout = if right {
+fn dt_cell(ui: &mut egui::Ui, width: f32, text: egui::RichText, align_right: bool) {
+    let layout = if align_right {
         egui::Layout::right_to_left(egui::Align::Center)
     } else {
         egui::Layout::left_to_right(egui::Align::Center)

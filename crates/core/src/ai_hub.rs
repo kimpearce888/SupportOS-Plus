@@ -449,7 +449,7 @@ pub(crate) fn apply_m054_ai_runs_endpoint(conn: &Connection) -> Result<()> {
     if !crate::sync_schema::table_exists(conn, "ai_runs")? {
         return Ok(());
     }
-    let has: bool = conn
+    let has_column: bool = conn
         .query_row(
             "SELECT COUNT(*) FROM pragma_table_info('ai_runs') WHERE name = 'endpoint_id'",
             [],
@@ -457,7 +457,7 @@ pub(crate) fn apply_m054_ai_runs_endpoint(conn: &Connection) -> Result<()> {
         )
         .map(|n| n > 0)
         .unwrap_or(false);
-    if !has {
+    if !has_column {
         conn.execute_batch("ALTER TABLE ai_runs ADD COLUMN endpoint_id TEXT;")?;
     }
     Ok(())

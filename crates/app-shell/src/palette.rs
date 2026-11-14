@@ -93,7 +93,7 @@ pub(crate) struct CommandPalette {
     hits: Vec<PaletteHit>,
     selected: usize,
     wants_focus: bool,
-    palette_take: bool,
+    query_committed: bool,
     last_window_rect: egui::Rect,
     just_opened: bool,
 }
@@ -107,7 +107,7 @@ impl CommandPalette {
             hits: Vec::new(),
             selected: 0,
             wants_focus: false,
-            palette_take: false,
+            query_committed: false,
             last_window_rect: egui::Rect::NOTHING,
             just_opened: false,
         }
@@ -270,12 +270,12 @@ impl CommandPalette {
                     }
                     let take =
                         response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                    self.palette_take = take;
+                    self.query_committed = take;
                     if take && (query_changed || take_hits(&self.hits).is_empty()) {
                         response.request_focus();
                     }
                 });
-                let take = self.palette_take;
+                let take = self.query_committed;
                 ui.add_space(6.0);
                 let hits = take_hits(&self.hits);
                 if hits.is_empty() {

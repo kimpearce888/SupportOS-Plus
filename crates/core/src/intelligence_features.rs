@@ -167,21 +167,21 @@ pub fn link_known_issue_conversation(
     known_issue_id: i64,
     conversation_id: i64,
 ) -> Result<bool> {
-    let known: bool = conn
+    let known_issue_exists: bool = conn
         .query_row(
             "SELECT 1 FROM known_issues WHERE id = ?1",
             params![known_issue_id],
             |_| Ok(()),
         )
         .is_ok();
-    let conversation: bool = conn
+    let conversation_exists: bool = conn
         .query_row(
             "SELECT 1 FROM conversations WHERE id = ?1 AND deleted_at IS NULL",
             params![conversation_id],
             |_| Ok(()),
         )
         .is_ok();
-    if !known || !conversation {
+    if !known_issue_exists || !conversation_exists {
         return Ok(false);
     }
     let changed = conn.execute(

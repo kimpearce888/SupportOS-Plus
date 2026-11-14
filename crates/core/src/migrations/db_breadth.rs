@@ -1105,7 +1105,7 @@ fn try_create_unique_index(
     unique_ddl: &str,
     plain_ddl: &str,
 ) -> Result<()> {
-    let already: bool = conn
+    let already_exists: bool = conn
         .query_row(
             "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name = ?1",
             [name],
@@ -1113,7 +1113,7 @@ fn try_create_unique_index(
         )
         .map(|n| n > 0)
         .unwrap_or(false);
-    if already {
+    if already_exists {
         return Ok(());
     }
     match conn.execute_batch(unique_ddl) {

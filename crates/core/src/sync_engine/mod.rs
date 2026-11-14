@@ -1375,7 +1375,7 @@ impl SyncEngine {
                     tracing::debug!(conversations = n, "interaction snapshots built");
                 }
                 if !cancelled {
-                    let already: bool = conn
+                    let already_queued: bool = conn
                         .query_row(
                             "SELECT 1 FROM jobs WHERE type = 'rebuild_search_index'
                               AND status = 'queued' LIMIT 1",
@@ -1383,7 +1383,7 @@ impl SyncEngine {
                             |_| Ok(true),
                         )
                         .unwrap_or(false);
-                    if !already {
+                    if !already_queued {
                         let _ = crate::jobs::enqueue_on(
                             &conn,
                             "sync",
@@ -1539,7 +1539,7 @@ impl SyncEngine {
             let processed: i64 = results.iter().map(|r| r.processed).sum();
             {
                 let conn = self.lock();
-                let already: bool = conn
+                let already_queued: bool = conn
                     .query_row(
                         "SELECT 1 FROM jobs WHERE type = 'rebuild_search_index'
                           AND status = 'queued' LIMIT 1",
@@ -1547,7 +1547,7 @@ impl SyncEngine {
                         |_| Ok(true),
                     )
                     .unwrap_or(false);
-                if !already {
+                if !already_queued {
                     let _ = crate::jobs::enqueue_on(
                         &conn,
                         "sync",

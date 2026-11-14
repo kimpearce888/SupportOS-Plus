@@ -7,34 +7,31 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 
 ## CURRENT POINTER
 
-- Next task: **R4.1 — naming** (modules, types, functions, variables
-  per plan §5.3 — see plan §7 R4). STAGE R3 IS CLOSED (R3.1–R3.6 all
-  terminal). R4 opens with the naming pass; CENSUS FIRST per the
-  standing discipline (six consecutive overcount corrections): enumerate
-  the naming deviations from §5.3 before changing anything, classify
-  each (pure rename vs API-visible churn), and remember invariant 5
-  (names that appear in wire formats/settings keys — R3.6 just
-  single-sourced the drill-slug routes; any rename touching wire or
-  persisted vocab needs a migration note, and most should be verdict-row
-  keeps). Watch the D-13 allow clusters: too_many_arguments fns are
-  R3.4-owned keeps — R4.1 renames may touch their signatures only
-  if the rename is otherwise mandatory.
-- Pre-flight [session 12]: run#340 green on `cf5faa7` (preflight gate);
-  R3.5 zero-motion ledger head `3074b5e` CI-VERIFIED — run#341 (id
-  43535457579) green, all four lanes; R3.6 executed on that green base
-  same-session (two-batch session). R3.6 head `c04be80` CI-VERIFIED —
-  run#342 (id 43541154258) green, all four lanes incl. the kittest
-  drift gate (the routes fold is behavior-neutral on goldens). Green
-  base for R4.1: this addendum head's own docs-only run (the standard
-  next-session preflight gate).
-- Session counter: 12 completed (R1 terminal; R2 stage TERMINAL; R3
-  stage TERMINAL — R3.1 run#332, R3.2 run#335, R3.3 run#337, R3.4
-  run#339, R3.5 zero-motion run#341, R3.6 run#342).
-- Environment: session 12 partial-reset only — the canonical clone at
-  /home/z/SupportOS-Plus SURVIVED (G-12 intact); toolchain via the §3
-  partial-reset exports; rustc 1.99.1 verified; credentials active;
-  battery ran on the warm base (470–474 s core lanes, 253–282 s
-  app-shell, catalog+xtask instant).
+- Next task: **R4.2 — decomposition** (top-20 largest functions split
+  to the §5.3 soft cap of 40 lines — see plan §7 R4). R4.1 executed in
+  session 13 (naming census + surgical renames, D-22; CI row rides
+  that push — next session MUST confirm green before starting R4.2).
+  R4.2 notes for the executor: CENSUS FIRST (top-20 by line count from
+  a scanner, not from memory); the D-13 too_many_lines keeps (inbox.rs
+  ui() ×3 + design/mod.rs) and the F-04 split candidates overlap this
+  batch deliberately — the splits must be pixel-neutral (D-05: kittest
+  goldens are CI-only per F-06, so the discipline is extract-fn along
+  existing seams + battery + CI drift gate); kittest suite file names
+  and test fn names stay stable (invariant 5); new code is
+  comment-free (constraint 3).
+- Pre-flight [session 13]: run#343 green on `66f3968` (the session-12
+  addendum head — the standard docs-only preflight gate). R4.1
+  executed on that green base; its CI row rides the R4.1 push.
+- Session counter: 13 completed (R1 terminal; R2 TERMINAL; R3 TERMINAL
+  — R3.1 run#332, R3.2 run#335, R3.3 run#337, R3.4 run#339, R3.5
+  zero-motion run#341, R3.6 run#342; R4.1 battery-green, CI rides
+  this push).
+- Environment: session 13 was a FULL reset again — repo re-cloned via
+  github-reconnect.sh; toolchain SURVIVED at /home/z/my-project/
+  {rustup,cargo-home} (handover §3 updated to this durable path);
+  cold-cache battery ~30 min total (clippy lanes fast in check mode,
+  codegen test lanes ~8–10 min each); disk tripped 93% at the
+  app-shell link lane — G-05 incremental cleanup applied post-run.
 
 ## Task states
 
@@ -63,7 +60,8 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 | R3.4 page scaffolding | terminal (session 11) | census: hosting layer ALREADY shared (design:: hosts/page_header; 21/23 pages); the real repeat = the "Sync now" toolbar fragment byte-identical ×4 (dashboard/customers/reports/organizations) → `sync_health::sync_now_button` (button+hover+match+3 note strings in ONE place; re-read flag returns for the caller-side page-specific invalidate()); inbox variant, ensure_loaded latches, RANGES chip loops, LIST_CAP hint censused as keeps (R3.4 verdict table); +41/−97 across 5 files; battery green (520/528/293+2/56); strip-check 206/206; CI run#339 green on `9edd9b9` — see complete.md |
 | R3.5 PageKey tables | terminal (session 12) | census: ZERO folds land — the attribute layer is already single-sourced (label() str site, Icon::for_page Icon site, apply_invalidations field-dispatch, render-dispatch heterogeneous payloads — four disjoint payload shapes, no ≥2 same-shape pair); titles/nav-labels are decoupled roles (2 intentional divergences); NAV_GROUPS + all() already tables; drill-slug pair queued to R3.6 — see complete.md |
 | R3.6 cross-crate vocabulary | terminal (session 12) | census: ZERO core↔catalog const duplication (plan letter overcounted — 6th consecutive correction); real debt = 8 inline-parse twins of existing catalog parse fns (GraphNodeKind ×7 + AiAttributeKey ×1) + the drill-slug wire pair → `catalog::routes` (5 consts, new module); +24/−44 +6 (net −20); battery green (520/528/293+2/56, strip-check 207/207) — see complete.md |
-| R4.1–R4.5 clean code | pending | see plan §7 R4 |
+| R4.1 naming | done (session 13) | census (r41_census.py): 341 bool decls (272 prod) + 118 bool-returning fns + 478 short-id kinds + 232 suspicious-word hits; SEVENTH consecutive census correction — the tree's naming was overwhelmingly honest; 10 surgical renames + 1 deletion (aa_get, D-18 rule): temp→temperature, already→already_exists/already_queued, has→has_column, known/conversation→*_exists, palette_take→query_committed, right→align_right ×3, drill→drillable, assistant→from_assistant, ins→stmt ×2; keep rulings in the R4.1 verdict table (wire vocab / truthy adjectives / predicate phrases / flag idioms / established short vocabulary); dt_cell ×3 fold candidate recorded, not acted; battery green (520/528/293+2/56, clippy x2, gate, icons, strip-check 207/207); CI row rides this push — see complete.md |
+| R4.2–R4.5 clean code | pending | see plan §7 R4 |
 | R5.1–R5.3 guardrails | pending (optional, stage-gated) | |
 | R6.1–R6.2 polish + close | pending | |
 
@@ -222,7 +220,82 @@ Checks: cargo machete (v0.9.2, installed ad hoc) now reports only the 3 document
 
 **R3.6 verdict summary:** the plan's letter ("constants duplicated between core and catalog") censused to ZERO const-level core↔catalog duplication (4 cross-crate groups, all coincidental/xtask); the REAL cross-crate vocabulary debt was (a) 8 inline-parse twins of catalog parse fns that already existed, and (b) the R3.5-seeded drill-slug wire pair. Executed: +24/−44 across 7 files + new 5-line catalog::routes (net −20); battery green at exact baselines (520/528/293+2/56, clippy x2, gate, icons, strip-check 207/207 — +1 file for routes.rs). STAGE R3 closes with this batch (R3.1–R3.6 all terminal).
 
+### R4.1 — naming (session 13; census-first per standing discipline — scanner r41_census.py in tool-results: bool decls 341 (272 prod) + fn-returns-bool 118 + short-id inventory 478 kinds + suspicious-word pass 232; every weak candidate then read in context)
+
+The plan's letter ("booleans read is_/has_; no non-domain-standard abbreviations") reads as a mass-rename mandate; the precise census shows the tree's naming is overwhelmingly honest — SEVENTH consecutive census correction. The rename set is surgical:
+
+| module | construct | verdict | outcome |
+|---|---|---|---|
+| core/workers/execute.rs ×2 chat closures (translate ~1216, coaching ~1320) | `temp: f64` | rename | `temperature` — abbreviation collides with "temporary"; the callee `chat_qa` already names it temperature (LLM-sampling domain word); 2 params + 2 forwarding uses |
+| core/migrations/db_breadth.rs:1108 | `let already: bool` (sqlite_master index check) | rename | `already_exists` — bare adverb → complete predicate |
+| core/sync_engine/mod.rs:1378 + 1542 | `let already: bool` (queued rebuild_search_index job check) | rename | `already_queued` — mirrors the EXISTING `already_queued` local in the same engine family (loops.rs:1070, identical query) |
+| core/ai_hub.rs:452, core/embeddings.rs:297+320+1460 | `let has: bool` (pragma_table_info column checks) | rename | `has_column` — bare "has" is an incomplete predicate; mirrors the existing has_column local (outreach/mod.rs:1934); 1460 rides inside a #[cfg(test)] audit fn — local var, not a golden key (D-06 intact) |
+| core/intelligence_features.rs:170+177 | `let known: bool` / `let conversation: bool` | rename | `known_issue_exists` / `conversation_exists` — noun-as-bool → complete predicates; mirrors the *_exists vocabulary (conv_exists, notification_exists) |
+| app-shell/palette.rs:96 | `palette_take: bool` field | rename | `query_committed` — "palette_take" does not say what it is (deferred Enter-in-query commit flag across the layout closure); sibling vocabulary: query, query_changed, wants_focus; 4 sites (decl/init/store/load) |
+| app-shell/pages/{customers,incidents,organizations}.rs dt_cell ×3 | `right: bool` alignment param | rename | `align_right` — "right" ambiguous (side vs correctness); the body's right_to_left branch makes the alignment meaning explicit at the signature |
+| app-shell/design/mod.rs metric_tile (~1255) | `drill: bool` | rename | `drillable` — noun-as-flag → predicate adjective; sits beside `drill_line`; 1 param + 3 internal uses; positional callers untouched |
+| app-shell/design/mod.rs cop_chat (~2201) | `assistant: bool` | rename | `from_assistant` — noun-as-bool → directional predicate; the body already computes `align_right = !assistant` |
+| core/embeddings.rs:225, core/outreach/mod.rs:1126 | `let mut ins` (prepared INSERT statements) | rename | `stmt` — the tree's established statement vocabulary (169 sites); intra-codebase consistency |
+| core/segment/mod.rs:531 | `fn aa_get(obj, key)` | delete | cryptic name wrapping a literal `Map::get`; D-18's standing rule (module-local rewrite of an existing API shape = construction debt); 3 callers inline `obj.get(...)` — net −3 lines |
+
+**R4.1 keep rulings (the census's honest majority — every class with its reason):**
+
+- **Wire/persisted bool fields (invariant 5):** AuditEntry.ai_involvement (audit_log DB column mirror), ChatCompletionRequest.stream (OpenAI-compatible wire), HsField.required (HelpScout wire), SpanStyle.{bold,italic,underline,quote,code,strikethrough} (rich-text format), settings structs' *_enabled family (persisted JSON keys), import_result's `changed` (JSON-key mirror), event payloads' ok/success — names ARE the wire vocabulary.
+- **Truthy state adjectives/participles:** enabled/configured/connected/loaded/selected/stale/active/finished/deleted/detected/escalated/verified/revoked/replied/required/focused/folded/running/editable/gated (~200 sites incl. the wire-locked) — read as complete predicates at use sites; forcing is_ prefixes would churn for zero readability (Q-03 family).
+- **Predicate-phrase fns (118 bool-returning):** exists/matches/contains/available/configured/enabled/stale/healthy/answers/needs/requires families already predicate (std precedent: Path::exists, str::contains — the is_ prefix is optional when the verb already predicates); egui widget fns (nav_row, theme_row, result_row, empty_state_cta, armed_danger_button, switch) return activation by widget-fn convention; action fns returning success (upsert, drop_collection, ensure_collection, recover_interrupted_state, set_tab_by_label, spawn_sync_action, insert_gap_candidate, verify_backup, cached_verify) honestly name the action — the bool return contract is a type-level concern outside R4.1's names-only scope (recorded, not acted).
+- **Flag-parameter idioms:** force, include_*, show_*, unread_only, default/value (setter/getter-with-default idiom), on (switch state), check (xtask --check CLI flag), read/draft (message domain), big/wide/slim (size adjectives), b_* builder-form family (reports.rs — 14-field coherent page-local prefix convention, D-13 family), initial (first-pass sync term of art), intersect (set-operation domain), escalation (signals-family vocabulary — DeterministicSignals/LocalAnalysis fields sit among noun siblings urgency/frustration/technical), ai_suffix (param says exactly what it toggles).
+- **Short-identifier inventory (478 kinds):** full words at short length (conn/db/id/rows/stmt/page/kind/name/text/note/key/tag) + domain abbreviations (conv/org/tx/rt/sig/cfg/ctx/msg/req/res/idx/cc/bcc/href/sql/json/api/url/ui/ai/hs) + single-letter closures/tight-scope locals (t=tokens, |h| hits, i/j/k) + readable contextual (buf/addr/arr/obj/dup) — the tree's established vocabulary; no misleading short name survived the context reads.
+- **Type/module names:** zero vague types (no Data/Info/Item/Thing/Helper/Manager/Util anywhere); page-local `enum Tab` ×8 + xtask Cli/Cmd are self-describing in context (D-13's module_name_repetitions family); D-13's self-named-module ruling stands.
+- **Test regions (69 bool decls + junk/out2/res2 fixtures):** D-10-adjacent naming exemption — honest in test context, zero golden-key contact.
+
+**Census finding recorded, not acted (wrong change class for R4.1 — same pattern as D-18's deferred truncation note):** dt_cell exists as 3 byte-similar private copies (customers.rs:892 / incidents.rs:1041 / organizations.rs:608) — a cross-page helper fold candidate (R3.4-family); the rename above is applied to all three copies identically, the fold itself awaits its own batch if ordered.
+
 ## Session log
+
+### Session 13 — 2026-11-14
+- Pre-flight: run#343 green on the session-12 addendum head `66f3968`
+  (the standard docs-only preflight gate) — R4.1's green base.
+- Environment: FULL reset (repo wiped; re-cloned via
+  github-reconnect.sh; git identity re-applied by the script).
+  Toolchain SURVIVED at /home/z/my-project/{rustup,cargo-home}
+  (handover §3 corrected to this path — the audit/env.sh exports
+  already pointed there); rustc 1.99.1 verified on first command.
+- R4.1 executed (naming, census-first): scanner r41_census.py
+  (tool-results, not committed) — bool decls 341 (272 prod / 69
+  test), fn-returns-bool 118 (production 117 + 1 kittest helper),
+  short-id inventory 478 kinds, suspicious-word pass 232 hits;
+  every weak candidate read in context before its verdict. Result:
+  SEVENTH consecutive census correction — the tree's naming is
+  overwhelmingly honest; 10 rename families + 1 deletion executed
+  (temp→temperature ×4, already→already_exists ×2, already→
+  already_queued ×4, has→has_column ×6, known/conversation→
+  known_issue_exists/conversation_exists ×6, palette_take→
+  query_committed ×4, right→align_right ×6, drill→drillable ×4,
+  assistant→from_assistant ×4, ins→stmt ×4, aa_get deleted with 3
+  callers inlined to Map::get per D-18's standing rule). Keep
+  rulings (wire vocab invariant 5 / truthy state adjectives /
+  predicate-phrase fns / egui widget conventions / flag idioms /
+  b_* form-state family / established short vocabulary / test
+  regions) in the R4.1 verdict table. Zero kittest golden-key
+  contact (positional callers unchanged); dt_cell ×3 fold candidate
+  recorded for a possible future batch.
+- Battery: COLD cache (fresh target/) — full battery green via the
+  detached-driver pattern (G-10 subshell form, sequential lanes,
+  G-05 incremental cleanup between codegen lanes): gate clean, fmt
+  --check, clippy workspace + sandbox (-D warnings), core 520 ✓,
+  core-sandbox 528 ✓, app-shell 293+2 ✓ (27 kittest binaries at 0
+  local fns — F-10 normal), catalog+xtask 56 ✓, verify-icons,
+  strip-comments --check 207/207 ✓. Total ~30 min (06:37–07:07);
+  disk tripped 93% at the app-shell link lane — post-run
+  `rm -rf target/debug/incremental` restored 2.7G free.
+- Diff class review: 13 code files, +77/−51 (progress.md +30
+  ledger) — every hunk a word-level rename or the aa_get deletion;
+  no behavior, no wire, no golden contact.
+- Commit `refactor(R4.1): naming …` + push; CI row rides this push
+  (four lanes incl. the kittest drift gate — renames are
+  pixel-neutral by construction).
+- memory.md: D-22 added (naming end state + standing rules);
+  handover §3 toolchain path corrected to /home/z/my-project/.
 
 ### Session 12 — 2026-11-14
 - Pre-flight: run#340 green on the addendum head `cf5faa7` (id

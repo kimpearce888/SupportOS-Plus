@@ -222,7 +222,7 @@ pub(crate) fn chunk_conversation(conn: &Connection, conversation_id: i64) -> Res
     if !unchanged {
         conn.execute_batch("BEGIN")?;
         let tx = (|| -> Result<()> {
-            let mut ins = conn.prepare(
+            let mut stmt = conn.prepare(
                 "INSERT INTO conversation_chunks
                     (conversation_id, chunk_index, content, chunk_kind)
                  VALUES (?1, ?2, ?3, ?4)",
@@ -237,10 +237,10 @@ pub(crate) fn chunk_conversation(conn: &Connection, conversation_id: i64) -> Res
                               WHERE conversation_id = ?1 AND chunk_index = ?2",
                             params![conversation_id, i],
                         )?;
-                        ins.execute(params![conversation_id, i, content, kind])?;
+                        stmt.execute(params![conversation_id, i, content, kind])?;
                     }
                     None => {
-                        ins.execute(params![conversation_id, i, content, kind])?;
+                        stmt.execute(params![conversation_id, i, content, kind])?;
                     }
                 }
             }
@@ -294,7 +294,7 @@ pub(crate) fn apply_m055_chunk_kind(conn: &Connection) -> Result<()> {
     if !crate::sync_schema::table_exists(conn, "conversation_chunks")? {
         return Ok(());
     }
-    let has: bool = conn
+    let has_column: bool = conn
         .query_row(
             "SELECT COUNT(*) FROM pragma_table_info('conversation_chunks')
              WHERE name = 'chunk_kind'",
@@ -303,7 +303,7 @@ pub(crate) fn apply_m055_chunk_kind(conn: &Connection) -> Result<()> {
         )
         .unwrap_or(0)
         > 0;
-    if !has {
+    if !has_column {
         conn.execute(
             "ALTER TABLE conversation_chunks
              ADD COLUMN chunk_kind TEXT NOT NULL DEFAULT 'thread'",
@@ -317,7 +317,7 @@ pub(crate) fn apply_m061_knowledge_chunk_attempts(conn: &Connection) -> Result<(
     if !crate::sync_schema::table_exists(conn, "knowledge_chunks")? {
         return Ok(());
     }
-    let has: bool = conn
+    let has_column: bool = conn
         .query_row(
             "SELECT COUNT(*) FROM pragma_table_info('knowledge_chunks')
              WHERE name = 'embedding_attempts'",
@@ -326,7 +326,7 @@ pub(crate) fn apply_m061_knowledge_chunk_attempts(conn: &Connection) -> Result<(
         )
         .unwrap_or(0)
         > 0;
-    if !has {
+    if !has_column {
         conn.execute(
             "ALTER TABLE knowledge_chunks
              ADD COLUMN embedding_attempts INTEGER NOT NULL DEFAULT 0",
@@ -1457,7 +1457,7 @@ mod batch29_audit100_tests {
     #[test]
     fn audit100_knowledge_chunks_gain_the_attempts_column() {
         let conn = db_with_knowledge_chunks();
-        let has: bool = conn
+        let has_column: bool = conn
             .query_row(
                 "SELECT COUNT(*) FROM pragma_table_info('knowledge_chunks')
                  WHERE name = 'embedding_attempts'",
@@ -1466,7 +1466,7 @@ mod batch29_audit100_tests {
             )
             .expect("pragma")
             > 0;
-        assert!(has, "m061 must add the attempts column at boot");
+        assert!(has_column, "m061 must add the attempts column at boot");
         apply_m061_knowledge_chunk_attempts(&conn).expect("re-apply");
     }
 

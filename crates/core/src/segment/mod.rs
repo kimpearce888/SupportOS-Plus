@@ -429,14 +429,14 @@ fn parse_segment_node(v: &Value, depth: u32, nodes: &mut u32) -> Result<SegmentN
                 .get("aiAttribute")
                 .and_then(|aa| aa.as_object())
                 .and_then(|obj| {
-                    let attr = as_str(aa_get(obj, "attribute"))?;
+                    let attr = as_str(obj.get("attribute"))?;
                     if attr.is_empty() {
                         return None;
                     }
                     Some(AiAttrTest {
                         attribute: attr,
-                        op: as_str(aa_get(obj, "op")).unwrap_or_else(|| "equals".to_string()),
-                        value: as_str(aa_get(obj, "value")).unwrap_or_default(),
+                        op: as_str(obj.get("op")).unwrap_or_else(|| "equals".to_string()),
+                        value: as_str(obj.get("value")).unwrap_or_default(),
                     })
                 });
             let custom_fields = v
@@ -526,10 +526,6 @@ fn parse_segment_node(v: &Value, depth: u32, nodes: &mut u32) -> Result<SegmentN
         },
     };
     Ok(node)
-}
-
-fn aa_get<'v>(obj: &'v serde_json::Map<String, Value>, key: &str) -> Option<&'v Value> {
-    obj.get(key)
 }
 
 fn describe_op(op: &str) -> &str {

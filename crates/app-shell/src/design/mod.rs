@@ -1252,7 +1252,7 @@ pub fn metric_tile(
     count: &str,
     label: &str,
     band: Option<BadgeTone>,
-    drill: bool,
+    drillable: bool,
     drill_line: Option<&str>,
 ) -> egui::Response {
     let t = tokens(ui);
@@ -1295,7 +1295,7 @@ pub fn metric_tile(
     let width = 196.0f32.max(count_g.size().x + label_g.size().x + 12.0 + 10.0 + 12.0 + 12.0);
     let size = egui::vec2(width, height);
     let (id, rect) = ui.allocate_space(size);
-    let sense = if drill {
+    let sense = if drillable {
         egui::Sense::click()
     } else {
         egui::Sense::hover()
@@ -1303,7 +1303,7 @@ pub fn metric_tile(
     let resp = ui.interact(rect, id, sense);
     ui.painter()
         .rect_filled(rect, egui::CornerRadius::same(10), t.card);
-    let edge = if drill && resp.hovered() {
+    let edge = if drillable && resp.hovered() {
         t.border_strong
     } else {
         t.border
@@ -1349,7 +1349,7 @@ pub fn metric_tile(
             t.muted_foreground,
         );
     }
-    let resp = if drill {
+    let resp = if drillable {
         resp.on_hover_cursor(egui::CursorIcon::PointingHand)
     } else {
         resp
@@ -2198,14 +2198,14 @@ pub fn cop_suggest(
     clicked
 }
 
-pub fn cop_chat(ui: &mut egui::Ui, assistant: bool, text: &str) {
+pub fn cop_chat(ui: &mut egui::Ui, from_assistant: bool, text: &str) {
     let t = tokens(ui);
-    let (bg, border) = if assistant {
+    let (bg, border) = if from_assistant {
         (t.ai_soft, t.ai_border)
     } else {
         (t.muted, t.border)
     };
-    let align_right = !assistant;
+    let align_right = !from_assistant;
     ui.with_layout(
         if align_right {
             egui::Layout::right_to_left(egui::Align::TOP)
@@ -2224,7 +2224,7 @@ pub fn cop_chat(ui: &mut egui::Ui, assistant: bool, text: &str) {
             let (rect, _id) = ui.allocate_exact_size(size, egui::Sense::hover());
             ui.painter()
                 .rect_filled(rect, egui::CornerRadius::same(12), bg);
-            if assistant {
+            if from_assistant {
                 ui.painter().rect_stroke(
                     rect,
                     egui::CornerRadius::same(12),
