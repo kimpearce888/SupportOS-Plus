@@ -213,6 +213,29 @@ impl DiagnosticsPage {
         let runs = self.runs.clone().unwrap_or_default();
         let audit = self.audit.clone().unwrap_or_default();
 
+        let clear_requested = self.event_log_card_ui(ui, &events);
+        ui.add_space(10.0);
+
+        audit_trail_card_ui(ui, &audit);
+        ui.add_space(10.0);
+
+        sync_reports_card_ui(ui, &runs);
+        ui.add_space(10.0);
+
+        outbound_deliveries_card_ui(ui, db);
+        if clear_requested {
+            return Some(NavRequest::Confirm(ConfirmRequest::clear_diagnostics_log(
+                events.len(),
+            )));
+        }
+        None
+    }
+
+    fn event_log_card_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        events: &[spp_core::audit::DiagEvent],
+    ) -> bool {
         let counts = self.event_counts;
         let subtitle = format!(
             "{} event{} shown · newest first",
@@ -316,202 +339,200 @@ impl DiagnosticsPage {
                     }
                 });
         });
-        ui.add_space(10.0);
+        clear_requested
+    }
+}
 
-        let audit_subtitle = format!(
-            "{} audited change{} shown — newest first",
+fn audit_trail_card_ui(ui: &mut egui::Ui, audit: &[AuditRow]) {
+    let audit_subtitle = format!(
+        "{} audited change{} shown — newest first",
+        audit.len(),
+        if audit.len() == 1 { "" } else { "s" }
+    );
+    design::card_titled_wide(ui, "Audit trail", Some(&audit_subtitle), |ui| {
+        if audit.is_empty() {
+            design::hint_text(
+                ui,
+                "No audited changes yet. Outbound writes, people edits, \
+                     copilot runs and side-thread actions record here.",
+            );
+            return;
+        }
+        design::data_table(
+            ui,
+            "diagnostics-audit",
+            &["When", "Actor", "Action", "Conversation", "AI"],
             audit.len(),
-            if audit.len() == 1 { "" } else { "s" }
+            24.0,
+            |ui, i| {
+                let row = &audit[i];
+                ui.monospace(
+                    egui::RichText::new(row.timestamp.as_str())
+                        .size(12.0)
+                        .weak(),
+                );
+                let (actor_tone, actor_label) = if row.actor == "ai" {
+                    (BadgeTone::Ai, row.actor.as_str())
+                } else {
+                    (BadgeTone::Neutral, row.actor.as_str())
+                };
+                design::badge(ui, actor_label, actor_tone);
+                ui.label(
+                    egui::RichText::new(row.action.as_str())
+                        .size(12.5)
+                        .color(design::tokens(ui).foreground),
+                );
+                ui.monospace(
+                    egui::RichText::new(
+                        row.conversation_id
+                            .map_or_else(|| "—".to_string(), |cid| cid.to_string()),
+                    )
+                    .size(12.5),
+                );
+                let (tone, label) = if row.ai_involvement {
+                    (BadgeTone::Ai, "ai")
+                } else {
+                    (BadgeTone::Neutral, "—")
+                };
+                design::badge(ui, label, tone);
+            },
         );
-        design::card_titled_wide(ui, "Audit trail", Some(&audit_subtitle), |ui| {
-            if audit.is_empty() {
+        egui::ScrollArea::vertical()
+            .id_salt("diagnostics-audit-detail")
+            .max_height(140.0)
+            .auto_shrink([false, false])
+            .show_rows(ui, 20.0, audit.len(), |ui, range| {
+                for row in &audit[range] {
+                    let has_detail = row.before_state.is_some()
+                        || row.after_state.is_some()
+                        || row.remote_operation.is_some()
+                        || row.remote_result.is_some();
+                    if !has_detail {
+                        continue;
+                    }
+                    ui.horizontal(|ui| {
+                        ui.monospace(
+                            egui::RichText::new(format!("#{}", row.id))
+                                .size(11.0)
+                                .weak(),
+                        );
+                        if let Some(op) = &row.remote_operation {
+                            design::badge(ui, op, BadgeTone::Neutral);
+                        }
+                        for (label, value) in [
+                            ("before", &row.before_state),
+                            ("after", &row.after_state),
+                            ("remote", &row.remote_result),
+                        ] {
+                            if let Some(value) = value {
+                                ui.monospace(
+                                    egui::RichText::new(format!("{label}: {value}"))
+                                        .size(11.0)
+                                        .weak(),
+                                );
+                            }
+                        }
+                    });
+                }
+            });
+    });
+}
+
+fn sync_reports_card_ui(ui: &mut egui::Ui, runs: &[SyncRunRow]) {
+    design::card_titled_wide(
+        ui,
+        "Sync reports",
+        Some("The outcome of every recent sync run (newest first)."),
+        |ui| {
+            if runs.is_empty() {
                 design::hint_text(
                     ui,
-                    "No audited changes yet. Outbound writes, people edits, \
-                         copilot runs and side-thread actions record here.",
+                    "No sync runs recorded yet. Runs start automatically once \
+                     Help Scout credentials are configured.",
                 );
                 return;
             }
             design::data_table(
                 ui,
-                "diagnostics-audit",
-                &["When", "Actor", "Action", "Conversation", "AI"],
-                audit.len(),
+                "diagnostics-runs",
+                &["Run", "Kind", "State", "Records", "Errors", "Started"],
+                runs.len(),
                 24.0,
                 |ui, i| {
-                    let row = &audit[i];
-                    ui.monospace(
-                        egui::RichText::new(row.timestamp.as_str())
-                            .size(12.0)
-                            .weak(),
-                    );
-                    let (actor_tone, actor_label) = if row.actor == "ai" {
-                        (BadgeTone::Ai, row.actor.as_str())
-                    } else {
-                        (BadgeTone::Neutral, row.actor.as_str())
+                    let run = &runs[i];
+                    ui.monospace(egui::RichText::new(run.id.to_string()).size(12.5));
+                    ui.monospace(egui::RichText::new(run.kind.as_str()).size(12.5));
+                    let tone = match run.state.as_str() {
+                        "LIVE" => BadgeTone::Success,
+                        "ERROR" => BadgeTone::Destructive,
+                        "NEW" => BadgeTone::Neutral,
+                        "CATCHING_UP" => BadgeTone::Info,
+                        _ => BadgeTone::Warning,
                     };
-                    design::badge(ui, actor_label, actor_tone);
-                    ui.label(
-                        egui::RichText::new(row.action.as_str())
-                            .size(12.5)
-                            .color(design::tokens(ui).foreground),
-                    );
+                    design::badge(ui, &run.state, tone);
+                    design::td_num(ui, &run.records_processed.to_string());
+                    design::td_num(ui, &run.errors.to_string());
                     ui.monospace(
                         egui::RichText::new(
-                            row.conversation_id
-                                .map_or_else(|| "—".to_string(), |cid| cid.to_string()),
+                            run.finished_at
+                                .clone()
+                                .unwrap_or_else(|| run.started_at.clone()),
                         )
-                        .size(12.5),
+                        .size(12.0)
+                        .weak(),
                     );
-                    let (tone, label) = if row.ai_involvement {
-                        (BadgeTone::Ai, "ai")
-                    } else {
-                        (BadgeTone::Neutral, "—")
-                    };
-                    design::badge(ui, label, tone);
                 },
             );
-            egui::ScrollArea::vertical()
-                .id_salt("diagnostics-audit-detail")
-                .max_height(140.0)
-                .auto_shrink([false, false])
-                .show_rows(ui, 20.0, audit.len(), |ui, range| {
-                    for row in &audit[range] {
-                        let has_detail = row.before_state.is_some()
-                            || row.after_state.is_some()
-                            || row.remote_operation.is_some()
-                            || row.remote_result.is_some();
-                        if !has_detail {
-                            continue;
-                        }
-                        ui.horizontal(|ui| {
-                            ui.monospace(
-                                egui::RichText::new(format!("#{}", row.id))
-                                    .size(11.0)
-                                    .weak(),
-                            );
-                            if let Some(op) = &row.remote_operation {
-                                design::badge(ui, op, BadgeTone::Neutral);
-                            }
-                            for (label, value) in [
-                                ("before", &row.before_state),
-                                ("after", &row.after_state),
-                                ("remote", &row.remote_result),
-                            ] {
-                                if let Some(value) = value {
-                                    ui.monospace(
-                                        egui::RichText::new(format!("{label}: {value}"))
-                                            .size(11.0)
-                                            .weak(),
-                                    );
-                                }
-                            }
-                        });
-                    }
-                });
-        });
-        ui.add_space(10.0);
+        },
+    );
+}
 
-        design::card_titled_wide(
-            ui,
-            "Sync reports",
-            Some("The outcome of every recent sync run (newest first)."),
-            |ui| {
-                if runs.is_empty() {
-                    design::hint_text(
-                        ui,
-                        "No sync runs recorded yet. Runs start automatically once \
-                         Help Scout credentials are configured.",
-                    );
-                    return;
-                }
-                design::data_table(
-                    ui,
-                    "diagnostics-runs",
-                    &["Run", "Kind", "State", "Records", "Errors", "Started"],
-                    runs.len(),
-                    24.0,
-                    |ui, i| {
-                        let run = &runs[i];
-                        ui.monospace(egui::RichText::new(run.id.to_string()).size(12.5));
-                        ui.monospace(egui::RichText::new(run.kind.as_str()).size(12.5));
-                        let tone = match run.state.as_str() {
-                            "LIVE" => BadgeTone::Success,
-                            "ERROR" => BadgeTone::Destructive,
-                            "NEW" => BadgeTone::Neutral,
-                            "CATCHING_UP" => BadgeTone::Info,
-                            _ => BadgeTone::Warning,
-                        };
-                        design::badge(ui, &run.state, tone);
-                        design::td_num(ui, &run.records_processed.to_string());
-                        design::td_num(ui, &run.errors.to_string());
-                        ui.monospace(
-                            egui::RichText::new(
-                                run.finished_at
-                                    .clone()
-                                    .unwrap_or_else(|| run.started_at.clone()),
-                            )
-                            .size(12.0)
-                            .weak(),
-                        );
-                    },
-                );
-            },
-        );
-        ui.add_space(10.0);
-
-        let (out_stats, failed_rows) = db.with_read(|conn| {
-            let stats = spp_core::outbound::stats(conn);
-            let mut stmt = conn
-                .prepare(
-                    "SELECT id, kind, updated_at, COALESCE(error, '') FROM outbound_jobs
-                      WHERE status = 'failed' ORDER BY id DESC LIMIT 8",
-                )
-                .ok();
-            let rows: Vec<(i64, String, String, String)> = match stmt {
-                Some(ref mut s) => s
-                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
-                    .map(|rows| rows.filter_map(|r| r.ok()).collect())
-                    .unwrap_or_default(),
-                None => Vec::new(),
-            };
-            (stats, rows)
-        });
-        let out_subtitle = format!(
-            "{} delivered · {} queued · {} sending · {} failed",
-            out_stats.confirmed, out_stats.queued, out_stats.sending, out_stats.failed
-        );
-        design::card_titled_wide(ui, "Outbound deliveries", Some(&out_subtitle), |ui| {
-            if failed_rows.is_empty() {
-                design::hint_text(
-                    ui,
-                    "No failed deliveries. Replies, notes, status changes and \
-                         assignments are dispatched to Help Scout within seconds.",
-                );
-            } else {
-                design::data_table(
-                    ui,
-                    "diagnostics-outbound",
-                    &["Job", "Kind", "At", "Error"],
-                    failed_rows.len(),
-                    22.0,
-                    |ui, i| {
-                        let (id, kind, at, error) = &failed_rows[i];
-                        ui.monospace(egui::RichText::new(id.to_string()).size(12.5));
-                        ui.monospace(egui::RichText::new(kind.as_str()).size(12.5));
-                        ui.monospace(egui::RichText::new(at.as_str()).size(12.0).weak());
-                        ui.monospace(egui::RichText::new(error.as_str()).size(11.5).weak());
-                    },
-                );
-            }
-        });
-        if clear_requested {
-            return Some(NavRequest::Confirm(ConfirmRequest::clear_diagnostics_log(
-                events.len(),
-            )));
+fn outbound_deliveries_card_ui(ui: &mut egui::Ui, db: &DbHandle) {
+    let (out_stats, failed_rows) = db.with_read(|conn| {
+        let stats = spp_core::outbound::stats(conn);
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, kind, updated_at, COALESCE(error, '') FROM outbound_jobs
+                  WHERE status = 'failed' ORDER BY id DESC LIMIT 8",
+            )
+            .ok();
+        let rows: Vec<(i64, String, String, String)> = match stmt {
+            Some(ref mut s) => s
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+                .map(|rows| rows.filter_map(|r| r.ok()).collect())
+                .unwrap_or_default(),
+            None => Vec::new(),
+        };
+        (stats, rows)
+    });
+    let out_subtitle = format!(
+        "{} delivered · {} queued · {} sending · {} failed",
+        out_stats.confirmed, out_stats.queued, out_stats.sending, out_stats.failed
+    );
+    design::card_titled_wide(ui, "Outbound deliveries", Some(&out_subtitle), |ui| {
+        if failed_rows.is_empty() {
+            design::hint_text(
+                ui,
+                "No failed deliveries. Replies, notes, status changes and \
+                     assignments are dispatched to Help Scout within seconds.",
+            );
+        } else {
+            design::data_table(
+                ui,
+                "diagnostics-outbound",
+                &["Job", "Kind", "At", "Error"],
+                failed_rows.len(),
+                22.0,
+                |ui, i| {
+                    let (id, kind, at, error) = &failed_rows[i];
+                    ui.monospace(egui::RichText::new(id.to_string()).size(12.5));
+                    ui.monospace(egui::RichText::new(kind.as_str()).size(12.5));
+                    ui.monospace(egui::RichText::new(at.as_str()).size(12.0).weak());
+                    ui.monospace(egui::RichText::new(error.as_str()).size(11.5).weak());
+                },
+            );
         }
-        None
-    }
+    });
 }
 
 impl Default for DiagnosticsPage {

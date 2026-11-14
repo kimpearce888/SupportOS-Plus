@@ -256,82 +256,16 @@ impl OrganizationsPage {
                 orgs.len(),
                 ROW_HEIGHT,
                 |ui, i| {
-                    let org = &orgs[i];
-                    let id = i64_field(org, "id");
-                    let name = str_field(org, "name");
-                    let domains = domains_text(org);
-                    let domains = if domains.is_empty() {
-                        "No domains yet".to_string()
-                    } else {
-                        domains
-                    };
-                    let customers = i64_field(org, "customer_count");
-                    let conversations = i64_field(org, "conversation_count");
-                    let t = design::tokens(ui);
-                    dt_cell(
-                        ui,
-                        240.0,
-                        egui::RichText::new(&name)
-                            .size(design::scale::text::BODY)
-                            .strong()
-                            .color(t.foreground),
-                        false,
-                    );
-                    dt_cell(
-                        ui,
-                        220.0,
-                        egui::RichText::new(domains)
-                            .size(design::scale::text::SMALL_HALF)
-                            .monospace()
-                            .color(t.muted_foreground),
-                        false,
-                    );
-                    dt_cell(
-                        ui,
-                        90.0,
-                        egui::RichText::new(customers.to_string())
-                            .size(design::scale::text::SMALL_HALF)
-                            .monospace()
-                            .color(t.foreground),
-                        true,
-                    );
-                    dt_cell(
-                        ui,
-                        110.0,
-                        egui::RichText::new(conversations.to_string())
-                            .size(design::scale::text::SMALL_HALF)
-                            .monospace()
-                            .color(t.foreground),
-                        true,
-                    );
-                    ui.allocate_ui_with_layout(
-                        egui::vec2(200.0, ROW_HEIGHT),
-                        egui::Layout::left_to_right(egui::Align::Center),
-                        |ui| {
-                            if design::button(ui, "Open", ButtonVariant::Outline)
-                                .on_hover_text(format!(
-                                    "open {name} — members, domains and conversation counts"
-                                ))
-                                .clicked()
-                            {
-                                pick = Some(id);
-                            }
-                            if design::button(ui, "Edit", ButtonVariant::Outline)
-                                .on_hover_text(format!("edit {name} — its name and domains"))
-                                .clicked()
-                            {
-                                edit_requested = Some(org.clone());
-                            }
-                            if design::button(ui, "Delete", ButtonVariant::Destructive)
-                                .on_hover_text(format!(
-                                    "delete {name} — asks for confirmation first"
-                                ))
-                                .clicked()
-                            {
-                                delete_requested = Some((id, name.clone()));
-                            }
-                        },
-                    );
+                    let (pick_id, edit_req, delete_req) = org_row(ui, &orgs[i]);
+                    if pick_id.is_some() {
+                        pick = pick_id;
+                    }
+                    if edit_req.is_some() {
+                        edit_requested = edit_req;
+                    }
+                    if delete_req.is_some() {
+                        delete_requested = delete_req;
+                    }
                 },
             );
         }
@@ -351,6 +285,79 @@ impl OrganizationsPage {
         }
 
         ui.add_space(design::scale::space::SP2);
+        self.org_form_card_ui(ui, db);
+
+        if !orgs.is_empty() {
+            design::list_end_note(
+                ui,
+                &format!(
+                    "{} organization{} · Open shows members, domains and conversation counts",
+                    orgs.len(),
+                    if orgs.len() == 1 { "" } else { "s" }
+                ),
+            );
+        }
+
+        let detail = self.detail.clone();
+        let title = detail
+            .as_ref()
+            .map(|d| str_field(d, "name"))
+            .filter(|n| !n.is_empty())
+            .unwrap_or_else(|| "Organization".to_string());
+        let mut panel_open = self.panel_open;
+        let mut panel_edit: Option<serde_json::Value> = None;
+        let mut panel_delete: Option<(i64, String)> = None;
+        let mut member_nav: Option<NavRequest> = None;
+        design::detail_panel(
+            ui.ctx(),
+            "organizations-detail",
+            &mut panel_open,
+            &title,
+            |_ui| {},
+            |ui| {
+                let Some(org) = detail else {
+                    design::empty_state_slim(
+                        ui,
+                        Icon::Building,
+                        "Select an organization",
+                        "Its members, domains, and conversation counts appear here.",
+                    );
+                    return;
+                };
+                let t = design::tokens(ui);
+                let members = org
+                    .get("members")
+                    .and_then(|c| c.as_array())
+                    .cloned()
+                    .unwrap_or_default();
+                let (edit_req, delete_req) = org_detail_header_ui(ui, &org, &members, t);
+                panel_edit = edit_req;
+                panel_delete = delete_req;
+                design::divider(ui);
+                let nav = members_card_ui(ui, &members, t);
+                if member_nav.is_none() {
+                    member_nav = nav;
+                }
+            },
+        );
+        self.panel_open = panel_open;
+        if let Some(org) = panel_edit {
+            self.start_edit(&org);
+        }
+        if let Some((id, name)) = panel_delete
+            && nav.is_none()
+        {
+            nav = Some(Self::delete_request(id, &name));
+        }
+        if let Some(request) = member_nav
+            && nav.is_none()
+        {
+            nav = Some(request);
+        }
+        nav
+    }
+
+    fn org_form_card_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         let editing = self.edit_id.is_some();
         design::card_titled(
             ui,
@@ -413,169 +420,6 @@ impl OrganizationsPage {
                 });
             },
         );
-
-        if !orgs.is_empty() {
-            design::list_end_note(
-                ui,
-                &format!(
-                    "{} organization{} · Open shows members, domains and conversation counts",
-                    orgs.len(),
-                    if orgs.len() == 1 { "" } else { "s" }
-                ),
-            );
-        }
-
-        let detail = self.detail.clone();
-        let title = detail
-            .as_ref()
-            .map(|d| str_field(d, "name"))
-            .filter(|n| !n.is_empty())
-            .unwrap_or_else(|| "Organization".to_string());
-        let mut panel_open = self.panel_open;
-        let mut panel_edit: Option<serde_json::Value> = None;
-        let mut panel_delete: Option<(i64, String)> = None;
-        let mut member_nav: Option<NavRequest> = None;
-        design::detail_panel(
-            ui.ctx(),
-            "organizations-detail",
-            &mut panel_open,
-            &title,
-            |_ui| {},
-            |ui| {
-                let Some(org) = detail else {
-                    design::empty_state_slim(
-                        ui,
-                        Icon::Building,
-                        "Select an organization",
-                        "Its members, domains, and conversation counts appear here.",
-                    );
-                    return;
-                };
-                let t = design::tokens(ui);
-                let name = str_field(&org, "name");
-                let members = org
-                    .get("members")
-                    .and_then(|c| c.as_array())
-                    .cloned()
-                    .unwrap_or_default();
-                let member_count = i64_field(&org, "member_count");
-                let member_count = if member_count > 0 {
-                    member_count
-                } else {
-                    members.len() as i64
-                };
-                let conversation_count = i64_field(&org, "conversation_count");
-                let domains = domains_text(&org);
-
-                ui.horizontal(|ui| {
-                    design::avatar(ui, AvatarSize::Md, &initials(&name), BadgeTone::Neutral);
-                    ui.vertical(|ui| {
-                        ui.label(
-                            egui::RichText::new(&name)
-                                .size(design::scale::text::SECTION_BIG)
-                                .strong()
-                                .color(t.foreground),
-                        );
-                        design::hint_text(
-                            ui,
-                            &format!("{member_count} members · {conversation_count} conversations"),
-                        );
-                    });
-                });
-                if !domains.is_empty() {
-                    ui.monospace(
-                        egui::RichText::new(&domains)
-                            .size(design::scale::text::SMALL_HALF)
-                            .color(t.muted_foreground),
-                    );
-                }
-                ui.horizontal(|ui| {
-                    if design::button(ui, "Edit", ButtonVariant::Outline)
-                        .on_hover_text("edit this organization's name and domains")
-                        .clicked()
-                    {
-                        panel_edit = Some(org.clone());
-                    }
-                    if design::button(ui, "Delete", ButtonVariant::Destructive)
-                        .on_hover_text("delete this organization — asks for confirmation first")
-                        .clicked()
-                    {
-                        panel_delete = Some((i64_field(&org, "id"), name.clone()));
-                    }
-                });
-                design::divider(ui);
-
-                design::card_titled(ui, "Members", None, |ui| {
-                    if members.is_empty() {
-                        design::empty_state_slim(
-                            ui,
-                            Icon::Building,
-                            "No members recorded",
-                            "Members come from the mirror's customer→organization edges.",
-                        );
-                        return;
-                    }
-                    for member in &members {
-                        let name = str_field(member, "name");
-                        let email = str_field(member, "email");
-                        let job_title = opt_str_field(member, "job_title");
-                        ui.horizontal(|ui| {
-                            design::avatar(
-                                ui,
-                                AvatarSize::Sm,
-                                &initials(&name),
-                                BadgeTone::Neutral,
-                            );
-                            let response = ui
-                                .add(
-                                    egui::Label::new(
-                                        egui::RichText::new(&name)
-                                            .size(design::scale::text::BODY)
-                                            .color(t.foreground),
-                                    )
-                                    .sense(egui::Sense::click()),
-                                )
-                                .on_hover_text("open this member's customer profile");
-                            if response.hovered() {
-                                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                            }
-                            if response.clicked() && member_nav.is_none() {
-                                member_nav = Self::member_request(member);
-                            }
-                            if !email.is_empty() {
-                                ui.label(
-                                    egui::RichText::new(email)
-                                        .size(design::scale::text::SMALL)
-                                        .color(t.muted_foreground),
-                                );
-                            }
-                            if let Some(job) = job_title {
-                                ui.label(
-                                    egui::RichText::new(job)
-                                        .size(design::scale::text::META_HALF)
-                                        .color(t.muted_foreground),
-                                );
-                            }
-                        });
-                    }
-                });
-            },
-        );
-        self.panel_open = panel_open;
-        if let Some(org) = panel_edit {
-            self.start_edit(&org);
-        }
-        if let Some((id, name)) = panel_delete
-            && nav.is_none()
-        {
-            nav = Some(Self::delete_request(id, &name));
-        }
-        if let Some(request) = member_nav
-            && nav.is_none()
-        {
-            nav = Some(request);
-        }
-        nav
     }
 }
 
@@ -583,6 +427,208 @@ impl Default for OrganizationsPage {
     fn default() -> Self {
         Self::new()
     }
+}
+
+fn org_row(
+    ui: &mut egui::Ui,
+    org: &serde_json::Value,
+) -> (
+    Option<i64>,
+    Option<serde_json::Value>,
+    Option<(i64, String)>,
+) {
+    let mut pick_id: Option<i64> = None;
+    let mut edit_req: Option<serde_json::Value> = None;
+    let mut delete_req: Option<(i64, String)> = None;
+    let id = i64_field(org, "id");
+    let name = str_field(org, "name");
+    let domains = domains_text(org);
+    let domains = if domains.is_empty() {
+        "No domains yet".to_string()
+    } else {
+        domains
+    };
+    let customers = i64_field(org, "customer_count");
+    let conversations = i64_field(org, "conversation_count");
+    let t = design::tokens(ui);
+    dt_cell(
+        ui,
+        240.0,
+        egui::RichText::new(&name)
+            .size(design::scale::text::BODY)
+            .strong()
+            .color(t.foreground),
+        false,
+    );
+    dt_cell(
+        ui,
+        220.0,
+        egui::RichText::new(domains)
+            .size(design::scale::text::SMALL_HALF)
+            .monospace()
+            .color(t.muted_foreground),
+        false,
+    );
+    dt_cell(
+        ui,
+        90.0,
+        egui::RichText::new(customers.to_string())
+            .size(design::scale::text::SMALL_HALF)
+            .monospace()
+            .color(t.foreground),
+        true,
+    );
+    dt_cell(
+        ui,
+        110.0,
+        egui::RichText::new(conversations.to_string())
+            .size(design::scale::text::SMALL_HALF)
+            .monospace()
+            .color(t.foreground),
+        true,
+    );
+    ui.allocate_ui_with_layout(
+        egui::vec2(200.0, ROW_HEIGHT),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            if design::button(ui, "Open", ButtonVariant::Outline)
+                .on_hover_text(format!(
+                    "open {name} — members, domains and conversation counts"
+                ))
+                .clicked()
+            {
+                pick_id = Some(id);
+            }
+            if design::button(ui, "Edit", ButtonVariant::Outline)
+                .on_hover_text(format!("edit {name} — its name and domains"))
+                .clicked()
+            {
+                edit_req = Some(org.clone());
+            }
+            if design::button(ui, "Delete", ButtonVariant::Destructive)
+                .on_hover_text(format!("delete {name} — asks for confirmation first"))
+                .clicked()
+            {
+                delete_req = Some((id, name.clone()));
+            }
+        },
+    );
+    (pick_id, edit_req, delete_req)
+}
+
+fn org_detail_header_ui(
+    ui: &mut egui::Ui,
+    org: &serde_json::Value,
+    members: &[serde_json::Value],
+    t: &'static design::Tokens,
+) -> (Option<serde_json::Value>, Option<(i64, String)>) {
+    let mut edit_req: Option<serde_json::Value> = None;
+    let mut delete_req: Option<(i64, String)> = None;
+    let name = str_field(org, "name");
+    let member_count = i64_field(org, "member_count");
+    let member_count = if member_count > 0 {
+        member_count
+    } else {
+        members.len() as i64
+    };
+    let conversation_count = i64_field(org, "conversation_count");
+    let domains = domains_text(org);
+
+    ui.horizontal(|ui| {
+        design::avatar(ui, AvatarSize::Md, &initials(&name), BadgeTone::Neutral);
+        ui.vertical(|ui| {
+            ui.label(
+                egui::RichText::new(&name)
+                    .size(design::scale::text::SECTION_BIG)
+                    .strong()
+                    .color(t.foreground),
+            );
+            design::hint_text(
+                ui,
+                &format!("{member_count} members · {conversation_count} conversations"),
+            );
+        });
+    });
+    if !domains.is_empty() {
+        ui.monospace(
+            egui::RichText::new(&domains)
+                .size(design::scale::text::SMALL_HALF)
+                .color(t.muted_foreground),
+        );
+    }
+    ui.horizontal(|ui| {
+        if design::button(ui, "Edit", ButtonVariant::Outline)
+            .on_hover_text("edit this organization's name and domains")
+            .clicked()
+        {
+            edit_req = Some(org.clone());
+        }
+        if design::button(ui, "Delete", ButtonVariant::Destructive)
+            .on_hover_text("delete this organization — asks for confirmation first")
+            .clicked()
+        {
+            delete_req = Some((i64_field(org, "id"), name.clone()));
+        }
+    });
+    (edit_req, delete_req)
+}
+
+fn members_card_ui(
+    ui: &mut egui::Ui,
+    members: &[serde_json::Value],
+    t: &'static design::Tokens,
+) -> Option<NavRequest> {
+    let mut nav: Option<NavRequest> = None;
+    design::card_titled(ui, "Members", None, |ui| {
+        if members.is_empty() {
+            design::empty_state_slim(
+                ui,
+                Icon::Building,
+                "No members recorded",
+                "Members come from the mirror's customer→organization edges.",
+            );
+            return;
+        }
+        for member in members {
+            let name = str_field(member, "name");
+            let email = str_field(member, "email");
+            let job_title = opt_str_field(member, "job_title");
+            ui.horizontal(|ui| {
+                design::avatar(ui, AvatarSize::Sm, &initials(&name), BadgeTone::Neutral);
+                let response = ui
+                    .add(
+                        egui::Label::new(
+                            egui::RichText::new(&name)
+                                .size(design::scale::text::BODY)
+                                .color(t.foreground),
+                        )
+                        .sense(egui::Sense::click()),
+                    )
+                    .on_hover_text("open this member's customer profile");
+                if response.hovered() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                }
+                if response.clicked() && nav.is_none() {
+                    nav = OrganizationsPage::member_request(member);
+                }
+                if !email.is_empty() {
+                    ui.label(
+                        egui::RichText::new(email)
+                            .size(design::scale::text::SMALL)
+                            .color(t.muted_foreground),
+                    );
+                }
+                if let Some(job) = job_title {
+                    ui.label(
+                        egui::RichText::new(job)
+                            .size(design::scale::text::META_HALF)
+                            .color(t.muted_foreground),
+                    );
+                }
+            });
+        }
+    });
+    nav
 }
 
 fn domains_text(org: &serde_json::Value) -> String {

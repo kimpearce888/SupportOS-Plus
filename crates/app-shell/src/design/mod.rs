@@ -1941,7 +1941,6 @@ pub enum ComposerAct {
     AiInsert,
 }
 
-#[allow(clippy::too_many_lines)]
 pub fn composer(
     ui: &mut egui::Ui,
     id_salt: &str,
@@ -1950,7 +1949,6 @@ pub fn composer(
     before_body: impl FnOnce(&mut egui::Ui),
     after_body: impl FnOnce(&mut egui::Ui),
 ) -> Option<ComposerAct> {
-    use egui::RichText as R;
     let t = tokens(ui);
     let mut act = None;
     let note = state.mode == ComposerMode::Note;
@@ -1958,74 +1956,10 @@ pub fn composer(
     card(ui, |ui| {
         ui.set_width(ui.available_width());
 
-        ui.horizontal(|ui| {
-            let mode_idx = usize::from(note);
-            if let Some(i) = segmented(
-                ui,
-                &format!("composer-mode-{id_salt}"),
-                &["Reply", "Note"],
-                mode_idx,
-            ) {
-                state.mode = if i == 0 {
-                    ComposerMode::Reply
-                } else {
-                    ComposerMode::Note
-                };
-            }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if state.draft_saved {
-                    ui.label(
-                        R::new("Draft saved")
-                            .size(scale::text::META)
-                            .color(t.muted_foreground),
-                    );
-                }
-                if button_with_icon(ui, Icon::Sparkles, "AI Draft", ButtonVariant::Outline)
-                    .on_hover_text("insert the latest LM Studio draft for this conversation")
-                    .clicked()
-                {
-                    act = Some(ComposerAct::AiInsert);
-                }
-                let sr = button_with_icon(ui, Icon::Mail, "Saved Replies", ButtonVariant::Outline)
-                    .on_hover_text("pick a saved reply template");
-                let popup_id = ui.make_persistent_id(("spp-sr-menu", id_salt));
-                egui::Popup::menu(&sr)
-                    .id(popup_id)
-                    .width(280.0)
-                    .frame(
-                        egui::Frame::new()
-                            .fill(t.card)
-                            .stroke(egui::Stroke::new(1.0, t.border))
-                            .corner_radius(egui::CornerRadius::same(10))
-                            .inner_margin(egui::Margin::same(4))
-                            .shadow(egui::Shadow {
-                                offset: [0, 8],
-                                blur: 24,
-                                spread: 0,
-                                color: egui::Color32::from_black_alpha(60),
-                            }),
-                    )
-                    .show(|ui| {
-                        ui.set_min_width(270.0);
-                        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
-                        if saved_replies.is_empty() {
-                            ui.label(
-                                R::new("No saved replies yet")
-                                    .size(scale::text::SMALL_HALF)
-                                    .color(t.muted_foreground),
-                            );
-                        }
-                        for (i, reply) in saved_replies.iter().enumerate() {
-                            if ui
-                                .button(R::new(reply).size(scale::text::SMALL_HALF))
-                                .clicked()
-                            {
-                                act = Some(ComposerAct::SavedReply(i));
-                            }
-                        }
-                    });
-            });
-        });
+        let header_act = composer_header_row(ui, id_salt, state, saved_replies, t, note);
+        if header_act.is_some() {
+            act = header_act;
+        }
         ui.add_space(scale::space::SP2);
         divider(ui);
 
@@ -2052,61 +1986,157 @@ pub fn composer(
 
         after_body(ui);
 
-        ui.horizontal(|ui| {
-            let context = if note {
-                "note — visible to teammates only · Ctrl+Enter sends"
+        let footer_act = composer_footer_row(ui, state, t, note);
+        if footer_act.is_some() {
+            act = footer_act;
+        }
+    });
+    act
+}
+
+fn composer_header_row(
+    ui: &mut egui::Ui,
+    id_salt: &str,
+    state: &mut ComposerState,
+    saved_replies: &[String],
+    t: &'static Tokens,
+    note: bool,
+) -> Option<ComposerAct> {
+    use egui::RichText as R;
+    let mut act = None;
+    ui.horizontal(|ui| {
+        let mode_idx = usize::from(note);
+        if let Some(i) = segmented(
+            ui,
+            &format!("composer-mode-{id_salt}"),
+            &["Reply", "Note"],
+            mode_idx,
+        ) {
+            state.mode = if i == 0 {
+                ComposerMode::Reply
             } else {
-                "reply — sent to the customer · Ctrl+Enter sends"
+                ComposerMode::Note
             };
-            ui.add(
-                egui::Label::new(
-                    R::new(context)
+        }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if state.draft_saved {
+                ui.label(
+                    R::new("Draft saved")
                         .size(scale::text::META)
                         .color(t.muted_foreground),
+                );
+            }
+            if button_with_icon(ui, Icon::Sparkles, "AI Draft", ButtonVariant::Outline)
+                .on_hover_text("insert the latest LM Studio draft for this conversation")
+                .clicked()
+            {
+                act = Some(ComposerAct::AiInsert);
+            }
+            let sr = button_with_icon(ui, Icon::Mail, "Saved Replies", ButtonVariant::Outline)
+                .on_hover_text("pick a saved reply template");
+            let popup_id = ui.make_persistent_id(("spp-sr-menu", id_salt));
+            egui::Popup::menu(&sr)
+                .id(popup_id)
+                .width(280.0)
+                .frame(
+                    egui::Frame::new()
+                        .fill(t.card)
+                        .stroke(egui::Stroke::new(1.0, t.border))
+                        .corner_radius(egui::CornerRadius::same(10))
+                        .inner_margin(egui::Margin::same(4))
+                        .shadow(egui::Shadow {
+                            offset: [0, 8],
+                            blur: 24,
+                            spread: 0,
+                            color: egui::Color32::from_black_alpha(60),
+                        }),
                 )
-                .truncate(),
-            );
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let send_label = if note { "Send Note" } else { "Send" };
-                let send = if note {
-                    let g = egui::WidgetText::from(
-                        R::new(send_label).color(t.on_ai).size(scale::text::CONTROL),
-                    )
-                    .into_galley(
-                        ui,
-                        Some(egui::TextWrapMode::Extend),
-                        f32::INFINITY,
-                        egui::TextStyle::Button,
-                    );
-                    let size = egui::vec2(g.size().x + 28.0, 32.0);
-                    let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
-                    ui.painter().rect_filled(
-                        rect,
-                        egui::CornerRadius::same(scale::radius::CONTROL),
-                        t.warning,
-                    );
-                    ui.painter().galley(
-                        egui::pos2(
-                            rect.center().x - g.size().x / 2.0,
-                            rect.center().y - g.size().y / 2.0,
-                        ),
-                        g,
-                        t.on_ai,
-                    );
-                    resp.widget_info(|| {
-                        egui::WidgetInfo::labeled(egui::Role::Button, true, send_label.to_owned())
-                    });
-                    resp
-                } else {
-                    button_with_icon(ui, Icon::Send, send_label, ButtonVariant::Primary)
-                };
-                let ctrl_enter = ui.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::Enter));
-                if send.clicked() || ctrl_enter {
-                    act = Some(ComposerAct::Send(state.mode, state.draft.clone()));
-                    state.draft.clear();
-                    state.draft_saved = false;
-                }
-            });
+                .show(|ui| {
+                    ui.set_min_width(270.0);
+                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+                    if saved_replies.is_empty() {
+                        ui.label(
+                            R::new("No saved replies yet")
+                                .size(scale::text::SMALL_HALF)
+                                .color(t.muted_foreground),
+                        );
+                    }
+                    for (i, reply) in saved_replies.iter().enumerate() {
+                        if ui
+                            .button(R::new(reply).size(scale::text::SMALL_HALF))
+                            .clicked()
+                        {
+                            act = Some(ComposerAct::SavedReply(i));
+                        }
+                    }
+                });
+        });
+    });
+    act
+}
+
+fn composer_footer_row(
+    ui: &mut egui::Ui,
+    state: &mut ComposerState,
+    t: &'static Tokens,
+    note: bool,
+) -> Option<ComposerAct> {
+    use egui::RichText as R;
+    let mut act = None;
+    ui.horizontal(|ui| {
+        let context = if note {
+            "note — visible to teammates only · Ctrl+Enter sends"
+        } else {
+            "reply — sent to the customer · Ctrl+Enter sends"
+        };
+        ui.add(
+            egui::Label::new(
+                R::new(context)
+                    .size(scale::text::META)
+                    .color(t.muted_foreground),
+            )
+            .truncate(),
+        );
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let send_label = if note { "Send Note" } else { "Send" };
+            let send = if note {
+                let g = egui::WidgetText::from(
+                    R::new(send_label).color(t.on_ai).size(scale::text::CONTROL),
+                )
+                .into_galley(
+                    ui,
+                    Some(egui::TextWrapMode::Extend),
+                    f32::INFINITY,
+                    egui::TextStyle::Button,
+                );
+                let size = egui::vec2(g.size().x + 28.0, 32.0);
+                let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
+                ui.painter().rect_filled(
+                    rect,
+                    egui::CornerRadius::same(scale::radius::CONTROL),
+                    t.warning,
+                );
+                ui.painter().galley(
+                    egui::pos2(
+                        rect.center().x - g.size().x / 2.0,
+                        rect.center().y - g.size().y / 2.0,
+                    ),
+                    g,
+                    t.on_ai,
+                );
+                resp.widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::Role::Button, true, send_label.to_owned())
+                });
+                resp
+            } else {
+                button_with_icon(ui, Icon::Send, send_label, ButtonVariant::Primary)
+            };
+            let ctrl_enter = ui.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::Enter));
+            if send.clicked() || ctrl_enter {
+                act = Some(ComposerAct::Send(state.mode, state.draft.clone()));
+                state.draft.clear();
+                state.draft_saved = false;
+            }
         });
     });
     act

@@ -328,6 +328,68 @@ struct TriageChip {
     editable: bool,
 }
 
+#[derive(Clone, Copy)]
+enum ToolAction {
+    Review,
+    Rewrite(&'static str),
+    Translate,
+}
+
+fn composer_tool_row(
+    ui: &mut egui::Ui,
+    busy: bool,
+    body_empty: bool,
+    gen_ok: bool,
+    translate_lang: &mut String,
+) -> Option<ToolAction> {
+    let mut tool: Option<ToolAction> = None;
+    if !busy && !body_empty {
+        if design::chip_with_icon(ui, false, Icon::Sparkles, "Review Draft")
+            .on_hover_text(
+                "run the 9 deterministic coaching checks (plus the AI layer when a \
+                 model is routed) — advisory only",
+            )
+            .clicked()
+        {
+            tool = Some(ToolAction::Review);
+        }
+        if gen_ok {
+            for (instruction, label) in [
+                ("shorten", "Shorten"),
+                ("expand", "Expand"),
+                ("warmer", "Warmer"),
+            ] {
+                if design::chip(ui, false, label)
+                    .on_hover_text("rewrite the composer text with the Draft role model")
+                    .clicked()
+                {
+                    tool = Some(ToolAction::Rewrite(instruction));
+                }
+            }
+            let lang_label = translate_lang.clone();
+            design::select(ui, "composer-translate-lang", &lang_label, 110.0, |ui| {
+                for (code, name) in spp_core::translation::SUPPORTED_LANGUAGES {
+                    ui.selectable_value(
+                        translate_lang,
+                        code.to_string(),
+                        format!("{code} — {name}"),
+                    );
+                }
+            });
+            if design::chip(ui, false, "Translate")
+                .on_hover_text(
+                    "translate the composer text to the picked language (cached \
+                     locally)",
+                )
+                .clicked()
+            {
+                tool = Some(ToolAction::Translate);
+            }
+        }
+    }
+    tool
+}
+
 impl InboxPage {
     #[must_use]
     pub fn new() -> Self {
@@ -1300,7 +1362,6 @@ impl InboxPage {
         ui.add_space(design::scale::space::SP1);
     }
 
-    #[allow(clippy::too_many_lines)]
     fn list_ui(
         &mut self,
         ui: &mut egui::Ui,
@@ -1341,6 +1402,29 @@ impl InboxPage {
         design::hint_text(ui, &subtitle);
         ui.add_space(design::scale::space::SP2);
 
+        let apply_requested = self.search_filter_ui(ui);
+
+        self.list_toolbar_ui(ui, db, engine);
+        if apply_requested {
+            self.apply_filters(db);
+        }
+        ui.add_space(design::scale::space::SP2);
+
+        if let Some(id) = self.conversation_rows_ui(ui, t) {
+            self.select(db, id);
+        }
+        let pages = self.total.div_ceil(INBOX_PAGE_SIZE);
+        let delta = design::pager(ui, self.page, pages);
+        if delta != 0
+            && let Some(next) = self.page.checked_add_signed(delta)
+            && next < pages
+        {
+            self.page = next;
+            self.reload_list(db);
+        }
+    }
+
+    fn search_filter_ui(&mut self, ui: &mut egui::Ui) -> bool {
         let mut apply_entered = false;
         let apply = design::filter_bar(
             ui,
@@ -1424,7 +1508,15 @@ impl InboxPage {
             },
             "Apply",
         );
+        apply.clicked() || apply_entered
+    }
 
+    fn list_toolbar_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        db: &DbHandle,
+        engine: Option<&std::sync::Arc<SyncEngine>>,
+    ) {
         ui.horizontal(|ui| {
             if design::button(
                 ui,
@@ -1484,11 +1576,13 @@ impl InboxPage {
                 }
             });
         });
-        if apply.clicked() || apply_entered {
-            self.apply_filters(db);
-        }
-        ui.add_space(design::scale::space::SP2);
+    }
 
+    fn conversation_rows_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        t: &'static design::Tokens,
+    ) -> Option<i64> {
         let mut clicked: Option<i64> = None;
         egui::ScrollArea::vertical()
             .id_salt("inbox-list-scroll")
@@ -1613,18 +1707,7 @@ impl InboxPage {
                     }
                 }
             });
-        if let Some(id) = clicked {
-            self.select(db, id);
-        }
-        let pages = self.total.div_ceil(INBOX_PAGE_SIZE);
-        let delta = design::pager(ui, self.page, pages);
-        if delta != 0
-            && let Some(next) = self.page.checked_add_signed(delta)
-            && next < pages
-        {
-            self.page = next;
-            self.reload_list(db);
-        }
+        clicked
     }
 
     fn apply_filters(&mut self, db: &DbHandle) {
@@ -2053,7 +2136,6 @@ impl InboxPage {
         );
     }
 
-    #[allow(clippy::too_many_lines)]
     fn copilot_pane_ui(
         &mut self,
         ui: &mut egui::Ui,
@@ -2096,354 +2178,351 @@ impl InboxPage {
                     design::hint_text(ui, "Analyzing the conversation…");
                     return;
                 };
-                let a = &report.analysis;
+                self.copilot_cards_ui(ui, &report);
+                self.copilot_lmstudio_ui(ui, db, detail);
+                self.assistant_ui(ui, db, detail);
+            });
+    }
 
-                design::card_titled(ui, "Signals", None, |ui| {
-                    ui.horizontal_wrapped(|ui| {
-                        design::badge(ui, &a.intent, design::BadgeTone::Info);
-                        let urgency_tone = match a.urgency.as_str() {
-                            "high" => design::BadgeTone::Destructive,
-                            "medium" => design::BadgeTone::Warning,
-                            _ => design::BadgeTone::Neutral,
-                        };
-                        design::badge(ui, &format!("urgency: {}", a.urgency), urgency_tone);
-                        if a.escalation {
-                            design::badge(
-                                ui,
-                                "escalation risk",
-                                design::BadgeTone::Destructive,
-                            );
-                        }
-                    });
-                });
-                ui.add_space(design::scale::space::SP2);
+    fn copilot_cards_ui(&mut self, ui: &mut egui::Ui, report: &spp_core::ai_local::CopilotReport) {
+        let a = &report.analysis;
 
-                if !a.summary.is_empty() || !a.questions.is_empty() {
-                    design::card_titled(ui, "Summary", None, |ui| {
-                        for line in &a.summary {
-                            ui.label(
-                                egui::RichText::new(format!(
-                                    "• {}",
-                                    spp_core::richtext::break_long_tokens(line, 40)
-                                ))
-                                .small()
-                                .color(design::tokens(ui).foreground),
-                            );
-                        }
-                        for q in &a.questions {
-                            ui.label(
-                                egui::RichText::new(format!(
-                                    "? {}",
-                                    spp_core::richtext::break_long_tokens(q, 40)
-                                ))
-                                .small()
-                                .color(design::tokens(ui).muted_foreground),
-                            );
-                        }
-                    });
-                    ui.add_space(design::scale::space::SP2);
+        design::card_titled(ui, "Signals", None, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                design::badge(ui, &a.intent, design::BadgeTone::Info);
+                let urgency_tone = match a.urgency.as_str() {
+                    "high" => design::BadgeTone::Destructive,
+                    "medium" => design::BadgeTone::Warning,
+                    _ => design::BadgeTone::Neutral,
+                };
+                design::badge(ui, &format!("urgency: {}", a.urgency), urgency_tone);
+                if a.escalation {
+                    design::badge(ui, "escalation risk", design::BadgeTone::Destructive);
                 }
+            });
+        });
+        ui.add_space(design::scale::space::SP2);
 
-                design::hint_text(
-                    ui,
-                    &format!(
-                        "{} past conversation{} on file{}",
-                        report.history.previous_conversations,
-                        if report.history.previous_conversations == 1 {
-                            ""
-                        } else {
-                            "s"
-                        },
-                        report
-                            .history
-                            .last_contact
-                            .as_deref()
-                            .map(|t| format!(" · last contact {t}"))
-                            .unwrap_or_default()
-                    ),
-                );
-                ui.add_space(design::scale::space::SP1);
+        if !a.summary.is_empty() || !a.questions.is_empty() {
+            design::card_titled(ui, "Summary", None, |ui| {
+                for line in &a.summary {
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "• {}",
+                            spp_core::richtext::break_long_tokens(line, 40)
+                        ))
+                        .small()
+                        .color(design::tokens(ui).foreground),
+                    );
+                }
+                for q in &a.questions {
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "? {}",
+                            spp_core::richtext::break_long_tokens(q, 40)
+                        ))
+                        .small()
+                        .color(design::tokens(ui).muted_foreground),
+                    );
+                }
+            });
+            ui.add_space(design::scale::space::SP2);
+        }
 
-                if report.similar.is_empty() {
-                    design::hint_text(ui, "No similar past conversations found yet.");
+        design::hint_text(
+            ui,
+            &format!(
+                "{} past conversation{} on file{}",
+                report.history.previous_conversations,
+                if report.history.previous_conversations == 1 {
+                    ""
                 } else {
-                    design::card_titled(ui, "Similar past issues", None, |ui| {
-                        for s in report.similar.iter().take(3) {
-                            ui.horizontal(|ui| {
-                                ui.add(
-                                    egui::Label::new(
-                                        egui::RichText::new(format!(
-                                            "#{} {}",
-                                            s.number, s.subject
-                                        ))
-                                        .small()
-                                        .strong()
-                                        .color(design::tokens(ui).foreground),
-                                    )
-                                    .truncate(),
-                                );
-                                design::badge(
-                                    ui,
-                                    &format!("{}%", (s.score * 100.0) as u32),
-                                    design::BadgeTone::Ai,
-                                );
-                            });
-                            ui.label(
-                                egui::RichText::new(format!(
-                                    "resolved with: {}",
-                                    truncate_chars(&s.resolution, 160)
-                                ))
-                                .small()
-                                .color(design::tokens(ui).muted_foreground),
-                            );
-                            if !s.why.is_empty() {
-                                ui.label(
-                                    egui::RichText::new(format!(
-                                        "why: {}",
-                                        s.why.join(", ")
-                                    ))
+                    "s"
+                },
+                report
+                    .history
+                    .last_contact
+                    .as_deref()
+                    .map(|t| format!(" · last contact {t}"))
+                    .unwrap_or_default()
+            ),
+        );
+        ui.add_space(design::scale::space::SP1);
+
+        if report.similar.is_empty() {
+            design::hint_text(ui, "No similar past conversations found yet.");
+        } else {
+            design::card_titled(ui, "Similar past issues", None, |ui| {
+                for s in report.similar.iter().take(3) {
+                    ui.horizontal(|ui| {
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(format!("#{} {}", s.number, s.subject))
                                     .small()
-                                    .weak(),
-                                );
-                            }
-                            ui.add_space(design::scale::space::SP1);
-                        }
+                                    .strong()
+                                    .color(design::tokens(ui).foreground),
+                            )
+                            .truncate(),
+                        );
+                        design::badge(
+                            ui,
+                            &format!("{}%", (s.score * 100.0) as u32),
+                            design::BadgeTone::Ai,
+                        );
                     });
-                    ui.add_space(design::scale::space::SP2);
-                }
-
-                if !report.articles.is_empty() {
-                    design::card_titled(ui, "Relevant help articles", None, |ui| {
-                        for art in report.articles.iter().take(3) {
-                            ui.label(
-                                egui::RichText::new(format!(
-                                    "• {} — {}",
-                                    art.name,
-                                    truncate_chars(&art.snippet, 120)
-                                ))
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "resolved with: {}",
+                            truncate_chars(&s.resolution, 160)
+                        ))
+                        .small()
+                        .color(design::tokens(ui).muted_foreground),
+                    );
+                    if !s.why.is_empty() {
+                        ui.label(
+                            egui::RichText::new(format!("why: {}", s.why.join(", ")))
                                 .small()
-                                .color(design::tokens(ui).muted_foreground),
-                            );
-                        }
-                    });
-                    ui.add_space(design::scale::space::SP2);
+                                .weak(),
+                        );
+                    }
+                    ui.add_space(design::scale::space::SP1);
                 }
+            });
+            ui.add_space(design::scale::space::SP2);
+        }
 
-                if design::cop_suggest(
-                    ui,
-                    "Suggested reply",
-                    std::slice::from_ref(&report.suggested_reply),
-                    &["Insert into reply"],
-                )
-                .is_some()
-                {
+        if !report.articles.is_empty() {
+            design::card_titled(ui, "Relevant help articles", None, |ui| {
+                for art in report.articles.iter().take(3) {
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "• {} — {}",
+                            art.name,
+                            truncate_chars(&art.snippet, 120)
+                        ))
+                        .small()
+                        .color(design::tokens(ui).muted_foreground),
+                    );
+                }
+            });
+            ui.add_space(design::scale::space::SP2);
+        }
+
+        if design::cop_suggest(
+            ui,
+            "Suggested reply",
+            std::slice::from_ref(&report.suggested_reply),
+            &["Insert into reply"],
+        )
+        .is_some()
+        {
+            self.composer_mode = ComposerMode::Reply;
+            self.inserted_draft = None;
+            self.composer_body = report.suggested_reply.clone();
+            self.mention_caret = 0;
+            self.mention_active = 0;
+            self.draft_saved = false;
+        }
+        ui.add_space(design::scale::space::SP2);
+    }
+
+    fn copilot_lmstudio_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        db: &DbHandle,
+        detail: &ConversationDetail,
+    ) {
+        let lmstudio_ok = db.with_read(spp_core::ai_local::generative_backend_available);
+        if lmstudio_ok {
+            let drafting = self
+                .pending_ai
+                .as_ref()
+                .is_some_and(|p| p.kind == "generate_draft");
+            if design::button(
+                ui,
+                if drafting {
+                    "Drafting with LM Studio…"
+                } else {
+                    "Draft reply with LM Studio"
+                },
+                ButtonVariant::Ai,
+            )
+            .on_hover_text(
+                "read the full thread, the knowledge base, the help center and similar \
+                 resolutions, then draft a grounded reply — review it and Insert before \
+                 sending",
+            )
+            .clicked()
+                && self.pending_ai.is_none()
+            {
+                self.enqueue_composer_ai(
+                    db,
+                    "generate_draft",
+                    json!({ "conversationId": detail.id }),
+                    detail.id,
+                );
+            }
+        } else {
+            design::hint_text(
+                ui,
+                "Reply drafting needs a routed Draft role (AI Center > Model-role routing).",
+            );
+        }
+        ui.add_space(design::scale::space::SP2);
+        if let Some((draft_id, draft, model)) =
+            db.with_read(|conn| spp_core::ai_local::latest_ai_draft_row(conn, detail.id))
+        {
+            match design::cop_suggest(
+                ui,
+                &format!("LM Studio draft ({model})"),
+                std::slice::from_ref(&draft),
+                &["Insert LM Studio draft", "Discard draft"],
+            ) {
+                Some(0) => {
                     self.composer_mode = ComposerMode::Reply;
-                    self.inserted_draft = None;
-                    self.composer_body = report.suggested_reply.clone();
+                    self.inserted_draft = Some((draft_id, draft.clone()));
+                    self.composer_body = draft.clone();
                     self.mention_caret = 0;
                     self.mention_active = 0;
                     self.draft_saved = false;
                 }
-                ui.add_space(design::scale::space::SP2);
-                let lmstudio_ok = db.with_read(spp_core::ai_local::generative_backend_available);
-                if lmstudio_ok {
-                    let drafting = self
-                        .pending_ai
-                        .as_ref()
-                        .is_some_and(|p| p.kind == "generate_draft");
-                    if design::button(
-                        ui,
-                        if drafting {
-                            "Drafting with LM Studio…"
-                        } else {
-                            "Draft reply with LM Studio"
-                        },
-                        ButtonVariant::Ai,
-                    )
-                    .on_hover_text(
-                        "read the full thread, the knowledge base, the help center and similar \
-                         resolutions, then draft a grounded reply — review it and Insert before \
-                         sending",
-                    )
-                    .clicked()
-                        && self.pending_ai.is_none()
-                    {
-                        self.enqueue_composer_ai(
-                            db,
-                            "generate_draft",
-                            json!({ "conversationId": detail.id }),
-                            detail.id,
-                        );
-                    }
-                } else {
-                    design::hint_text(
-                        ui,
-                        "Reply drafting needs a routed Draft role (AI Center > Model-role routing).",
-                    );
-                }
-                ui.add_space(design::scale::space::SP2);
-                if let Some((draft_id, draft, model)) =
-                    db.with_read(|conn| spp_core::ai_local::latest_ai_draft_row(conn, detail.id))
-                {
-                    match design::cop_suggest(
-                        ui,
-                        &format!("LM Studio draft ({model})"),
-                        std::slice::from_ref(&draft),
-                        &["Insert LM Studio draft", "Discard draft"],
-                    ) {
-                        Some(0) => {
-                            self.composer_mode = ComposerMode::Reply;
-                            self.inserted_draft = Some((draft_id, draft.clone()));
-                            self.composer_body = draft.clone();
-                            self.mention_caret = 0;
-                            self.mention_active = 0;
-                            self.draft_saved = false;
-                        }
-                        Some(1) => {
-                            let rejected = db.with_write(|conn| {
-                                spp_core::ai_pipeline::record_feedback(
-                                    conn, draft_id, &draft, &draft, false,
-                                )
-                                .and_then(|()| {
-                                    spp_core::ai_pipeline::set_draft_state(
-                                        conn, draft_id, "rejected",
-                                    )
-                                })
-                            });
-                            match rejected {
-                                Ok(()) => self.set_status_message(
-                                    "Draft marked rejected — feedback recorded.",
-                                    false,
-                                ),
-                                Err(e) => {
-                                    self.set_status_message(format!("Reject failed: {e}"), true)
-                                }
-                            }
-                        }
-                        _ => {}
-                    }
-                    if self
-                        .inserted_draft
-                        .as_ref()
-                        .is_some_and(|(id, _)| *id == draft_id)
-                    {
-                        design::badge(ui, "in composer", BadgeTone::Info);
-                    }
-                }
-                ui.add_space(design::scale::space::SP2);
-                design::divider(ui);
-                design::section_title(ui, "Ask the assistant");
-                let (feature_on, agent_ok) = db.with_read(|conn| {
-                    (
-                        spp_core::ai_hub::ai_feature_enabled(conn, "copilot"),
-                        !matches!(
-                            spp_core::ai_hub::backend_for_role(
-                                conn,
-                                spp_core::ai_hub::AiRole::Agent,
-                            ),
-                            spp_core::ai_pipeline::AiBackend::Disabled,
-                        ),
-                    )
-                });
-                if !feature_on {
-                    design::hint_text(ui, "Copilot is switched off (AI Center > Features).");
-                } else if !agent_ok {
-                    design::hint_text(
-                        ui,
-                        "Route the Agent role to an endpoint to ask questions (AI Center > Model-role routing).",
-                    );
-                } else {
-                    if let Some(err) = self.assistant_error.clone() {
-                        design::error_text(ui, &format!("assistant: {err}"));
-                    }
-                    if !self.assistant_messages.is_empty() {
-                        egui::ScrollArea::vertical()
-                            .id_salt("assistant-messages")
-                            .max_height(180.0)
-                            .stick_to_bottom(true)
-                            .show(ui, |ui| {
-                                for message in &self.assistant_messages {
-                                    let role = message
-                                        .get("role")
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or("?");
-                                    if role == "tool" {
-                                        continue;
-                                    }
-                                    let content = message
-                                        .get("content")
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or("");
-                                    design::cop_chat(ui, role == "assistant", content);
-                                }
-                            });
-                    }
-                    let busy = self.assistant_pending.is_some();
-                    ui.horizontal(|ui| {
-                        let mut question = self.assistant_input.clone();
-                        let response = ui.add_sized(
-                            [ui.available_width() - 64.0, 26.0],
-                            egui::TextEdit::singleline(&mut question)
-                                .hint_text("ask about this conversation…"),
-                        );
-                        if response.changed() {
-                            self.assistant_input = question;
-                        }
-                        if (design::button(
-                            ui,
-                            if busy { "Thinking…" } else { "Ask" },
-                            ButtonVariant::Ai,
+                Some(1) => {
+                    let rejected = db.with_write(|conn| {
+                        spp_core::ai_pipeline::record_feedback(
+                            conn, draft_id, &draft, &draft, false,
                         )
-                        .clicked()
-                            && !busy)
-                            || (ui.input(|i| i.key_pressed(egui::Key::Enter))
-                                && response.lost_focus()
-                                && !busy)
-                        {
-                            let question = self.assistant_input.trim().to_string();
-                            if !question.is_empty() {
-                                let payload = json!({
-                                    "question": question,
-                                    "conversationId": detail.id,
-                                    "sessionId": self.assistant_session,
-                                });
-                                let job = db.with_write(|conn| {
-                                    spp_core::jobs::enqueue_on(
-                                        conn,
-                                        "ai",
-                                        "copilot_chat",
-                                        &payload.to_string(),
-                                        3,
-                                        2,
-                                    )
-                                });
-                                match job {
-                                    Ok(job_id) => {
-                                        self.assistant_pending = Some(job_id);
-                                        self.assistant_input.clear();
-                                    }
-                                    Err(e) => self.assistant_error = Some(e.to_string()),
-                                }
+                        .and_then(|()| {
+                            spp_core::ai_pipeline::set_draft_state(conn, draft_id, "rejected")
+                        })
+                    });
+                    match rejected {
+                        Ok(()) => self.set_status_message(
+                            "Draft marked rejected — feedback recorded.",
+                            false,
+                        ),
+                        Err(e) => self.set_status_message(format!("Reject failed: {e}"), true),
+                    }
+                }
+                _ => {}
+            }
+            if self
+                .inserted_draft
+                .as_ref()
+                .is_some_and(|(id, _)| *id == draft_id)
+            {
+                design::badge(ui, "in composer", BadgeTone::Info);
+            }
+        }
+        ui.add_space(design::scale::space::SP2);
+    }
+
+    fn assistant_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle, detail: &ConversationDetail) {
+        design::divider(ui);
+        design::section_title(ui, "Ask the assistant");
+        let (feature_on, agent_ok) = db.with_read(|conn| {
+            (
+                spp_core::ai_hub::ai_feature_enabled(conn, "copilot"),
+                !matches!(
+                    spp_core::ai_hub::backend_for_role(conn, spp_core::ai_hub::AiRole::Agent,),
+                    spp_core::ai_pipeline::AiBackend::Disabled,
+                ),
+            )
+        });
+        if !feature_on {
+            design::hint_text(ui, "Copilot is switched off (AI Center > Features).");
+        } else if !agent_ok {
+            design::hint_text(
+                ui,
+                "Route the Agent role to an endpoint to ask questions (AI Center > Model-role routing).",
+            );
+        } else {
+            if let Some(err) = self.assistant_error.clone() {
+                design::error_text(ui, &format!("assistant: {err}"));
+            }
+            if !self.assistant_messages.is_empty() {
+                egui::ScrollArea::vertical()
+                    .id_salt("assistant-messages")
+                    .max_height(180.0)
+                    .stick_to_bottom(true)
+                    .show(ui, |ui| {
+                        for message in &self.assistant_messages {
+                            let role = message.get("role").and_then(|v| v.as_str()).unwrap_or("?");
+                            if role == "tool" {
+                                continue;
                             }
+                            let content = message
+                                .get("content")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("");
+                            design::cop_chat(ui, role == "assistant", content);
                         }
                     });
-                    let starters = db
-                        .with_read(|conn| spp_core::copilot::starter_questions(conn, detail.id));
-                    if !starters.is_empty() {
-                        ui.horizontal_wrapped(|ui| {
-                            for (question, hint) in starters.iter().take(4) {
-                                if design::chip(ui, false, &truncate_chars(question, 34))
-                                    .on_hover_text(hint)
-                                    .clicked()
-                                    && self.assistant_pending.is_none()
-                                {
-                                    self.assistant_input = question.clone();
-                                }
-                            }
+            }
+            let busy = self.assistant_pending.is_some();
+            ui.horizontal(|ui| {
+                let mut question = self.assistant_input.clone();
+                let response = ui.add_sized(
+                    [ui.available_width() - 64.0, 26.0],
+                    egui::TextEdit::singleline(&mut question)
+                        .hint_text("ask about this conversation…"),
+                );
+                if response.changed() {
+                    self.assistant_input = question;
+                }
+                if (design::button(
+                    ui,
+                    if busy { "Thinking…" } else { "Ask" },
+                    ButtonVariant::Ai,
+                )
+                .clicked()
+                    && !busy)
+                    || (ui.input(|i| i.key_pressed(egui::Key::Enter))
+                        && response.lost_focus()
+                        && !busy)
+                {
+                    let question = self.assistant_input.trim().to_string();
+                    if !question.is_empty() {
+                        let payload = json!({
+                            "question": question,
+                            "conversationId": detail.id,
+                            "sessionId": self.assistant_session,
                         });
+                        let job = db.with_write(|conn| {
+                            spp_core::jobs::enqueue_on(
+                                conn,
+                                "ai",
+                                "copilot_chat",
+                                &payload.to_string(),
+                                3,
+                                2,
+                            )
+                        });
+                        match job {
+                            Ok(job_id) => {
+                                self.assistant_pending = Some(job_id);
+                                self.assistant_input.clear();
+                            }
+                            Err(e) => self.assistant_error = Some(e.to_string()),
+                        }
                     }
                 }
             });
+            let starters =
+                db.with_read(|conn| spp_core::copilot::starter_questions(conn, detail.id));
+            if !starters.is_empty() {
+                ui.horizontal_wrapped(|ui| {
+                    for (question, hint) in starters.iter().take(4) {
+                        if design::chip(ui, false, &truncate_chars(question, 34))
+                            .on_hover_text(hint)
+                            .clicked()
+                            && self.assistant_pending.is_none()
+                        {
+                            self.assistant_input = question.clone();
+                        }
+                    }
+                });
+            }
+        }
     }
 
     fn insert_ai_draft(&mut self, db: &DbHandle, conversation_id: i64) {
@@ -2675,7 +2754,6 @@ impl InboxPage {
         }
     }
 
-    #[allow(clippy::too_many_lines)]
     fn composer_pane_ui(
         &mut self,
         ui: &mut egui::Ui,
@@ -2710,12 +2788,6 @@ impl InboxPage {
         let mut bcc = self.composer_bcc.clone();
         let mut translate_lang = self.translate_lang.clone();
         let gen_ok = db.with_read(spp_core::ai_local::generative_backend_available);
-        #[derive(Clone, Copy)]
-        enum ToolAction {
-            Review,
-            Rewrite(&'static str),
-            Translate,
-        }
         let mut tool: Option<ToolAction> = None;
 
         let mut state = ComposerState {
@@ -2754,52 +2826,7 @@ impl InboxPage {
                 }
             },
             |ui| {
-                if !busy && !body_empty {
-                    if design::chip_with_icon(ui, false, Icon::Sparkles, "Review Draft")
-                        .on_hover_text(
-                            "run the 9 deterministic coaching checks (plus the AI layer when a \
-                             model is routed) — advisory only",
-                        )
-                        .clicked()
-                    {
-                        tool = Some(ToolAction::Review);
-                    }
-                    if gen_ok {
-                        for (instruction, label) in [
-                            ("shorten", "Shorten"),
-                            ("expand", "Expand"),
-                            ("warmer", "Warmer"),
-                        ] {
-                            if design::chip(ui, false, label)
-                                .on_hover_text(
-                                    "rewrite the composer text with the Draft role model",
-                                )
-                                .clicked()
-                            {
-                                tool = Some(ToolAction::Rewrite(instruction));
-                            }
-                        }
-                        let lang_label = translate_lang.clone();
-                        design::select(ui, "composer-translate-lang", &lang_label, 110.0, |ui| {
-                            for (code, name) in spp_core::translation::SUPPORTED_LANGUAGES {
-                                ui.selectable_value(
-                                    &mut translate_lang,
-                                    code.to_string(),
-                                    format!("{code} — {name}"),
-                                );
-                            }
-                        });
-                        if design::chip(ui, false, "Translate")
-                            .on_hover_text(
-                                "translate the composer text to the picked language (cached \
-                                 locally)",
-                            )
-                            .clicked()
-                        {
-                            tool = Some(ToolAction::Translate);
-                        }
-                    }
-                }
+                tool = composer_tool_row(ui, busy, body_empty, gen_ok, &mut translate_lang);
             },
         );
         self.composer_cc = cc;
@@ -2810,6 +2837,13 @@ impl InboxPage {
         if let Some(caret) = state.caret {
             self.mention_caret = char_index_to_byte(&state.draft, caret);
         }
+        self.enqueue_composer_tool(db, conv_id, tool);
+        self.apply_composer_act(db, bus, conv_id, act, &state);
+
+        self.mention_popup_ui(ui);
+    }
+
+    fn enqueue_composer_tool(&mut self, db: &DbHandle, conv_id: i64, tool: Option<ToolAction>) {
         match tool {
             Some(ToolAction::Review) => {
                 self.enqueue_composer_ai(
@@ -2849,6 +2883,16 @@ impl InboxPage {
             }
             None => {}
         }
+    }
+
+    fn apply_composer_act(
+        &mut self,
+        db: &DbHandle,
+        bus: &EventBus,
+        conv_id: i64,
+        act: Option<ComposerAct>,
+        state: &ComposerState,
+    ) {
         match act {
             Some(ComposerAct::Send(mode, text)) => {
                 self.composer_mode = match mode {
@@ -2878,7 +2922,9 @@ impl InboxPage {
                 }
             }
         }
+    }
 
+    fn mention_popup_ui(&mut self, ui: &mut egui::Ui) {
         let body = self.composer_body.clone();
         if let Some((query, start)) = caret_query(&body, self.mention_caret) {
             let matches = filter_matches(&self.directory, &query);

@@ -458,77 +458,7 @@ impl IncidentsPage {
             design::hint_text(ui, note);
         }
 
-        let apply = design::filter_bar(
-            ui,
-            |ui| {
-                design::field_label(ui, "Status:");
-                let prev_status = self.filter_status.clone();
-                let status_label = self.filter_status.clone().unwrap_or_else(|| "Any".into());
-                egui::ComboBox::from_id_salt("incident-filter-status")
-                    .width(150.0)
-                    .selected_text(status_label.clone())
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut self.filter_status, None, "Any");
-                        for status in INCIDENT_STATUSES {
-                            ui.selectable_value(
-                                &mut self.filter_status,
-                                Some(status.into()),
-                                status,
-                            );
-                        }
-                    })
-                    .response
-                    .widget_info(|| {
-                        egui::WidgetInfo::labeled(
-                            egui::Role::Button,
-                            ui.is_enabled(),
-                            format!("status: {status_label}"),
-                        )
-                    });
-                if self.filter_status != prev_status {
-                    self.reload_list(db);
-                }
-                design::field_label(ui, "Severity:");
-                let prev_severity = self.filter_severity.clone();
-                let severity_label = self.filter_severity.clone().unwrap_or_else(|| "Any".into());
-                egui::ComboBox::from_id_salt("incident-filter-severity")
-                    .width(130.0)
-                    .selected_text(severity_label.clone())
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut self.filter_severity, None, "Any");
-                        for severity in INCIDENT_SEVERITIES {
-                            ui.selectable_value(
-                                &mut self.filter_severity,
-                                Some(severity.into()),
-                                severity,
-                            );
-                        }
-                    })
-                    .response
-                    .widget_info(|| {
-                        egui::WidgetInfo::labeled(
-                            egui::Role::Button,
-                            ui.is_enabled(),
-                            format!("severity: {severity_label}"),
-                        )
-                    });
-                if self.filter_severity != prev_severity {
-                    self.reload_list(db);
-                }
-                let prev_open_only = self.filter_open_only;
-                ui.checkbox(&mut self.filter_open_only, "Open only");
-                if self.filter_open_only != prev_open_only {
-                    self.reload_list(db);
-                }
-                let mut q = self.filter_query.clone();
-                ui.add_sized(
-                    [180.0, 28.0],
-                    egui::TextEdit::singleline(&mut q).hint_text("search incidents…"),
-                );
-                self.filter_query = q;
-            },
-            "Apply",
-        );
+        let apply = design::filter_bar(ui, |ui| self.filter_controls(ui, db), "Apply");
         if apply.clicked() {
             self.applied_query = self.filter_query.trim().to_string();
             self.reload_list(db);
@@ -543,37 +473,7 @@ impl IncidentsPage {
         let rows = self.rows.clone();
         let mut pick: Option<i64> = None;
         if rows.is_empty() {
-            let filters_active = self.filter_status.is_some()
-                || self.filter_severity.is_some()
-                || self.filter_open_only
-                || !self.applied_query.trim().is_empty();
-            if filters_active {
-                design::empty_state(
-                    ui,
-                    Icon::AlertTriangle,
-                    "No incidents match these filters",
-                    "Adjust or clear the filters, or create a new incident.",
-                );
-                ui.vertical_centered(|ui| {
-                    if design::button(ui, "Clear Filters", ButtonVariant::Outline).clicked() {
-                        self.filter_status = None;
-                        self.filter_severity = None;
-                        self.filter_open_only = false;
-                        self.filter_query.clear();
-                        self.applied_query.clear();
-                        self.reload_list(db);
-                    }
-                    ui.add_space(4.0);
-                });
-            } else if design::empty_state_cta(
-                ui,
-                Icon::AlertTriangle,
-                "No incidents yet",
-                "Track outages and recurring problems — create your first incident.",
-                "New Incident",
-            ) {
-                self.show_new = true;
-            }
+            self.empty_list_ui(ui, db);
         } else {
             design::data_table(
                 ui,
@@ -582,68 +482,9 @@ impl IncidentsPage {
                 rows.len(),
                 ROW_HEIGHT,
                 |ui, i| {
-                    let row = &rows[i];
-                    let id = i64_field(row, "id");
-                    let code = str_field(row, "code");
-                    let title = str_field(row, "title");
-                    let status = str_field(row, "status");
-                    let severity = str_field(row, "severity");
-                    let convs = i64_field(row, "conversation_count");
-                    let t = design::tokens(ui);
-                    dt_cell(
-                        ui,
-                        90.0,
-                        egui::RichText::new(&code)
-                            .size(design::scale::text::BODY)
-                            .strong()
-                            .color(t.foreground),
-                        false,
-                    );
-                    dt_cell(
-                        ui,
-                        240.0,
-                        egui::RichText::new(&title)
-                            .size(design::scale::text::BODY)
-                            .color(t.foreground),
-                        false,
-                    );
-                    ui.allocate_ui_with_layout(
-                        egui::vec2(110.0, ROW_HEIGHT),
-                        egui::Layout::left_to_right(egui::Align::Center),
-                        |ui| {
-                            design::badge(ui, &severity, severity_tone(&severity));
-                        },
-                    );
-                    ui.allocate_ui_with_layout(
-                        egui::vec2(120.0, ROW_HEIGHT),
-                        egui::Layout::left_to_right(egui::Align::Center),
-                        |ui| {
-                            design::badge(ui, &status, incident_status_tone(&status));
-                        },
-                    );
-                    dt_cell(
-                        ui,
-                        110.0,
-                        egui::RichText::new(convs.to_string())
-                            .size(design::scale::text::SMALL_HALF)
-                            .monospace()
-                            .color(t.foreground),
-                        true,
-                    );
-                    ui.allocate_ui_with_layout(
-                        egui::vec2(70.0, ROW_HEIGHT),
-                        egui::Layout::left_to_right(egui::Align::Center),
-                        |ui| {
-                            if design::button(ui, "Open", ButtonVariant::Outline)
-                                .on_hover_text(format!(
-                                    "open {code} — linked conversations, notes, releases"
-                                ))
-                                .clicked()
-                            {
-                                pick = Some(id);
-                            }
-                        },
-                    );
+                    if let Some(id) = incident_row(ui, &rows[i]) {
+                        pick = Some(id);
+                    }
                 },
             );
         }
@@ -693,109 +534,13 @@ impl IncidentsPage {
                     .cloned()
                     .unwrap_or_else(|| detail.clone());
                 let t = design::tokens(ui);
-                let status = str_field(&incident, "status");
-                let severity = str_field(&incident, "severity");
-
-                let code = str_field(&incident, "code");
-                let incident_title = str_field(&incident, "title");
-                let incident_id = i64_field(&incident, "id");
-                ui.vertical(|ui| {
-                    ui.label(
-                        egui::RichText::new(format!("{code} · {incident_title}"))
-                            .size(design::scale::text::LEAD)
-                            .strong()
-                            .color(t.foreground),
-                    );
-                    let started = opt_str_field(&incident, "started_at")
-                        .map(|s| format!("started: {s}"))
-                        .unwrap_or_else(|| "not started".into());
-                    let owner = opt_str_field(&incident, "owner_name")
-                        .map(|o| format!(" · owner: {o}"))
-                        .unwrap_or_default();
-                    design::hint_text(ui, &format!("{started}{owner}"));
-                    ui.horizontal(|ui| {
-                        design::badge(ui, &status, incident_status_tone(&status));
-                        design::badge(ui, &severity, severity_tone(&severity));
-                    });
-                });
+                incident_detail_header(ui, &incident, t);
                 design::divider(ui);
 
-                design::card_titled(
-                    ui,
-                    "Lifecycle",
-                    Some("update this incident as it develops"),
-                    |ui| {
-                        ui.horizontal(|ui| {
-                            design::field_label(ui, "Status");
-                            let active = INCIDENT_STATUSES
-                                .iter()
-                                .position(|s| *s == status)
-                                .unwrap_or(0);
-                            if let Some(i) = design::segmented(
-                                ui,
-                                "incident-status-edit",
-                                &INCIDENT_STATUSES,
-                                active,
-                            ) {
-                                self.set_status(db, INCIDENT_STATUSES[i]);
-                            }
-                        });
-                        ui.horizontal(|ui| {
-                            design::field_label(ui, "Severity");
-                            let active = INCIDENT_SEVERITIES
-                                .iter()
-                                .position(|s| *s == severity)
-                                .unwrap_or(0);
-                            if let Some(i) = design::segmented(
-                                ui,
-                                "incident-severity-edit",
-                                &INCIDENT_SEVERITIES,
-                                active,
-                            ) {
-                                self.set_severity(db, INCIDENT_SEVERITIES[i]);
-                            }
-                        });
-                        ui.horizontal(|ui| {
-                            design::field_label(ui, "Owner");
-                            let owner_label = self
-                                .owner_pick
-                                .and_then(|id| {
-                                    self.users
-                                        .iter()
-                                        .find(|(uid, _)| *uid == id)
-                                        .map(|(_, name)| name.clone())
-                                })
-                                .or_else(|| opt_str_field(&incident, "owner_name"))
-                                .unwrap_or_else(|| "Unassigned".into());
-                            design::select(ui, "incident-owner", &owner_label, 200.0, |ui| {
-                                ui.selectable_value(&mut self.owner_pick, None, "Unassigned");
-                                for (id, name) in self.users.clone() {
-                                    ui.selectable_value(&mut self.owner_pick, Some(id), &name);
-                                }
-                            });
-                            if design::button(ui, "Set Owner", ButtonVariant::Secondary)
-                                .on_hover_text("the owner shows in the header line and the list")
-                                .clicked()
-                            {
-                                self.set_owner(db, self.owner_pick);
-                            }
-                        });
-                        if design::button(ui, "Delete Incident", ButtonVariant::Destructive)
-                            .on_hover_text(
-                                "asks for confirmation — the incident and its links, \
-                                 notes and events are removed",
-                            )
-                            .clicked()
-                            && panel_nav.is_none()
-                        {
-                            panel_nav = Some(NavRequest::Confirm(ConfirmRequest::delete_incident(
-                                incident_id,
-                                &code,
-                                &incident_title,
-                            )));
-                        }
-                    },
-                );
+                let nav = self.lifecycle_card_ui(ui, db, &incident);
+                if panel_nav.is_none() {
+                    panel_nav = nav;
+                }
                 ui.add_space(design::scale::space::SP2);
 
                 for (label, key) in [
@@ -824,140 +569,332 @@ impl IncidentsPage {
                 }
 
                 ui.columns(2, |columns| {
-                    let conversations = self.conversations.clone();
-                    let releases = self.releases.clone();
-                    let link_conversation = self.link_conversation.clone();
-                    let customers = self.customers.clone();
-                    let notes = self.notes.clone();
-
-                    design::card_titled(
-                        &mut columns[0],
-                        &format!("Linked conversations ({})", conversations.len()),
-                        None,
-                        |ui| {
-                            for conv in &conversations {
-                                let conv_id = i64_field(conv, "conversation_id");
-                                ui.horizontal(|ui| {
-                                    let response = ui
-                                        .add(
-                                            egui::Label::new(
-                                                egui::RichText::new(format!(
-                                                    "#{} · {}",
-                                                    i64_field(conv, "number"),
-                                                    str_field(conv, "subject")
-                                                ))
-                                                .size(design::scale::text::SMALL)
-                                                .color(t.primary),
-                                            )
-                                            .sense(egui::Sense::click()),
-                                        )
-                                        .on_hover_text("open this conversation in the Inbox");
-                                    if response.hovered() {
-                                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                                    }
-                                    if response.clicked() && panel_nav.is_none() {
-                                        panel_nav = Some(NavRequest::OpenConversation(conv_id));
-                                    }
-                                    if design::button(ui, "Unlink", ButtonVariant::Text)
-                                        .on_hover_text(
-                                            "remove the link — the conversation itself \
-                                             is untouched",
-                                        )
-                                        .clicked()
-                                    {
-                                        self.unlink(db, conv_id);
-                                    }
-                                });
-                            }
-                            ui.add_space(design::scale::space::SP1);
-                            design::form_row(ui, "link #", |ui| {
-                                let mut link = link_conversation;
-                                let response = ui.add_sized(
-                                    [90.0, 28.0],
-                                    egui::TextEdit::singleline(&mut link).hint_text("id"),
-                                );
-                                if response.changed() {
-                                    self.link_conversation = link;
-                                }
-                            });
-                            if design::button(ui, "Link", ButtonVariant::Primary).clicked() {
-                                self.link(db);
-                            }
-                        },
-                    );
-                    columns[0].add_space(design::scale::space::SP2);
-                    if !releases.is_empty() {
-                        design::card_titled(
-                            &mut columns[0],
-                            &format!("Releases ({})", releases.len()),
-                            None,
-                            |ui| {
-                                for release in &releases {
-                                    ui.label(
-                                        egui::RichText::new(format!(
-                                            "{} · {}",
-                                            str_field(release, "version_label"),
-                                            str_field(release, "released_at")
-                                        ))
-                                        .size(design::scale::text::SMALL)
-                                        .color(t.foreground),
-                                    );
-                                }
-                            },
-                        );
-                        columns[0].add_space(design::scale::space::SP2);
+                    let nav = self.linked_column_ui(&mut columns[0], db, t);
+                    if panel_nav.is_none() {
+                        panel_nav = nav;
                     }
-
-                    design::card_titled(
-                        &mut columns[1],
-                        &format!("Affected customers ({})", customers.len()),
-                        None,
-                        |ui| {
-                            for customer in &customers {
-                                ui.label(
-                                    egui::RichText::new(str_field(customer, "name"))
-                                        .size(design::scale::text::SMALL)
-                                        .color(t.foreground),
-                                );
-                            }
-                        },
-                    );
-                    columns[1].add_space(design::scale::space::SP2);
-                    design::card_titled(
-                        &mut columns[1],
-                        &format!("Notes ({})", notes.len()),
-                        None,
-                        |ui| {
-                            for note in &notes {
-                                design::card(ui, |ui| {
-                                    ui.label(
-                                        egui::RichText::new(str_field(note, "created_at"))
-                                            .size(design::scale::text::META)
-                                            .color(t.muted_foreground),
-                                    );
-                                    ui.label(
-                                        egui::RichText::new(str_field(note, "body"))
-                                            .size(design::scale::text::SMALL)
-                                            .color(t.foreground),
-                                    );
-                                });
-                            }
-                            ui.add_space(design::scale::space::SP1);
-                            ui.add_sized(
-                                [ui.available_width(), 70.0],
-                                egui::TextEdit::multiline(&mut self.new_note)
-                                    .hint_text("write an incident note…"),
-                            );
-                            if design::button(ui, "Add Note", ButtonVariant::Primary).clicked() {
-                                self.add_note(db);
-                            }
-                        },
-                    );
+                    self.info_column_ui(&mut columns[1], db, t);
                 });
             },
         );
         self.panel_open = panel_open;
         panel_nav
+    }
+
+    fn filter_controls(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
+        design::field_label(ui, "Status:");
+        let prev_status = self.filter_status.clone();
+        let status_label = self.filter_status.clone().unwrap_or_else(|| "Any".into());
+        egui::ComboBox::from_id_salt("incident-filter-status")
+            .width(150.0)
+            .selected_text(status_label.clone())
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut self.filter_status, None, "Any");
+                for status in INCIDENT_STATUSES {
+                    ui.selectable_value(&mut self.filter_status, Some(status.into()), status);
+                }
+            })
+            .response
+            .widget_info(|| {
+                egui::WidgetInfo::labeled(
+                    egui::Role::Button,
+                    ui.is_enabled(),
+                    format!("status: {status_label}"),
+                )
+            });
+        if self.filter_status != prev_status {
+            self.reload_list(db);
+        }
+        design::field_label(ui, "Severity:");
+        let prev_severity = self.filter_severity.clone();
+        let severity_label = self.filter_severity.clone().unwrap_or_else(|| "Any".into());
+        egui::ComboBox::from_id_salt("incident-filter-severity")
+            .width(130.0)
+            .selected_text(severity_label.clone())
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut self.filter_severity, None, "Any");
+                for severity in INCIDENT_SEVERITIES {
+                    ui.selectable_value(&mut self.filter_severity, Some(severity.into()), severity);
+                }
+            })
+            .response
+            .widget_info(|| {
+                egui::WidgetInfo::labeled(
+                    egui::Role::Button,
+                    ui.is_enabled(),
+                    format!("severity: {severity_label}"),
+                )
+            });
+        if self.filter_severity != prev_severity {
+            self.reload_list(db);
+        }
+        let prev_open_only = self.filter_open_only;
+        ui.checkbox(&mut self.filter_open_only, "Open only");
+        if self.filter_open_only != prev_open_only {
+            self.reload_list(db);
+        }
+        let mut q = self.filter_query.clone();
+        ui.add_sized(
+            [180.0, 28.0],
+            egui::TextEdit::singleline(&mut q).hint_text("search incidents…"),
+        );
+        self.filter_query = q;
+    }
+
+    fn empty_list_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
+        let filters_active = self.filter_status.is_some()
+            || self.filter_severity.is_some()
+            || self.filter_open_only
+            || !self.applied_query.trim().is_empty();
+        if filters_active {
+            design::empty_state(
+                ui,
+                Icon::AlertTriangle,
+                "No incidents match these filters",
+                "Adjust or clear the filters, or create a new incident.",
+            );
+            ui.vertical_centered(|ui| {
+                if design::button(ui, "Clear Filters", ButtonVariant::Outline).clicked() {
+                    self.filter_status = None;
+                    self.filter_severity = None;
+                    self.filter_open_only = false;
+                    self.filter_query.clear();
+                    self.applied_query.clear();
+                    self.reload_list(db);
+                }
+                ui.add_space(4.0);
+            });
+        } else if design::empty_state_cta(
+            ui,
+            Icon::AlertTriangle,
+            "No incidents yet",
+            "Track outages and recurring problems — create your first incident.",
+            "New Incident",
+        ) {
+            self.show_new = true;
+        }
+    }
+
+    fn lifecycle_card_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        db: &DbHandle,
+        incident: &serde_json::Value,
+    ) -> Option<NavRequest> {
+        let status = str_field(incident, "status");
+        let severity = str_field(incident, "severity");
+        let code = str_field(incident, "code");
+        let incident_title = str_field(incident, "title");
+        let incident_id = i64_field(incident, "id");
+        let mut nav: Option<NavRequest> = None;
+        design::card_titled(
+            ui,
+            "Lifecycle",
+            Some("update this incident as it develops"),
+            |ui| {
+                ui.horizontal(|ui| {
+                    design::field_label(ui, "Status");
+                    let active = INCIDENT_STATUSES
+                        .iter()
+                        .position(|s| *s == status)
+                        .unwrap_or(0);
+                    if let Some(i) =
+                        design::segmented(ui, "incident-status-edit", &INCIDENT_STATUSES, active)
+                    {
+                        self.set_status(db, INCIDENT_STATUSES[i]);
+                    }
+                });
+                ui.horizontal(|ui| {
+                    design::field_label(ui, "Severity");
+                    let active = INCIDENT_SEVERITIES
+                        .iter()
+                        .position(|s| *s == severity)
+                        .unwrap_or(0);
+                    if let Some(i) = design::segmented(
+                        ui,
+                        "incident-severity-edit",
+                        &INCIDENT_SEVERITIES,
+                        active,
+                    ) {
+                        self.set_severity(db, INCIDENT_SEVERITIES[i]);
+                    }
+                });
+                ui.horizontal(|ui| {
+                    design::field_label(ui, "Owner");
+                    let owner_label = self
+                        .owner_pick
+                        .and_then(|id| {
+                            self.users
+                                .iter()
+                                .find(|(uid, _)| *uid == id)
+                                .map(|(_, name)| name.clone())
+                        })
+                        .or_else(|| opt_str_field(incident, "owner_name"))
+                        .unwrap_or_else(|| "Unassigned".into());
+                    design::select(ui, "incident-owner", &owner_label, 200.0, |ui| {
+                        ui.selectable_value(&mut self.owner_pick, None, "Unassigned");
+                        for (id, name) in self.users.clone() {
+                            ui.selectable_value(&mut self.owner_pick, Some(id), &name);
+                        }
+                    });
+                    if design::button(ui, "Set Owner", ButtonVariant::Secondary)
+                        .on_hover_text("the owner shows in the header line and the list")
+                        .clicked()
+                    {
+                        self.set_owner(db, self.owner_pick);
+                    }
+                });
+                if design::button(ui, "Delete Incident", ButtonVariant::Destructive)
+                    .on_hover_text(
+                        "asks for confirmation — the incident and its links, \
+                         notes and events are removed",
+                    )
+                    .clicked()
+                    && nav.is_none()
+                {
+                    nav = Some(NavRequest::Confirm(ConfirmRequest::delete_incident(
+                        incident_id,
+                        &code,
+                        &incident_title,
+                    )));
+                }
+            },
+        );
+        nav
+    }
+
+    fn linked_column_ui(
+        &mut self,
+        column: &mut egui::Ui,
+        db: &DbHandle,
+        t: &'static design::Tokens,
+    ) -> Option<NavRequest> {
+        let conversations = self.conversations.clone();
+        let releases = self.releases.clone();
+        let link_conversation = self.link_conversation.clone();
+        let mut nav: Option<NavRequest> = None;
+        design::card_titled(
+            column,
+            &format!("Linked conversations ({})", conversations.len()),
+            None,
+            |ui| {
+                for conv in &conversations {
+                    let conv_id = i64_field(conv, "conversation_id");
+                    ui.horizontal(|ui| {
+                        let response = ui
+                            .add(
+                                egui::Label::new(
+                                    egui::RichText::new(format!(
+                                        "#{} · {}",
+                                        i64_field(conv, "number"),
+                                        str_field(conv, "subject")
+                                    ))
+                                    .size(design::scale::text::SMALL)
+                                    .color(t.primary),
+                                )
+                                .sense(egui::Sense::click()),
+                            )
+                            .on_hover_text("open this conversation in the Inbox");
+                        if response.hovered() {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                        }
+                        if response.clicked() && nav.is_none() {
+                            nav = Some(NavRequest::OpenConversation(conv_id));
+                        }
+                        if design::button(ui, "Unlink", ButtonVariant::Text)
+                            .on_hover_text(
+                                "remove the link — the conversation itself \
+                                 is untouched",
+                            )
+                            .clicked()
+                        {
+                            self.unlink(db, conv_id);
+                        }
+                    });
+                }
+                ui.add_space(design::scale::space::SP1);
+                design::form_row(ui, "link #", |ui| {
+                    let mut link = link_conversation;
+                    let response = ui.add_sized(
+                        [90.0, 28.0],
+                        egui::TextEdit::singleline(&mut link).hint_text("id"),
+                    );
+                    if response.changed() {
+                        self.link_conversation = link;
+                    }
+                });
+                if design::button(ui, "Link", ButtonVariant::Primary).clicked() {
+                    self.link(db);
+                }
+            },
+        );
+        column.add_space(design::scale::space::SP2);
+        if !releases.is_empty() {
+            design::card_titled(
+                column,
+                &format!("Releases ({})", releases.len()),
+                None,
+                |ui| {
+                    for release in &releases {
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "{} · {}",
+                                str_field(release, "version_label"),
+                                str_field(release, "released_at")
+                            ))
+                            .size(design::scale::text::SMALL)
+                            .color(t.foreground),
+                        );
+                    }
+                },
+            );
+            column.add_space(design::scale::space::SP2);
+        }
+        nav
+    }
+
+    fn info_column_ui(&mut self, column: &mut egui::Ui, db: &DbHandle, t: &'static design::Tokens) {
+        let customers = self.customers.clone();
+        let notes = self.notes.clone();
+        design::card_titled(
+            column,
+            &format!("Affected customers ({})", customers.len()),
+            None,
+            |ui| {
+                for customer in &customers {
+                    ui.label(
+                        egui::RichText::new(str_field(customer, "name"))
+                            .size(design::scale::text::SMALL)
+                            .color(t.foreground),
+                    );
+                }
+            },
+        );
+        column.add_space(design::scale::space::SP2);
+        design::card_titled(column, &format!("Notes ({})", notes.len()), None, |ui| {
+            for note in &notes {
+                design::card(ui, |ui| {
+                    ui.label(
+                        egui::RichText::new(str_field(note, "created_at"))
+                            .size(design::scale::text::META)
+                            .color(t.muted_foreground),
+                    );
+                    ui.label(
+                        egui::RichText::new(str_field(note, "body"))
+                            .size(design::scale::text::SMALL)
+                            .color(t.foreground),
+                    );
+                });
+            }
+            ui.add_space(design::scale::space::SP1);
+            ui.add_sized(
+                [ui.available_width(), 70.0],
+                egui::TextEdit::multiline(&mut self.new_note).hint_text("write an incident note…"),
+            );
+            if design::button(ui, "Add Note", ButtonVariant::Primary).clicked() {
+                self.add_note(db);
+            }
+        });
     }
 
     fn edit_slot(&mut self, field: &str) -> &mut String {
@@ -1036,6 +973,103 @@ impl Default for IncidentsPage {
     fn default() -> Self {
         Self::new()
     }
+}
+
+fn incident_row(ui: &mut egui::Ui, row: &serde_json::Value) -> Option<i64> {
+    let id = i64_field(row, "id");
+    let code = str_field(row, "code");
+    let title = str_field(row, "title");
+    let status = str_field(row, "status");
+    let severity = str_field(row, "severity");
+    let convs = i64_field(row, "conversation_count");
+    let t = design::tokens(ui);
+    dt_cell(
+        ui,
+        90.0,
+        egui::RichText::new(&code)
+            .size(design::scale::text::BODY)
+            .strong()
+            .color(t.foreground),
+        false,
+    );
+    dt_cell(
+        ui,
+        240.0,
+        egui::RichText::new(&title)
+            .size(design::scale::text::BODY)
+            .color(t.foreground),
+        false,
+    );
+    ui.allocate_ui_with_layout(
+        egui::vec2(110.0, ROW_HEIGHT),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            design::badge(ui, &severity, severity_tone(&severity));
+        },
+    );
+    ui.allocate_ui_with_layout(
+        egui::vec2(120.0, ROW_HEIGHT),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            design::badge(ui, &status, incident_status_tone(&status));
+        },
+    );
+    dt_cell(
+        ui,
+        110.0,
+        egui::RichText::new(convs.to_string())
+            .size(design::scale::text::SMALL_HALF)
+            .monospace()
+            .color(t.foreground),
+        true,
+    );
+    let mut picked: Option<i64> = None;
+    ui.allocate_ui_with_layout(
+        egui::vec2(70.0, ROW_HEIGHT),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            if design::button(ui, "Open", ButtonVariant::Outline)
+                .on_hover_text(format!(
+                    "open {code} — linked conversations, notes, releases"
+                ))
+                .clicked()
+            {
+                picked = Some(id);
+            }
+        },
+    );
+    picked
+}
+
+fn incident_detail_header(
+    ui: &mut egui::Ui,
+    incident: &serde_json::Value,
+    t: &'static design::Tokens,
+) {
+    let status = str_field(incident, "status");
+    let severity = str_field(incident, "severity");
+
+    let code = str_field(incident, "code");
+    let incident_title = str_field(incident, "title");
+    ui.vertical(|ui| {
+        ui.label(
+            egui::RichText::new(format!("{code} · {incident_title}"))
+                .size(design::scale::text::LEAD)
+                .strong()
+                .color(t.foreground),
+        );
+        let started = opt_str_field(incident, "started_at")
+            .map(|s| format!("started: {s}"))
+            .unwrap_or_else(|| "not started".into());
+        let owner = opt_str_field(incident, "owner_name")
+            .map(|o| format!(" · owner: {o}"))
+            .unwrap_or_default();
+        design::hint_text(ui, &format!("{started}{owner}"));
+        ui.horizontal(|ui| {
+            design::badge(ui, &status, incident_status_tone(&status));
+            design::badge(ui, &severity, severity_tone(&severity));
+        });
+    });
 }
 
 fn dt_cell(ui: &mut egui::Ui, width: f32, text: egui::RichText, align_right: bool) {

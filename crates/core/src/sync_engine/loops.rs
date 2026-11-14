@@ -313,177 +313,21 @@ impl SyncEngine {
     ) -> Result<ResourceSyncResult> {
         let resource = resource.to_string();
         match resource.as_str() {
-            "account" => {
-                let me = self.provider.get_me().await?;
-                let conn = self.lock();
-                conn.execute(
-                    "INSERT INTO accounts (remote_id, plan, raw_json, last_seen_at)
-                     VALUES (?1, ?2, ?3, datetime('now'))
-                     ON CONFLICT(remote_id) DO UPDATE SET plan = excluded.plan,
-                       raw_json = excluded.raw_json, last_seen_at = datetime('now')",
-                    params![
-                        me.remote_id,
-                        me.role,
-                        serde_json::to_string(&me).unwrap_or_default()
-                    ],
-                )?;
-                mirror::upsert_user(&conn, &me)?;
-                Ok(ResourceSyncResult {
-                    resource,
-                    processed: 1,
-                    failed: 0,
-                    error: None,
-                })
-            }
-            "users" => {
-                let users = self.provider.list_users().await?;
-                let conn = self.lock();
-                for u in &users {
-                    mirror::upsert_user(&conn, u)?;
-                }
-                Ok(ResourceSyncResult {
-                    resource,
-                    processed: users.len() as i64,
-                    failed: 0,
-                    error: None,
-                })
-            }
-            "system_users" => {
-                let users = self.provider.list_system_users().await?;
-                let conn = self.lock();
-                for u in &users {
-                    mirror::upsert_user(&conn, u)?;
-                }
-                Ok(ResourceSyncResult {
-                    resource,
-                    processed: users.len() as i64,
-                    failed: 0,
-                    error: None,
-                })
-            }
-            "teams" => {
-                let teams = self.provider.list_teams().await?;
-                let conn = self.lock();
-                for t in &teams {
-                    mirror::upsert_team(&conn, t)?;
-                }
-                Ok(ResourceSyncResult {
-                    resource,
-                    processed: teams.len() as i64,
-                    failed: 0,
-                    error: None,
-                })
-            }
-            "mailboxes" => {
-                let mbs = self.provider.list_mailboxes().await?;
-                let conn = self.lock();
-                for m in &mbs {
-                    mirror::upsert_mailbox(&conn, m)?;
-                }
-                Ok(ResourceSyncResult {
-                    resource,
-                    processed: mbs.len() as i64,
-                    failed: 0,
-                    error: None,
-                })
-            }
-            "folders" => {
-                let mbs = self.provider.list_mailboxes().await?;
-                let mut processed = 0;
-                for m in &mbs {
-                    let folders = self.provider.list_folders(m.remote_id).await?;
-                    let conn = self.lock();
-                    if let Some(mailbox_local) = local_id(&conn, "mailboxes", m.remote_id) {
-                        for f in &folders {
-                            upsert_folder(&conn, mailbox_local, f)?;
-                            processed += 1;
-                        }
-                    }
-                }
-                Ok(ResourceSyncResult {
-                    resource,
-                    processed,
-                    failed: 0,
-                    error: None,
-                })
-            }
-            "tags" => {
-                let tags = self.provider.list_tags().await?;
-                let conn = self.lock();
-                for t in &tags {
-                    mirror::upsert_tag(&conn, t)?;
-                }
-                Ok(ResourceSyncResult {
-                    resource,
-                    processed: tags.len() as i64,
-                    failed: 0,
-                    error: None,
-                })
-            }
-            "inbox_fields" => {
-                let mbs = self.provider.list_mailboxes().await?;
-                let mut processed = 0;
-                for m in &mbs {
-                    let fields = self.provider.list_inbox_fields(m.remote_id).await?;
-                    let conn = self.lock();
-                    if let Some(mailbox_local) = local_id(&conn, "mailboxes", m.remote_id) {
-                        for f in &fields {
-                            upsert_inbox_field(&conn, mailbox_local, f)?;
-                            processed += 1;
-                        }
-                    }
-                }
-                Ok(ResourceSyncResult {
-                    resource,
-                    processed,
-                    failed: 0,
-                    error: None,
-                })
-            }
+            "account" => self.sync_account(resource).await,
+            "users" => self.sync_users(resource).await,
+            "system_users" => self.sync_system_users(resource).await,
+            "teams" => self.sync_teams(resource).await,
+            "mailboxes" => self.sync_mailboxes(resource).await,
+            "folders" => self.sync_folders(resource).await,
+            "tags" => self.sync_tags(resource).await,
+            "inbox_fields" => self.sync_inbox_fields(resource).await,
             "customer_property_definitions" => {
-                let defs = self.provider.list_customer_property_definitions().await?;
-                let conn = self.lock();
-                upsert_property_definitions(&conn, "customer_property_definitions", &defs)?;
-                Ok(ResourceSyncResult {
-                    resource,
-                    processed: defs.len() as i64,
-                    failed: 0,
-                    error: None,
-                })
+                self.sync_customer_property_definitions(resource).await
             }
             "organization_property_definitions" => {
-                let defs = self
-                    .provider
-                    .list_organization_property_definitions()
-                    .await?;
-                let conn = self.lock();
-                upsert_property_definitions(&conn, "organization_property_definitions", &defs)?;
-                Ok(ResourceSyncResult {
-                    resource,
-                    processed: defs.len() as i64,
-                    failed: 0,
-                    error: None,
-                })
+                self.sync_organization_property_definitions(resource).await
             }
-            "organizations" => {
-                let orgs = self.provider.list_organizations().await?;
-                let conn = self.lock();
-                let mut seen: Vec<i64> = Vec::with_capacity(orgs.len());
-                for o in &orgs {
-                    upsert_organization(&conn, o)?;
-                    seen.push(o.remote_id);
-                }
-                let pruned = prune_missing_rows(&conn, "organizations", &seen)?;
-                if pruned > 0 {
-                    tracing::debug!(deleted = pruned, "organizations removed platform-side");
-                }
-                Ok(ResourceSyncResult {
-                    resource,
-                    processed: orgs.len() as i64,
-                    failed: 0,
-                    error: None,
-                })
-            }
+            "organizations" => self.sync_organizations(resource).await,
             "customers" => {
                 let since = if initial {
                     None
@@ -493,144 +337,13 @@ impl SyncEngine {
                 };
                 self.sync_customers(since.as_deref(), initial).await
             }
-            "saved_replies" => {
-                let mbs = self.provider.list_mailboxes().await?;
-                let mut processed = 0;
-                let mut seen: Vec<i64> = Vec::new();
-                for m in &mbs {
-                    let replies = self.provider.list_saved_replies(m.remote_id).await?;
-                    let conn = self.lock();
-                    let mailbox_local = local_id(&conn, "mailboxes", m.remote_id);
-                    for r in &replies {
-                        upsert_saved_reply(&conn, mailbox_local, r)?;
-                        seen.push(r.remote_id);
-                        processed += 1;
-                    }
-                }
-                {
-                    let conn = self.lock();
-                    let pruned = prune_missing_rows(&conn, "saved_replies", &seen)?;
-                    if pruned > 0 {
-                        tracing::debug!(deleted = pruned, "saved replies removed platform-side");
-                    }
-                }
-                Ok(ResourceSyncResult {
-                    resource,
-                    processed,
-                    failed: 0,
-                    error: None,
-                })
-            }
-            "workflows" => {
-                let wfs = self.provider.list_workflows().await?;
-                let conn = self.lock();
-                let mut seen: Vec<i64> = Vec::with_capacity(wfs.len());
-                for w in &wfs {
-                    upsert_workflow(&conn, w)?;
-                    seen.push(w.remote_id);
-                }
-                let pruned = prune_missing_rows(&conn, "workflows", &seen)?;
-                if pruned > 0 {
-                    tracing::debug!(deleted = pruned, "workflows removed platform-side");
-                }
-                Ok(ResourceSyncResult {
-                    resource,
-                    processed: wfs.len() as i64,
-                    failed: 0,
-                    error: None,
-                })
-            }
+            "saved_replies" => self.sync_saved_replies(resource).await,
+            "workflows" => self.sync_workflows(resource).await,
             "conversations" => self.sync_conversations(None, initial).await,
             "threads" => self.sync_missing_threads().await,
-            "docs_collections" => {
-                let collections = self.provider.list_doc_collections().await?;
-                let mut processed = 0;
-                for col in &collections {
-                    let categories = self
-                        .provider
-                        .list_doc_categories(col.remote_id.clone())
-                        .await?;
-                    let conn = self.lock();
-                    let local = upsert_doc_collection(&conn, col)?;
-                    upsert_doc_categories(&conn, local, &categories)?;
-                    processed += 1;
-                }
-                Ok(ResourceSyncResult {
-                    resource,
-                    processed,
-                    failed: 0,
-                    error: None,
-                })
-            }
-            "docs_articles" => {
-                let mut processed = 0;
-                let collections: Vec<String> = {
-                    let conn = self.lock();
-                    crate::db::query_rows(
-                        &conn,
-                        "SELECT remote_id FROM docs_collections",
-                        [],
-                        |r| r.get::<_, String>(0),
-                    )?
-                };
-                for col_remote in collections {
-                    let articles = self.provider.list_doc_articles(col_remote.clone()).await?;
-                    let mut conn = self.lock();
-                    if let Some(col_local) = local_id_str(&conn, "docs_collections", &col_remote) {
-                        for a in &articles {
-                            upsert_doc_article(&mut conn, a, col_local)?;
-                            processed += 1;
-                        }
-                    }
-                }
-                if processed > 0 {
-                    let conn = self.lock();
-                    let _ = crate::jobs::enqueue_on(
-                        &conn,
-                        "embeddings",
-                        "embed_docs_chunks",
-                        "{}",
-                        4,
-                        2,
-                    );
-                    let _ = crate::jobs::enqueue_on(
-                        &conn,
-                        "embeddings",
-                        "embed_conversation_chunks",
-                        "{}",
-                        4,
-                        2,
-                    );
-                }
-                Ok(ResourceSyncResult {
-                    resource,
-                    processed,
-                    failed: 0,
-                    error: None,
-                })
-            }
-            "user_statuses" => {
-                let users: Vec<(i64, i64)> = {
-                    let conn = self.lock();
-                    crate::db::query_rows(&conn, "SELECT id, remote_id FROM users", [], |r| {
-                        Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
-                    })?
-                };
-                let mut processed = 0;
-                for (local, remote) in users {
-                    if let Some(status) = self.provider.get_user_status(remote).await? {
-                        let conn = self.lock();
-                        upsert_user_status(&conn, local, &status)?;
-                        processed += 1;
-                    }
-                }
-                Ok(ResourceSyncResult {
-                    resource,
-                    processed,
-                    failed: 0,
-                    error: None,
-                })
-            }
+            "docs_collections" => self.sync_docs_collections(resource).await,
+            "docs_articles" => self.sync_docs_articles(resource).await,
+            "user_statuses" => self.sync_user_statuses(resource).await,
             other => Ok(ResourceSyncResult {
                 resource: other.to_string(),
                 processed: 0,
@@ -638,6 +351,310 @@ impl SyncEngine {
                 error: Some(format!("Unknown resource {other}")),
             }),
         }
+    }
+
+    async fn sync_account(&self, resource: String) -> Result<ResourceSyncResult> {
+        let me = self.provider.get_me().await?;
+        let conn = self.lock();
+        conn.execute(
+            "INSERT INTO accounts (remote_id, plan, raw_json, last_seen_at)
+             VALUES (?1, ?2, ?3, datetime('now'))
+             ON CONFLICT(remote_id) DO UPDATE SET plan = excluded.plan,
+               raw_json = excluded.raw_json, last_seen_at = datetime('now')",
+            params![
+                me.remote_id,
+                me.role,
+                serde_json::to_string(&me).unwrap_or_default()
+            ],
+        )?;
+        mirror::upsert_user(&conn, &me)?;
+        Ok(ResourceSyncResult {
+            resource,
+            processed: 1,
+            failed: 0,
+            error: None,
+        })
+    }
+    async fn sync_users(&self, resource: String) -> Result<ResourceSyncResult> {
+        let users = self.provider.list_users().await?;
+        let conn = self.lock();
+        for u in &users {
+            mirror::upsert_user(&conn, u)?;
+        }
+        Ok(ResourceSyncResult {
+            resource,
+            processed: users.len() as i64,
+            failed: 0,
+            error: None,
+        })
+    }
+    async fn sync_system_users(&self, resource: String) -> Result<ResourceSyncResult> {
+        let users = self.provider.list_system_users().await?;
+        let conn = self.lock();
+        for u in &users {
+            mirror::upsert_user(&conn, u)?;
+        }
+        Ok(ResourceSyncResult {
+            resource,
+            processed: users.len() as i64,
+            failed: 0,
+            error: None,
+        })
+    }
+    async fn sync_teams(&self, resource: String) -> Result<ResourceSyncResult> {
+        let teams = self.provider.list_teams().await?;
+        let conn = self.lock();
+        for t in &teams {
+            mirror::upsert_team(&conn, t)?;
+        }
+        Ok(ResourceSyncResult {
+            resource,
+            processed: teams.len() as i64,
+            failed: 0,
+            error: None,
+        })
+    }
+    async fn sync_mailboxes(&self, resource: String) -> Result<ResourceSyncResult> {
+        let mbs = self.provider.list_mailboxes().await?;
+        let conn = self.lock();
+        for m in &mbs {
+            mirror::upsert_mailbox(&conn, m)?;
+        }
+        Ok(ResourceSyncResult {
+            resource,
+            processed: mbs.len() as i64,
+            failed: 0,
+            error: None,
+        })
+    }
+    async fn sync_folders(&self, resource: String) -> Result<ResourceSyncResult> {
+        let mbs = self.provider.list_mailboxes().await?;
+        let mut processed = 0;
+        for m in &mbs {
+            let folders = self.provider.list_folders(m.remote_id).await?;
+            let conn = self.lock();
+            if let Some(mailbox_local) = local_id(&conn, "mailboxes", m.remote_id) {
+                for f in &folders {
+                    upsert_folder(&conn, mailbox_local, f)?;
+                    processed += 1;
+                }
+            }
+        }
+        Ok(ResourceSyncResult {
+            resource,
+            processed,
+            failed: 0,
+            error: None,
+        })
+    }
+    async fn sync_tags(&self, resource: String) -> Result<ResourceSyncResult> {
+        let tags = self.provider.list_tags().await?;
+        let conn = self.lock();
+        for t in &tags {
+            mirror::upsert_tag(&conn, t)?;
+        }
+        Ok(ResourceSyncResult {
+            resource,
+            processed: tags.len() as i64,
+            failed: 0,
+            error: None,
+        })
+    }
+    async fn sync_inbox_fields(&self, resource: String) -> Result<ResourceSyncResult> {
+        let mbs = self.provider.list_mailboxes().await?;
+        let mut processed = 0;
+        for m in &mbs {
+            let fields = self.provider.list_inbox_fields(m.remote_id).await?;
+            let conn = self.lock();
+            if let Some(mailbox_local) = local_id(&conn, "mailboxes", m.remote_id) {
+                for f in &fields {
+                    upsert_inbox_field(&conn, mailbox_local, f)?;
+                    processed += 1;
+                }
+            }
+        }
+        Ok(ResourceSyncResult {
+            resource,
+            processed,
+            failed: 0,
+            error: None,
+        })
+    }
+    async fn sync_customer_property_definitions(
+        &self,
+        resource: String,
+    ) -> Result<ResourceSyncResult> {
+        let defs = self.provider.list_customer_property_definitions().await?;
+        let conn = self.lock();
+        upsert_property_definitions(&conn, "customer_property_definitions", &defs)?;
+        Ok(ResourceSyncResult {
+            resource,
+            processed: defs.len() as i64,
+            failed: 0,
+            error: None,
+        })
+    }
+    async fn sync_organization_property_definitions(
+        &self,
+        resource: String,
+    ) -> Result<ResourceSyncResult> {
+        let defs = self
+            .provider
+            .list_organization_property_definitions()
+            .await?;
+        let conn = self.lock();
+        upsert_property_definitions(&conn, "organization_property_definitions", &defs)?;
+        Ok(ResourceSyncResult {
+            resource,
+            processed: defs.len() as i64,
+            failed: 0,
+            error: None,
+        })
+    }
+    async fn sync_organizations(&self, resource: String) -> Result<ResourceSyncResult> {
+        let orgs = self.provider.list_organizations().await?;
+        let conn = self.lock();
+        let mut seen: Vec<i64> = Vec::with_capacity(orgs.len());
+        for o in &orgs {
+            upsert_organization(&conn, o)?;
+            seen.push(o.remote_id);
+        }
+        let pruned = prune_missing_rows(&conn, "organizations", &seen)?;
+        if pruned > 0 {
+            tracing::debug!(deleted = pruned, "organizations removed platform-side");
+        }
+        Ok(ResourceSyncResult {
+            resource,
+            processed: orgs.len() as i64,
+            failed: 0,
+            error: None,
+        })
+    }
+    async fn sync_saved_replies(&self, resource: String) -> Result<ResourceSyncResult> {
+        let mbs = self.provider.list_mailboxes().await?;
+        let mut processed = 0;
+        let mut seen: Vec<i64> = Vec::new();
+        for m in &mbs {
+            let replies = self.provider.list_saved_replies(m.remote_id).await?;
+            let conn = self.lock();
+            let mailbox_local = local_id(&conn, "mailboxes", m.remote_id);
+            for r in &replies {
+                upsert_saved_reply(&conn, mailbox_local, r)?;
+                seen.push(r.remote_id);
+                processed += 1;
+            }
+        }
+        {
+            let conn = self.lock();
+            let pruned = prune_missing_rows(&conn, "saved_replies", &seen)?;
+            if pruned > 0 {
+                tracing::debug!(deleted = pruned, "saved replies removed platform-side");
+            }
+        }
+        Ok(ResourceSyncResult {
+            resource,
+            processed,
+            failed: 0,
+            error: None,
+        })
+    }
+    async fn sync_workflows(&self, resource: String) -> Result<ResourceSyncResult> {
+        let wfs = self.provider.list_workflows().await?;
+        let conn = self.lock();
+        let mut seen: Vec<i64> = Vec::with_capacity(wfs.len());
+        for w in &wfs {
+            upsert_workflow(&conn, w)?;
+            seen.push(w.remote_id);
+        }
+        let pruned = prune_missing_rows(&conn, "workflows", &seen)?;
+        if pruned > 0 {
+            tracing::debug!(deleted = pruned, "workflows removed platform-side");
+        }
+        Ok(ResourceSyncResult {
+            resource,
+            processed: wfs.len() as i64,
+            failed: 0,
+            error: None,
+        })
+    }
+    async fn sync_docs_collections(&self, resource: String) -> Result<ResourceSyncResult> {
+        let collections = self.provider.list_doc_collections().await?;
+        let mut processed = 0;
+        for col in &collections {
+            let categories = self
+                .provider
+                .list_doc_categories(col.remote_id.clone())
+                .await?;
+            let conn = self.lock();
+            let local = upsert_doc_collection(&conn, col)?;
+            upsert_doc_categories(&conn, local, &categories)?;
+            processed += 1;
+        }
+        Ok(ResourceSyncResult {
+            resource,
+            processed,
+            failed: 0,
+            error: None,
+        })
+    }
+    async fn sync_docs_articles(&self, resource: String) -> Result<ResourceSyncResult> {
+        let mut processed = 0;
+        let collections: Vec<String> = {
+            let conn = self.lock();
+            crate::db::query_rows(&conn, "SELECT remote_id FROM docs_collections", [], |r| {
+                r.get::<_, String>(0)
+            })?
+        };
+        for col_remote in collections {
+            let articles = self.provider.list_doc_articles(col_remote.clone()).await?;
+            let mut conn = self.lock();
+            if let Some(col_local) = local_id_str(&conn, "docs_collections", &col_remote) {
+                for a in &articles {
+                    upsert_doc_article(&mut conn, a, col_local)?;
+                    processed += 1;
+                }
+            }
+        }
+        if processed > 0 {
+            let conn = self.lock();
+            let _ = crate::jobs::enqueue_on(&conn, "embeddings", "embed_docs_chunks", "{}", 4, 2);
+            let _ = crate::jobs::enqueue_on(
+                &conn,
+                "embeddings",
+                "embed_conversation_chunks",
+                "{}",
+                4,
+                2,
+            );
+        }
+        Ok(ResourceSyncResult {
+            resource,
+            processed,
+            failed: 0,
+            error: None,
+        })
+    }
+    async fn sync_user_statuses(&self, resource: String) -> Result<ResourceSyncResult> {
+        let users: Vec<(i64, i64)> = {
+            let conn = self.lock();
+            crate::db::query_rows(&conn, "SELECT id, remote_id FROM users", [], |r| {
+                Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
+            })?
+        };
+        let mut processed = 0;
+        for (local, remote) in users {
+            if let Some(status) = self.provider.get_user_status(remote).await? {
+                let conn = self.lock();
+                upsert_user_status(&conn, local, &status)?;
+                processed += 1;
+            }
+        }
+        Ok(ResourceSyncResult {
+            resource,
+            processed,
+            failed: 0,
+            error: None,
+        })
     }
 
     pub(super) async fn sync_customers(

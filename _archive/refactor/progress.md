@@ -1,48 +1,46 @@
 # Refactor Progress — Live State
 
-Last updated: session 14 (2026-11-14). Update rule: every session updates
+Last updated: session 15 (2026-11-14). Update rule: every session updates
 this file before ending. Statuses: `pending` / `in_progress` / `done` /
 `terminal` (done + closed in `complete.md`) / `dropped` (with reason in
 `memory.md`).
 
 ## CURRENT POINTER
 
-- Next task: **R4.2-b — decomposition continuation: the UI T-composition
-  twins + the two remaining dispatch fns** (see the R4.2 verdict table for
-  the exact queue). R4.2-a landed in session 14 (battery green; CI row
-  rides the push): six CORE mega-fn splits, zero app-shell source contact
-  (pixel-neutral by construction). R4.2-b notes for the executor: the
-  queue is incidents.rs ui (527), ai_center hub_ui (481), organizations
-  ui (393), inbox copilot_pane_ui (389, D-13), settings helpscout_ui
-  (330), diagnostics ui (322), inbox list_ui (322, D-13), inbox
-  composer_pane_ui (239, D-13), design/mod.rs composer (D-13), plus
-  workers/mod.rs execute_outbound (386) and sync_engine/loops.rs
-  sync_resource (333) via the execute_job-proven recipe (extract only arms
-  WITHOUT early `return Ok(())` — those skips job completion and must
-  stay inline; D-23). UI discipline: extract-fn along existing section
-  seams, pixel-neutral by construction (identical widget-call sequence),
-  kittest goldens are the CI drift gate (F-06: no local Vulkan); suite
-  file names and test fn names stay stable (invariant 5); delete the
-  arm's `#[allow(clippy::too_many_lines)]` only when its fn is under the
-  lint threshold after the split; new code comment-free (constraint 3).
-- Pre-flight [session 14]: run#345 green on `155c277` (the session-13
-  addendum head — the standard docs-only preflight gate). R4.2-a executed
-  on that green base and is now itself CI-VERIFIED (addendum, session 14):
-  run#346 (id 43585107897) green on `fa03cad`, all four lanes incl. the
-  kittest drift gate. Green base for R4.2-b: this addendum head's own
-  docs-only run (the standard next-session preflight gate).
-- Session counter: 14 completed (R1 terminal; R2 TERMINAL; R3 TERMINAL
+- Next task: **R4.3 — visibility: minimize `pub` to `pub(crate)`/
+  `pub(super)`** (plan §7 R4). Census-first per the standing discipline:
+  run a pub-surface scanner (every `pub fn`/`pub struct`/`pub mod` in
+  core + app-shell + xtask; grep the consumers tree-wide) BEFORE sizing
+  the batch — the last eight batches' plan letters overcounted every
+  time. Fold only where a symbol has zero out-of-crate consumers.
+  Watch for: `pub mod` re-export seams (core's `pub mod catalog` re-
+  export rides app-shell usage), bench/xtask consumers, and the
+  `pub(crate)`↔`pub(super)` preference inside nested module trees.
+  R4.4 (magic values → catalog constants) and R4.5 (file splits for the
+  >2K-line files) queue behind it.
+- Pre-flight [session 15]: run#347 green on `a18a8ea` (the session-14
+  addendum head — the standard docs-only preflight gate). R4.2-b
+  executed on that green base (battery green; CI row rides this push):
+  all 11 queued fns split — see the R4.2 verdict table's executed
+  rows and the session-15 log. Green base for R4.3: this head's own
+  CI run (monitor; addendum records it).
+- Session counter: 15 completed (R1 terminal; R2 TERMINAL; R3 TERMINAL
   — R3.1 run#332, R3.2 run#335, R3.3 run#337, R3.4 run#339, R3.5
-  zero-motion run#341, R3.6 run#342; R4.1 run#344; R4.2-a run#346).
-- Environment: session 14 was ANOTHER full reset — repo re-cloned via
-  github-reconnect.sh; toolchain SURVIVED at /tmp/my-project/
-  {rustup,cargo-home} (the persistent-dir location MOVED this reset —
-  handover §3's path is stale again; export RUSTUP_HOME=/tmp/my-project/
-  rustup CARGO_HOME=/tmp/my-project/cargo-home PATH=/tmp/my-project/
-  cargo-home/bin:$PATH in EVERY bash call); cold core-crate check ~7 min
-  first time; warm lanes fast; the workspace test lane EXCEEDS a single
-  600s tool call (split it: core --lib, core --tests, xtask; app-shell
-  covered by the first partial) — G-05 applied twice (disk tripped 81%).
+  zero-motion run#341, R3.6 run#342; R4.1 run#344; R4.2-a run#346;
+  R4.2-b rides this push).
+- Environment: session 15 was ANOTHER full reset — repo re-cloned via
+  github-reconnect.sh; toolchain SURVIVED again at /tmp/my-project/
+  {rustup,cargo-home} (export RUSTUP_HOME=/tmp/my-project/rustup
+  CARGO_HOME=/tmp/my-project/cargo-home PATH=/tmp/my-project/
+  cargo-home/bin:$PATH in EVERY bash call); cold core-crate check
+  ~7 min once, warm lanes fast; ONE test lane per tool call (core lib
+  470s, sandbox 464s, app-shell 270s); G-05 applied twice (disk
+  peaked 79% mid-battery; incremental rm between the sandbox and
+  app-shell lanes). Session-15 discovery: the r42b_split_*.py scripts
+  in tool-results were pre-written by the context-exhausted session
+  that queued R4.2-b — they were UNVERIFIED DRAFTS; three slicing
+  bugs + two design bugs fixed before/while running (see session-15
+  log + memory G-12): compile-and-verify every handed-over transform.
 
 ## Task states
 
@@ -72,7 +70,8 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 | R3.5 PageKey tables | terminal (session 12) | census: ZERO folds land — the attribute layer is already single-sourced (label() str site, Icon::for_page Icon site, apply_invalidations field-dispatch, render-dispatch heterogeneous payloads — four disjoint payload shapes, no ≥2 same-shape pair); titles/nav-labels are decoupled roles (2 intentional divergences); NAV_GROUPS + all() already tables; drill-slug pair queued to R3.6 — see complete.md |
 | R3.6 cross-crate vocabulary | terminal (session 12) | census: ZERO core↔catalog const duplication (plan letter overcounted — 6th consecutive correction); real debt = 8 inline-parse twins of existing catalog parse fns (GraphNodeKind ×7 + AiAttributeKey ×1) + the drill-slug wire pair → `catalog::routes` (5 consts, new module); +24/−44 +6 (net −20); battery green (520/528/293+2/56, strip-check 207/207) — see complete.md |
 | R4.1 naming | terminal (session 13) | census (r41_census.py): 341 bool decls (272 prod) + 118 bool-returning fns + 478 short-id kinds + 232 suspicious-word hits; SEVENTH consecutive census correction — the tree's naming was overwhelmingly honest; 10 surgical renames + 1 deletion (aa_get, D-18 rule): temp→temperature, already→already_exists/already_queued, has→has_column, known/conversation→*_exists, palette_take→query_committed, right→align_right ×3, drill→drillable, assistant→from_assistant, ins→stmt ×2; keep rulings in the R4.1 verdict table; dt_cell ×3 fold candidate recorded, not acted; battery green (520/528/293+2/56, clippy x2, gate, icons, strip-check 207/207); CI run#344 green on `1b653d4` — see complete.md |
-| R4.2 decomposition (batch a) | in_progress (session 14) | census (r42_census.py, cfg-aware fn-span scanner): 3,277 prod fns / 991 test fns; top-20 censused; 6 CORE mega-fns split (execute 1051→79 dispatch + 22 tool fns; derived_edges_touching 686→26 + 11 Kind fns + 4 module helpers + 2 epilogue fns; apply_m046 405→15 manifest + ensure_fk + 10 data consts; execute_job 3 fat arms→3 methods incl. embed×3 fold; build_support_health_report 465→34 manifest + 9 domain fns; analyze_friction 410→manifest + 6 finding fns + finding helper); 6 keeps + 11 queued to R4.2-b (verdict table below); battery green (520/528/293+2/56, clippy ×2, gate, icons, strip 207/207); CI run#346 green on `fa03cad` (all 4 lanes incl. kittest drift gate); D-23 |
+| R4.2 decomposition (batch a) | done (session 14) | census (r42_census.py, cfg-aware fn-span scanner): 3,277 prod fns / 991 test fns; top-20 censused; 6 CORE mega-fns split (execute 1051→79 dispatch + 22 tool fns; derived_edges_touching 686→26 + 11 Kind fns + 4 module helpers + 2 epilogue fns; apply_m046 405→15 manifest + ensure_fk + 10 data consts; execute_job 3 fat arms→3 methods incl. embed×3 fold; build_support_health_report 465→34 manifest + 9 domain fns; analyze_friction 410→manifest + 6 finding fns + finding helper); 6 keeps + 11 queued to R4.2-b (verdict table below); battery green (520/528/293+2/56, clippy ×2, gate, icons, strip 207/207); CI run#346 green on `fa03cad` (all 4 lanes incl. kittest drift gate); D-23 |
+| R4.2 decomposition (batch b) | done (session 15) | all 11 queued fns split: execute_outbound 390→~86-line dispatcher + 6 send_* arm methods + payload_num/payload_str_or module fns (closures promoted per the batch-a recipe); sync_resource 331→19-arm dispatcher table + 16 sync_* methods (conversations/threads delegations + the `customers` since-seam + the unknown-resource fallback stay inline); incidents ui 527→~180 dispatcher + filter_controls/empty_list_ui/lifecycle_card_ui/linked_column_ui/info_column_ui methods + incident_row/incident_detail_header module fns; ai_center hub_ui 481→35-line dispatcher + 8 methods (endpoints card/row/key-edit/price/add-form/roles/features/ledger); organizations ui 393→~170 dispatcher + org_form_card_ui method + org_row/org_detail_header_ui/members_card_ui module fns; inbox list_ui→search_filter_ui/list_toolbar_ui/conversation_rows_ui methods, copilot_pane_ui→copilot_cards_ui/copilot_lmstudio_ui/assistant_ui methods, composer_pane_ui→enqueue_composer_tool/apply_composer_act/mention_popup_ui methods + composer_tool_row module fn + ToolAction enum hoisted to module scope; settings helpscout_ui→4 card methods; diagnostics ui→event_log_card_ui method + audit_trail/sync_reports/outbound_deliveries_card_ui module fns; design composer→composer_header_row/composer_footer_row module fns; ALL 4 too_many_lines allows deleted (every post-split fn under the 100-line threshold — clippy -D warnings green); battery green at EXACT baselines (520/528/293+2/56, clippy ×2, gate, icons, strip 207/207); pixel-neutrality verified locally by the widget-call multiset comparison (design::/ui. call multisets byte-identical old-vs-new on all 9 files after fixes — D-24); the CI kittest drift gate rides this push; D-23/D-24 |
 | R4.3–R4.5 clean code | pending | see plan §7 R4 |
 | R5.1–R5.3 guardrails | pending (optional, stage-gated) | |
 | R6.1–R6.2 polish + close | pending | |
@@ -270,24 +269,24 @@ Top-20 by line span (census order) and the batch-a disposition:
 |---|---|---|---|
 | ai_tools/execute.rs `execute` | 1051 | split | 26-arm tool dispatch → 22 `tool_<name>` fns (params = exactly what each arm uses; conn/args/limit/index variants); dispatcher now 79 lines; every arm body moved verbatim (early `return json!` arms keep semantics — the arm value IS the fn result) |
 | support_graph/derived.rs `derived_edges_touching` | 686 | split | match-kind dispatch → 11 `<kind>_edges` fns + 2 epilogue fns (incident_related / custom_object_links) + closures promoted to module fns (one_i64, many_i64, product_id_by_name, mirror) + BRANCH_CAP to module const; dispatcher 26 lines; per-arm `Result` preserves the `?` abort order |
-| pages/incidents.rs `ui` | 527 | queued (R4.2-b) | UI T-composition twin — zero app-shell contact in batch a |
+| pages/incidents.rs `ui` | 527 | split (b) | dispatcher ~180 lines keeps prologue/table/pick/detail-panel scaffolding; 5 methods (filter_controls = the filter_bar closure body; empty_list_ui; lifecycle_card_ui → Option<NavRequest>; linked_column_ui → Option<NavRequest>; info_column_ui incl. the add-note card — needed a db param the draft missed) + module fns incident_row (→Option<i64> picked) / incident_detail_header; the description-fields for-loop and columns(2) scaffolding stay in the dispatcher (they ARE the panel structure) |
 | workers/execute.rs `execute_job` | 495 | split (partial) | 3 fat arms → methods along the file's own run_*_job seam: sync_conversation_ratings_job (63→thin arm+55-line fn), embed_chunks_job (3 structurally-identical embed arms folded to ONE fn-pointer-parameterized method — the fn's own DRY win), automation_approval_job (57); early-`return Ok(())` arms stay inline (that return SKIPS job completion — extraction would change the fail-path contract; D-23); post-split ~376 = 40-arm dispatch table, thin arms are dispatch data |
 | migrations/db_breadth.rs `add_missing_reference_columns` | 489 | keep | flat schema manifest — every line is one declarative `add()` call; per-table sub-fns would be artificial seams over data (same class as icons::draw); the `add` helper is already the shared seam |
-| pages/ai_center.rs `hub_ui` | 481 | queued (R4.2-b) | UI twin |
+| pages/ai_center.rs `hub_ui` | 481 | split (b) | 35-line dispatcher calls 4 card methods in order; hub_endpoints_card_ui carries the card + per-endpoint row/key-edit/price/add-form methods; roles/features/ledger cards are single methods (features needs no tokens — verified); `let t` re-threaded per-card (tokens() is a static getter — behavior-neutral); the draft's double-card wrapper bug caught by the multiset check and flattened to direct calls (D-24) |
 | people_store/health.rs `build_support_health_report` | 465 | split | 9 metric-domain fns (volume/waiting/first_response/bad_rating/escalation/customer_effort/repeated_issue/unresolved_known/incident) returning metrics / (metrics,flags) / (metrics,flags,exposure) tuples — no out-parameters (§5.3); the `ev` closure deleted, call sites → `evidence_ids(conn, conv_scope, subject_id, …)`; dispatcher = 34-line manifest + the report json |
 | quality/mod.rs `analyze_friction` | 410 | split | 6 finding fns (repeated_customer_explanations / repeated_agent_questions / troubleshooting_loop / repeated_handoffs / repeated_unresolved / duplicated_request) each returning `Vec<finding-tuple>`; `push` closure → `finding()` helper fn; persistence + report mapping stay in the dispatcher |
 | migrations/mirror_parity.rs `apply_m046` | 405 | split | 10 `if !fk_declared { rebuild_table }` scaffolds → ONE `ensure_fk` helper + 10 `M046_<TABLE>: Rebuild<'static>` data consts; apply_m046 is now a 15-line manifest (rebuild_customers + 10 ensure_fk + version stamp); m044/m045 keep their unconditional rebuild form (no guard to fold) |
 | icons.rs `draw` | 396 | keep | 34-arm icon dispatch table, arms 3-28 lines each — the arms ARE the data; per-icon fns with geometry params would add signature noise for zero abstraction gain |
 | sync_schema.rs `apply_inner` | 396 | keep | guarded one-shot migration sequence — flat manifest class |
-| pages/organizations.rs `ui` | 393 | queued (R4.2-b) | UI twin |
-| pages/inbox.rs `copilot_pane_ui` | 389 | queued (R4.2-b) | D-13 too_many_lines site — UI twin |
-| workers/mod.rs `execute_outbound` | 386 | queued (R4.2-b) | execute_job-proven recipe applies (arm extraction; early-return arms stay) |
+| pages/organizations.rs `ui` | 393 | split (b) | dispatcher ~170 lines; org_row module fn returns (pick, edit, delete) triple via the row-closure re-thread; org_detail_header_ui returns (edit_req, delete_req); members_card_ui → Option<NavRequest> (member_request already returns Option — the draft's Some() wrap would have double-Optioned; fixed); org_form_card_ui method carries the form card verbatim; the draft's orphan `);` slicing bug fixed (D-24) |
+| pages/inbox.rs `copilot_pane_ui` | 389 | split (b) | dispatcher keeps the header/hint/detail-gate/ScrollArea/error+report gates; copilot_cards_ui / copilot_lmstudio_ui / assistant_ui methods carry the three sections verbatim; allow deleted (dispatcher ~90 lines) |
+| workers/mod.rs `execute_outbound` | 386 | split (b) | 8-arm match-expression producing Result<String> → 6 send_* methods (create_reply/create_note/update_status/assign/update_tags/snooze; unsnooze arm and the unknown-kind Err stay inline — dispatch data); the num/str_or closures promoted to module fns payload_num/payload_str_or (the batch-a closure-promotion recipe); no arm carried an early return so the D-23 early-return rule never triggered here |
 | ai_pipeline/interaction.rs `analyze_interaction` | 376 | keep | two-stage LLM state machine (stage1 heuristic merge → stage2 rec) with dense local threading (obs/latencies/usage/merged/stored/stage_current) — extraction needs a context struct = re-architecture, not decomposition; one level of abstraction already holds (the pipeline) |
 | migrations/db_breadth.rs `create_missing_reference_tables` | 342 | keep | flat schema manifest class |
-| sync_engine/loops.rs `sync_resource` | 333 | queued (R4.2-b) | dispatch-arm recipe applies |
-| pages/settings.rs `helpscout_ui` | 330 | queued (R4.2-b) | UI twin |
+| sync_engine/loops.rs `sync_resource` | 333 | split (b) | 19-arm match → 16 sync_*(&self, resource: String) methods; conversations/threads delegation arms + the customers since-seam + the unknown-resource fallback stay inline (dispatch data); all arms were value-producing so the D-23 early-return rule never triggered; uniform method form chosen over folds because the debug-message strings differ per arm (organizations/workflows/saved_replies) — verbatim-move discipline beats a parameterized fold that would mint new strings |
+| pages/settings.rs `helpscout_ui` | 330 | split (b) | 4 card methods (hs_connection_card_ui/hs_credentials_card_ui with &HelpScoutStatus threaded from the dispatcher's prologue let; webhook_relay_card_ui; workspace_purge_card_ui); connection_doctor_ui call + add_space rhythm stays in the dispatcher; the draft's double-card wrapper bug caught by the multiset check and flattened to direct calls (D-24) |
 | copilot.rs `chat` | 324 | keep | single conversation loop — one abstraction level (rounds of chat); extraction threads 9 accumulators for no gain |
-| pages/diagnostics.rs `ui` | 322 | queued (R4.2-b) | UI twin |
+| pages/diagnostics.rs `ui` | 322 | split (b) | event_log_card_ui method (events param + returns the clear_requested flag); audit_trail_card_ui/sync_reports_card_ui/outbound_deliveries_card_ui module fns (pure data renders — no self); prologue keeps events/runs/audit clones + message/error flush |
 
 Batch-a mechanics: all six splits executed by line-boundary Python
 transforms (tool-results r42_split1..6.py) with hard asserts on every
@@ -302,6 +301,63 @@ trailing-whitespace strip (regex-introduced) that had tripped a rustfmt
 internal error.
 
 ## Session log
+
+### Session 15 — 2026-11-14
+- Pre-flight: run#347 green on the session-14 addendum head `a18a8ea`
+  (the standard docs-only preflight gate) — R4.2-b's green base.
+- Environment: full reset AGAIN — repo re-cloned via github-reconnect.sh;
+  toolchain survived at /tmp/my-project/{rustup,cargo-home} (same
+  location as session 14; exports re-applied per call).
+- Discovery: the context-exhausted session that queued R4.2-b had
+  PRE-WRITTEN the nine transform scripts (tool-results
+  r42b_split_{outbound,loops,incidents,aicenter,orgs,settings,
+  diagnostics,inbox,design}.py, timestamps 11:47–12:14 vs the 10:49
+  addendum push) but never ran them — no compile, no battery, no
+  commit. Treated as UNVERIFIED DRAFTS: line-by-line script review
+  against source BEFORE running found three slicing bugs (outbound's
+  update_tags body kept the arm label + missed the match's closing
+  brace; orgs kept an orphan `);` after the form-card replacement;
+  design kept composer's now-unused `use egui::RichText as R`) plus
+  a type bug (orgs members_card Some() around member_request, which
+  already returns Option — would have double-Optioned); scripts
+  patched, then run against the fresh a18a8ea clone (all boundary
+  asserts green).
+- Post-run verification loop: cold core check 7m06s → outbound+loops
+  compiled CLEAN first try; app-shell check surfaced the remaining
+  draft defects: incidents' incident_row missing the `);` of the
+  allocate_ui_with_layout call (slice cut at the closure body, not
+  the statement); info_column_ui missing the db param its add-note
+  card needs; hub_ledger_card_ui carrying an unused db param; 12
+  needlessly-borrowed `&incident` sites (the batch-a class).
+- PIXEL-NEUTRALITY GATE (new, D-24): widget-call multiset comparison
+  — for each of the 9 touched files, the multiset of `design::*`
+  calls + `ui.*` method calls old-vs-new must be byte-identical. It
+  PASSED 7 files and CAUGHT the two draft DESIGN bugs the compile
+  loop cannot see: ai_center +4 and settings +4 card_titled_wide —
+  the scripts had wrapped each moved card call in ANOTHER
+  card_titled_wide shell (double-carded UI). Both flattened to direct
+  method calls; the counts returned to baseline. ai_center's +2
+  design::tokens is the static-getter re-thread (13→13 card calls,
+  9→11 tokens — getter, no pixels — verified against source).
+- Battery (final, post-fixes): gate clean, fmt --check, clippy
+  workspace + sandbox (-D warnings), core lib 520 ✓ (470s), core
+  --tests (520 again — crates/core/tests/ does not exist in the repo;
+  all tests are inline), sandbox 528 ✓ (464s), app-shell 293+2 ✓
+  (270s, 26 kittest binaries at 0 — F-10), catalog 0 + xtask 56 ✓,
+  verify-icons ✓, strip-comments --check 207/207 ✓. G-05 applied
+  twice (disk peaked 79% before the app-shell link; incremental
+  removed, back to 3.0G free).
+- Diff class review: 9 files, +2335/−2065 — every hunk is a
+  mechanical move (arm/fn/closure-body extraction with the
+  documented re-thread rewrites: pick→picked locals, panel_nav→nav
+  locals, columns[0]→column params, ToolAction enum hoisted to module
+  scope, token/t/status/db/&Value threading), the two flattened
+  wrappers, or the four allow deletions; the 4 too_many_lines allows
+  deleted with clippy -D warnings green proving every post-split fn
+  under the 100-line threshold; no test changes (520/528/293+2/56 at
+  EXACT baselines).
+- Commits: this push (code + ledger, battery-green). CI: rides the
+  push — monitor; the addendum will record the run number.
 
 ### Session 14 — 2026-11-14
 - Pre-flight: run#345 green on the session-13 addendum head `155c277`

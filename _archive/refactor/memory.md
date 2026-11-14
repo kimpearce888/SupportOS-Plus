@@ -651,3 +651,37 @@ session ends by adding what the next session must not have to rediscover.
     construction (identical widget-call sequence); the CI kittest
     drift gate is the verifier (F-06); delete a D-13
     too_many_lines allow only when its fn drops under the threshold.
+
+- **D-24 (session 15, R4.2-b).** Pixel-neutrality verification recipe for
+  mechanical UI refactors (standing alongside D-05/D-06): after every
+  app-shell extraction batch, compare the per-file MULTISET of widget
+  calls (`design::*` functions + `ui.*` methods) between `git show
+  HEAD:<file>` and the working tree — byte-identical multisets are a
+  necessary condition for pixel-neutrality and the check is cheap. It
+  caught the one bug class the compile loop cannot see: a transform
+  that wraps a moved card call in ANOTHER `card_titled_wide` shell
+  (double-carded UI — compiles, renders differently). Known
+  exceptions that legitimately shift counts and must be verified
+  against source instead: `design::tokens` re-threading (static
+  getter, no pixels) and statement-level closures whose opener/closer
+  stay in the dispatcher. The CI kittest drift gate remains the final
+  verifier (F-06); the multiset check is the local pre-gate. R4.2-b
+  end state: all 11 queued fns split, all four D-13 too_many_lines
+  sites' allows deleted (clippy -D warnings green = under the
+  100-line threshold), every post-split fn private (fn, not pub).
+- **G-12 (session 15).** Transform scripts handed across sessions are
+  DRAFTS, never verified code. The context-exhausted session that
+  queued R4.2-b pre-wrote nine r42b_split_*.py scripts and died before
+  running any of them; boundary asserts did NOT catch four of the
+  seven real defects (two of them — the double-card wrappers — were
+  DESIGN errors invisible to any line-based assert). Standing rule:
+  read every handed-over transform against source before running it,
+  then compile, then run the D-24 multiset check, then battery. A
+  script's asserts prove the INPUT matched expectations, not that the
+  OUTPUT is sound.
+- **G-13 (session 15).** `crates/core/tests/` does not exist in the
+  repo (the audit-era e2e harness files were sandbox-side copies that
+  restore.sh re-injected into old clones; a fresh clone has no
+  integration binaries). The core test lane IS `--lib` (520 / 528
+  sandbox); a separate `--tests` run is a no-op that re-runs the lib
+  lane and costs another ~8 min. Don't run it twice.

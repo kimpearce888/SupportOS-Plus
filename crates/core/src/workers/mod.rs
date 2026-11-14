@@ -504,23 +504,9 @@ impl WorkerManager {
             return;
         }
 
-        let num = |key: &str| -> Option<i64> {
-            payload.get(key).and_then(|v| v.as_i64()).or_else(|| {
-                payload
-                    .get(key)
-                    .and_then(|v| v.as_str())
-                    .and_then(|s| s.parse().ok())
-            })
-        };
-        let str_or = |key: &str, fallback: &str| -> String {
-            payload
-                .get(key)
-                .and_then(|v| v.as_str())
-                .unwrap_or(fallback)
-                .to_string()
-        };
-
-        let conversation_local = job.conversation_local_id.or_else(|| num("conversationId"));
+        let conversation_local = job
+            .conversation_local_id
+            .or_else(|| outbound_num(&payload, "conversationId"));
         let Some(conversation_local) = conversation_local else {
             let conn = self.lock();
             let _ =
@@ -554,200 +540,14 @@ impl WorkerManager {
         let summary = format!("{} conversation {remote_id}", job.kind);
         let result: Result<String> = match job.kind.as_str() {
             "create_reply" => {
-                let text = str_or("text", "");
-                if text.trim().is_empty() {
-                    Err(Error::Other("reply text is empty".into()))
-                } else {
-                    let cc: Vec<String> = payload["cc"]
-                        .as_array()
-                        .map(|a| {
-                            a.iter()
-                                .filter_map(|v| v.as_str().map(str::to_string))
-                                .collect()
-                        })
-                        .unwrap_or_default();
-                    let bcc: Vec<String> = payload["bcc"]
-                        .as_array()
-                        .map(|a| {
-                            a.iter()
-                                .filter_map(|v| v.as_str().map(str::to_string))
-                                .collect()
-                        })
-                        .unwrap_or_default();
-                    let status_after = payload["statusAfter"]
-                        .as_str()
-                        .filter(|s| !s.is_empty())
-                        .map(str::to_string);
-                    let assign_to = num("assignTo");
-                    let customer_remote = if customer_remote.is_some() {
-                        customer_remote
-                    } else {
-                        match self.provider.get_conversation(remote_id).await {
-                            Ok(Some(conv)) if conv.customer_id > 0 => {
-                                let cust_remote = conv.customer_id;
-                                {
-                                    let conn = self.lock();
-                                    if let Some(customer_local) = crate::sync_engine::local_id(
-                                        &conn,
-                                        "customers",
-                                        cust_remote,
-                                    ) {
-                                        let _ = conn.execute(
-                                            "UPDATE conversations SET customer_local_id = ?1
-                                               WHERE id = ?2 AND customer_local_id IS NULL",
-                                            rusqlite::params![customer_local, conversation_local],
-                                        );
-                                    }
-                                }
-                                tracing::info!(
-                                    remote_id,
-                                    customer_remote_id = cust_remote,
-                                    "reply dispatch: customer resolved from the live conversation \
-                                     (mirror row repaired)"
-                                );
-                                Some(cust_remote)
-                            }
-                            Ok(_) => None,
-                            Err(e) => {
-                                tracing::warn!(
-                                    error = %e,
-                                    "reply dispatch: could not resolve the customer from the API"
-                                );
-                                None
-                            }
-                        }
-                    };
-                    match customer_remote {
-                        Some(customer_id) => self
-                            .provider
-                            .create_reply_thread(CreateThreadInput {
-                                conversation_id: remote_id,
-                                text,
-                                draft: false,
-                                cc,
-                                bcc,
-                                status_after,
-                                assign_to,
-                                customer_id: Some(customer_id),
-                            })
-                            .await
-                            .map(|created| {
-                                format!("reply delivered (thread {})", created.thread_id)
-                            }),
-                        None => Err(Error::Other(
-                            "the reply cannot be delivered: Help Scout requires the customer \
-                             being replied to, and this conversation has no customer in the \
-                             local mirror or on the server (it may have been deleted or \
-                             merged). Refresh the conversation and retry."
-                                .into(),
-                        )),
-                    }
-                }
+                self.send_create_reply(&payload, remote_id, customer_remote, conversation_local)
+                    .await
             }
-            "create_note" => {
-                let text = str_or("text", "");
-                if text.trim().is_empty() {
-                    Err(Error::Other("note text is empty".into()))
-                } else {
-                    self.provider
-                        .create_note_thread(CreateThreadInput {
-                            conversation_id: remote_id,
-                            text,
-                            draft: false,
-                            cc: vec![],
-                            bcc: vec![],
-                            status_after: None,
-                            assign_to: None,
-                            customer_id: None,
-                        })
-                        .await
-                        .map(|created| format!("note delivered (thread {})", created.thread_id))
-                }
-            }
-            "update_status" => {
-                let status = str_or("status", "");
-                if !matches!(status.as_str(), "active" | "pending" | "closed" | "spam") {
-                    Err(Error::Other(format!("invalid status {status}").into()))
-                } else {
-                    self.provider
-                        .update_conversation(
-                            remote_id,
-                            ConversationPatch {
-                                status: Some(status.clone()),
-                                ..Default::default()
-                            },
-                        )
-                        .await
-                        .map(|_| format!("status set to {status}"))
-                }
-            }
-            "assign" => {
-                let user_local = num("userId");
-                let assign_remote = user_local.and_then(|local| {
-                    let conn = self.lock();
-                    conn.query_row(
-                        "SELECT remote_id FROM users WHERE id = ?1",
-                        rusqlite::params![local],
-                        |r| r.get::<_, i64>(0),
-                    )
-                    .ok()
-                });
-                if user_local.is_some() && assign_remote.is_none() {
-                    Err(Error::Other(
-                        "assignee is not a synced Help Scout user (cannot assign remotely)".into(),
-                    ))
-                } else {
-                    self.provider
-                        .update_conversation(
-                            remote_id,
-                            ConversationPatch {
-                                assign_to: Some(assign_remote),
-                                ..Default::default()
-                            },
-                        )
-                        .await
-                        .map(|_| match assign_remote {
-                            Some(remote) => format!("assigned to user {remote}"),
-                            None => "unassigned".to_string(),
-                        })
-                }
-            }
-            "update_tags" => match payload.get("tags").and_then(|v| v.as_array()) {
-                None => Err(Error::Other("tag update job has no tags list".into())),
-                Some(values) => {
-                    let tags: Vec<String> = values
-                        .iter()
-                        .filter_map(|v| v.as_str().map(str::to_string))
-                        .collect();
-                    self.provider
-                        .update_tags(remote_id, tags)
-                        .await
-                        .map(|_| format!("tags updated on conversation {remote_id}"))
-                }
-            },
-            "snooze" => {
-                let until = payload["snoozedUntil"]
-                    .as_str()
-                    .filter(|s| !s.trim().is_empty())
-                    .map(str::to_string);
-                match until {
-                    None => Err(Error::Other(
-                        "snooze job is missing the snoozedUntil timestamp".into(),
-                    )),
-                    Some(snoozed_until) => {
-                        let unsnooze_on_reply =
-                            payload["unsnoozeOnCustomerReply"].as_bool().unwrap_or(true);
-                        self.provider
-                            .snooze_conversation(
-                                remote_id,
-                                snoozed_until.clone(),
-                                unsnooze_on_reply,
-                            )
-                            .await
-                            .map(|_| format!("snoozed until {snoozed_until}"))
-                    }
-                }
-            }
+            "create_note" => self.send_create_note(&payload, remote_id).await,
+            "update_status" => self.send_update_status(&payload, remote_id).await,
+            "assign" => self.send_assign(&payload, remote_id).await,
+            "update_tags" => self.send_update_tags(&payload, remote_id).await,
+            "snooze" => self.send_snooze(&payload, remote_id).await,
             "unsnooze" => self
                 .provider
                 .unsnooze_conversation(remote_id)
@@ -859,6 +659,218 @@ impl WorkerManager {
                     "outbound",
                     job.conversation_local_id,
                 );
+            }
+        }
+    }
+    async fn send_create_reply(
+        &self,
+        payload: &serde_json::Value,
+        remote_id: i64,
+        customer_remote: Option<i64>,
+        conversation_local: i64,
+    ) -> Result<String> {
+        let text = outbound_str_or(payload, "text", "");
+        if text.trim().is_empty() {
+            Err(Error::Other("reply text is empty".into()))
+        } else {
+            let cc: Vec<String> = payload["cc"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let bcc: Vec<String> = payload["bcc"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let status_after = payload["statusAfter"]
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .map(str::to_string);
+            let assign_to = outbound_num(payload, "assignTo");
+            let customer_remote = if customer_remote.is_some() {
+                customer_remote
+            } else {
+                match self.provider.get_conversation(remote_id).await {
+                    Ok(Some(conv)) if conv.customer_id > 0 => {
+                        let cust_remote = conv.customer_id;
+                        {
+                            let conn = self.lock();
+                            if let Some(customer_local) =
+                                crate::sync_engine::local_id(&conn, "customers", cust_remote)
+                            {
+                                let _ = conn.execute(
+                                    "UPDATE conversations SET customer_local_id = ?1
+                                       WHERE id = ?2 AND customer_local_id IS NULL",
+                                    rusqlite::params![customer_local, conversation_local],
+                                );
+                            }
+                        }
+                        tracing::info!(
+                            remote_id,
+                            customer_remote_id = cust_remote,
+                            "reply dispatch: customer resolved from the live conversation \
+                             (mirror row repaired)"
+                        );
+                        Some(cust_remote)
+                    }
+                    Ok(_) => None,
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e,
+                            "reply dispatch: could not resolve the customer from the API"
+                        );
+                        None
+                    }
+                }
+            };
+            match customer_remote {
+                Some(customer_id) => self
+                    .provider
+                    .create_reply_thread(CreateThreadInput {
+                        conversation_id: remote_id,
+                        text,
+                        draft: false,
+                        cc,
+                        bcc,
+                        status_after,
+                        assign_to,
+                        customer_id: Some(customer_id),
+                    })
+                    .await
+                    .map(|created| format!("reply delivered (thread {})", created.thread_id)),
+                None => Err(Error::Other(
+                    "the reply cannot be delivered: Help Scout requires the customer \
+                     being replied to, and this conversation has no customer in the \
+                     local mirror or on the server (it may have been deleted or \
+                     merged). Refresh the conversation and retry."
+                        .into(),
+                )),
+            }
+        }
+    }
+
+    async fn send_create_note(
+        &self,
+        payload: &serde_json::Value,
+        remote_id: i64,
+    ) -> Result<String> {
+        let text = outbound_str_or(payload, "text", "");
+        if text.trim().is_empty() {
+            Err(Error::Other("note text is empty".into()))
+        } else {
+            self.provider
+                .create_note_thread(CreateThreadInput {
+                    conversation_id: remote_id,
+                    text,
+                    draft: false,
+                    cc: vec![],
+                    bcc: vec![],
+                    status_after: None,
+                    assign_to: None,
+                    customer_id: None,
+                })
+                .await
+                .map(|created| format!("note delivered (thread {})", created.thread_id))
+        }
+    }
+
+    async fn send_update_status(
+        &self,
+        payload: &serde_json::Value,
+        remote_id: i64,
+    ) -> Result<String> {
+        let status = outbound_str_or(payload, "status", "");
+        if !matches!(status.as_str(), "active" | "pending" | "closed" | "spam") {
+            Err(Error::Other(format!("invalid status {status}").into()))
+        } else {
+            self.provider
+                .update_conversation(
+                    remote_id,
+                    ConversationPatch {
+                        status: Some(status.clone()),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .map(|_| format!("status set to {status}"))
+        }
+    }
+
+    async fn send_assign(&self, payload: &serde_json::Value, remote_id: i64) -> Result<String> {
+        let user_local = outbound_num(payload, "userId");
+        let assign_remote = user_local.and_then(|local| {
+            let conn = self.lock();
+            conn.query_row(
+                "SELECT remote_id FROM users WHERE id = ?1",
+                rusqlite::params![local],
+                |r| r.get::<_, i64>(0),
+            )
+            .ok()
+        });
+        if user_local.is_some() && assign_remote.is_none() {
+            Err(Error::Other(
+                "assignee is not a synced Help Scout user (cannot assign remotely)".into(),
+            ))
+        } else {
+            self.provider
+                .update_conversation(
+                    remote_id,
+                    ConversationPatch {
+                        assign_to: Some(assign_remote),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .map(|_| match assign_remote {
+                    Some(remote) => format!("assigned to user {remote}"),
+                    None => "unassigned".to_string(),
+                })
+        }
+    }
+
+    async fn send_update_tags(
+        &self,
+        payload: &serde_json::Value,
+        remote_id: i64,
+    ) -> Result<String> {
+        match payload.get("tags").and_then(|v| v.as_array()) {
+            None => Err(Error::Other("tag update job has no tags list".into())),
+            Some(values) => {
+                let tags: Vec<String> = values
+                    .iter()
+                    .filter_map(|v| v.as_str().map(str::to_string))
+                    .collect();
+                self.provider
+                    .update_tags(remote_id, tags)
+                    .await
+                    .map(|_| format!("tags updated on conversation {remote_id}"))
+            }
+        }
+    }
+
+    async fn send_snooze(&self, payload: &serde_json::Value, remote_id: i64) -> Result<String> {
+        let until = payload["snoozedUntil"]
+            .as_str()
+            .filter(|s| !s.trim().is_empty())
+            .map(str::to_string);
+        match until {
+            None => Err(Error::Other(
+                "snooze job is missing the snoozedUntil timestamp".into(),
+            )),
+            Some(snoozed_until) => {
+                let unsnooze_on_reply =
+                    payload["unsnoozeOnCustomerReply"].as_bool().unwrap_or(true);
+                self.provider
+                    .snooze_conversation(remote_id, snoozed_until.clone(), unsnooze_on_reply)
+                    .await
+                    .map(|_| format!("snoozed until {snoozed_until}"))
             }
         }
     }
@@ -1244,6 +1256,23 @@ impl WorkerManager {
             }
         }
     }
+}
+
+fn outbound_num(payload: &serde_json::Value, key: &str) -> Option<i64> {
+    payload.get(key).and_then(|v| v.as_i64()).or_else(|| {
+        payload
+            .get(key)
+            .and_then(|v| v.as_str())
+            .and_then(|s| s.parse().ok())
+    })
+}
+
+fn outbound_str_or(payload: &serde_json::Value, key: &str, fallback: &str) -> String {
+    payload
+        .get(key)
+        .and_then(|v| v.as_str())
+        .unwrap_or(fallback)
+        .to_string()
 }
 
 fn enqueue_activity_rebuild_repair_once(conn: &Connection) {

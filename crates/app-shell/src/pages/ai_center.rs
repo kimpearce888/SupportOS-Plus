@@ -1140,8 +1140,20 @@ impl AiCenterPage {
             self.reload_hub(db);
         }
         self.poll_probe_slot();
-        let t = design::tokens(ui);
+        self.hub_endpoints_card_ui(ui, db);
+        ui.add_space(10.0);
 
+        self.hub_roles_card_ui(ui, db);
+        ui.add_space(10.0);
+
+        self.hub_features_card_ui(ui, db);
+        ui.add_space(10.0);
+
+        self.hub_ledger_card_ui(ui);
+    }
+
+    fn hub_endpoints_card_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
+        let t = design::tokens(ui);
         design::card_titled_wide(
             ui,
             "Provider hub — endpoints",
@@ -1150,197 +1162,7 @@ impl AiCenterPage {
                 let endpoints = self.hub_endpoints.clone();
                 for endpoint in &endpoints {
                     ui.push_id(&endpoint.id, |ui| {
-                        ui.horizontal(|ui| {
-                            if endpoint.enabled {
-                                design::badge(ui, "on", BadgeTone::Success);
-                            } else {
-                                design::badge(ui, "off", BadgeTone::Neutral);
-                            }
-                            ui.strong(&endpoint.name);
-                            ui.monospace(
-                                egui::RichText::new(endpoint.base_url.as_str())
-                                    .small()
-                                    .color(t.muted_foreground),
-                            );
-                            let has_key = db.with_read(|conn| {
-                                spp_core::ai_hub::endpoint_has_key(conn, &endpoint.id)
-                            });
-                            if has_key {
-                                design::badge(ui, "key set", BadgeTone::Info);
-                            }
-                            if endpoint.builtin {
-                                design::badge(ui, "built-in", BadgeTone::Neutral);
-                            }
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                if !endpoint.builtin
-                                    && design::button(ui, "Remove", ButtonVariant::Ghost)
-                                        .on_hover_text("remove the endpoint, its envelope key and its role assignments")
-                                        .clicked()
-                                {
-                                    let _ = db.with_write(|conn| {
-                                        spp_core::ai_hub::remove_endpoint(conn, &endpoint.id)
-                                    });
-                                    self.reload_hub(db);
-                                }
-                                if design::button(ui, "Set Key", ButtonVariant::Outline).clicked() {
-                                    self.key_edit_for = Some(endpoint.id.clone());
-                                    self.key_edit_value.clear();
-                                }
-                                if design::button(ui, "Probe", ButtonVariant::Outline)
-                                    .on_hover_text("list models once — the green/red light for this endpoint")
-                                    .clicked()
-                                {
-                                    self.start_probe(db, &endpoint.id);
-                                }
-                            });
-                        });
-                        if self.key_edit_for.as_deref() == Some(endpoint.id.as_str()) {
-                            ui.horizontal(|ui| {
-                                design::field_label(ui, "API key");
-                                ui.add_sized(
-                                    [280.0, 28.0],
-                                    egui::TextEdit::singleline(&mut self.key_edit_value)
-                                        .password(true),
-                                );
-                                if design::button(ui, "Save Key", ButtonVariant::Primary).clicked() {
-                                    let id = endpoint.id.clone();
-                                    let value = self.key_edit_value.trim().to_string();
-                                    db.with_write(|conn| {
-                                        if value.is_empty() {
-                                            let _ = spp_core::settings::delete_secret(
-                                                conn,
-                                                &spp_core::ai_hub::EndpointConfig::secret_key(&id),
-                                            );
-                                        } else {
-                                            let _ = spp_core::ai_hub::set_endpoint_api_key(
-                                                conn, &id, &value,
-                                            );
-                                        }
-                                    });
-                                    self.key_edit_for = None;
-                                    self.key_edit_value.clear();
-                                }
-                                if design::button(ui, "Cancel", ButtonVariant::Ghost).clicked() {
-                                    self.key_edit_for = None;
-                                    self.key_edit_value.clear();
-                                }
-                                design::hint_text(
-                                    ui,
-                                    "stored in the encrypted envelope — never in plaintext",
-                                );
-                            });
-                        }
-                        if let Some(result) = self.probe_results.get(&endpoint.id) {
-                            if result.starts_with("reachable") {
-                                design::success_text(ui, result);
-                            } else {
-                                design::error_text(ui, result);
-                            }
-                        }
-                        if !endpoint.builtin {
-                            if self.price_edit_for.as_deref() == Some(endpoint.id.as_str()) {
-                                ui.horizontal(|ui| {
-                                    design::field_label(ui, "$ / mtok prompt:");
-                                    ui.add_sized(
-                                        [90.0, 26.0],
-                                        egui::TextEdit::singleline(&mut self.price_edit_prompt)
-                                            .hint_text("0.00"),
-                                    );
-                                    design::field_label(ui, "completion:");
-                                    ui.add_sized(
-                                        [90.0, 26.0],
-                                        egui::TextEdit::singleline(
-                                            &mut self.price_edit_completion,
-                                        )
-                                        .hint_text("0.00"),
-                                    );
-                                    if design::button(ui, "Save Prices", ButtonVariant::Primary)
-                                        .clicked()
-                                    {
-                                        let prompt: Option<f64> =
-                                            self.price_edit_prompt.trim().parse().ok();
-                                        let completion: Option<f64> =
-                                            self.price_edit_completion.trim().parse().ok();
-                                        match (prompt, completion) {
-                                            (Some(p), Some(c)) if p >= 0.0 && c >= 0.0 => {
-                                                let id = endpoint.id.clone();
-                                                let updated = db.with_write(|conn| {
-                                                    spp_core::ai_hub::update_endpoint_prices(
-                                                        conn, &id, p, c,
-                                                    )
-                                                });
-                                                let id_for_note = endpoint.id.clone();
-                                                match updated {
-                                                    Ok(true) => {
-                                                        self.price_edit_for = None;
-                                                        self.probe_results.insert(
-                                                            id_for_note,
-                                                            "prices saved".into(),
-                                                        );
-                                                        self.reload_hub(db);
-                                                    }
-                                                    Ok(false) => {
-                                                        self.probe_results.insert(
-                                                            id_for_note,
-                                                            "endpoint vanished — reload the page".into(),
-                                                        );
-                                                    }
-                                                    Err(e) => {
-                                                        self.probe_results.insert(
-                                                            id_for_note,
-                                                            format!("price save failed: {e}"),
-                                                        );
-                                                    }
-                                                }
-                                            }
-                                            _ => {
-                                                self.probe_results.insert(
-                                                    endpoint.id.clone(),
-                                                    "prices must be non-negative numbers (USD per million tokens)".into(),
-                                                );
-                                            }
-                                        }
-                                    }
-                                    if design::button(ui, "Cancel", ButtonVariant::Ghost).clicked() {
-                                        self.price_edit_for = None;
-                                    }
-                                });
-                            } else {
-                                ui.horizontal(|ui| {
-                                    ui.label(
-                                        egui::RichText::new(format!(
-                                            "${:.2} prompt · ${:.2} completion / mtok",
-                                            endpoint.price_prompt_per_mtok,
-                                            endpoint.price_completion_per_mtok
-                                        ))
-                                        .small()
-                                        .color(design::tokens(ui).muted_foreground),
-                                    )
-                                    .on_hover_text(
-                                        "price USD per million tokens — the cost ledger's \
-                                         estimation input",
-                                    );
-                                    if design::button(ui, "Edit Prices", ButtonVariant::Outline)
-                                        .on_hover_text(
-                                            "correct the $/mtok pair — the cost ledger \
-                                             uses it immediately",
-                                        )
-                                        .clicked()
-                                    {
-                                        self.price_edit_for = Some(endpoint.id.clone());
-                                        self.price_edit_prompt = format!(
-                                            "{}",
-                                            endpoint.price_prompt_per_mtok
-                                        );
-                                        self.price_edit_completion = format!(
-                                            "{}",
-                                            endpoint.price_completion_per_mtok
-                                        );
-                                    }
-                                });
-                            }
-                        }
-                        ui.add_space(4.0);
+                        self.endpoint_row_ui(ui, db, endpoint, t);
                     });
                 }
                 ui.add_space(4.0);
@@ -1349,49 +1171,245 @@ impl AiCenterPage {
                 )
                 .default_open(false)
                 .show(ui, |ui| {
-                    egui::Grid::new("ai-hub-add")
-                        .num_columns(2)
-                        .spacing(egui::vec2(12.0, 6.0))
-                        .show(ui, |ui| {
-                            design::field_label(ui, "Name");
-                            ui.add_sized(
-                                [220.0, 28.0],
-                                egui::TextEdit::singleline(&mut self.add_name),
-                            );
-                            ui.end_row();
-                            design::field_label(ui, "Base URL");
-                            ui.add_sized(
-                                [280.0, 28.0],
-                                egui::TextEdit::singleline(&mut self.add_url),
-                            );
-                            ui.end_row();
-                            design::field_label(ui, "API key");
-                            ui.add_sized(
-                                [280.0, 28.0],
-                                egui::TextEdit::singleline(&mut self.add_key).password(true),
-                            );
-                            ui.end_row();
-                            design::field_label(ui, "$ / mtok prompt:");
-                            ui.add_sized(
-                                [120.0, 28.0],
-                                egui::TextEdit::singleline(&mut self.add_price_prompt),
-                            );
-                            ui.end_row();
-                            design::field_label(ui, "$ / mtok completion:");
-                            ui.add_sized(
-                                [120.0, 28.0],
-                                egui::TextEdit::singleline(&mut self.add_price_completion),
-                            );
-                            ui.end_row();
-                        });
-                    if design::button(ui, "Add Endpoint", ButtonVariant::Primary).clicked() {
-                        self.add_endpoint(db);
-                    }
+                    self.add_endpoint_form_ui(ui, db);
                 });
             },
         );
-        ui.add_space(10.0);
+    }
 
+    fn endpoint_row_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        db: &DbHandle,
+        endpoint: &spp_core::ai_hub::EndpointConfig,
+        t: &'static design::Tokens,
+    ) {
+        ui.horizontal(|ui| {
+            if endpoint.enabled {
+                design::badge(ui, "on", BadgeTone::Success);
+            } else {
+                design::badge(ui, "off", BadgeTone::Neutral);
+            }
+            ui.strong(&endpoint.name);
+            ui.monospace(
+                egui::RichText::new(endpoint.base_url.as_str())
+                    .small()
+                    .color(t.muted_foreground),
+            );
+            let has_key =
+                db.with_read(|conn| spp_core::ai_hub::endpoint_has_key(conn, &endpoint.id));
+            if has_key {
+                design::badge(ui, "key set", BadgeTone::Info);
+            }
+            if endpoint.builtin {
+                design::badge(ui, "built-in", BadgeTone::Neutral);
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if !endpoint.builtin
+                    && design::button(ui, "Remove", ButtonVariant::Ghost)
+                        .on_hover_text(
+                            "remove the endpoint, its envelope key and its role assignments",
+                        )
+                        .clicked()
+                {
+                    let _ =
+                        db.with_write(|conn| spp_core::ai_hub::remove_endpoint(conn, &endpoint.id));
+                    self.reload_hub(db);
+                }
+                if design::button(ui, "Set Key", ButtonVariant::Outline).clicked() {
+                    self.key_edit_for = Some(endpoint.id.clone());
+                    self.key_edit_value.clear();
+                }
+                if design::button(ui, "Probe", ButtonVariant::Outline)
+                    .on_hover_text("list models once — the green/red light for this endpoint")
+                    .clicked()
+                {
+                    self.start_probe(db, &endpoint.id);
+                }
+            });
+        });
+        if self.key_edit_for.as_deref() == Some(endpoint.id.as_str()) {
+            self.endpoint_key_edit_ui(ui, db, endpoint);
+        }
+
+        if let Some(result) = self.probe_results.get(&endpoint.id) {
+            if result.starts_with("reachable") {
+                design::success_text(ui, result);
+            } else {
+                design::error_text(ui, result);
+            }
+        }
+        if !endpoint.builtin {
+            self.endpoint_price_ui(ui, db, endpoint);
+        }
+        ui.add_space(4.0);
+    }
+
+    fn endpoint_key_edit_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        db: &DbHandle,
+        endpoint: &spp_core::ai_hub::EndpointConfig,
+    ) {
+        ui.horizontal(|ui| {
+            design::field_label(ui, "API key");
+            ui.add_sized(
+                [280.0, 28.0],
+                egui::TextEdit::singleline(&mut self.key_edit_value).password(true),
+            );
+            if design::button(ui, "Save Key", ButtonVariant::Primary).clicked() {
+                let id = endpoint.id.clone();
+                let value = self.key_edit_value.trim().to_string();
+                db.with_write(|conn| {
+                    if value.is_empty() {
+                        let _ = spp_core::settings::delete_secret(
+                            conn,
+                            &spp_core::ai_hub::EndpointConfig::secret_key(&id),
+                        );
+                    } else {
+                        let _ = spp_core::ai_hub::set_endpoint_api_key(conn, &id, &value);
+                    }
+                });
+                self.key_edit_for = None;
+                self.key_edit_value.clear();
+            }
+            if design::button(ui, "Cancel", ButtonVariant::Ghost).clicked() {
+                self.key_edit_for = None;
+                self.key_edit_value.clear();
+            }
+            design::hint_text(ui, "stored in the encrypted envelope — never in plaintext");
+        });
+    }
+
+    fn endpoint_price_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        db: &DbHandle,
+        endpoint: &spp_core::ai_hub::EndpointConfig,
+    ) {
+        if self.price_edit_for.as_deref() == Some(endpoint.id.as_str()) {
+            ui.horizontal(|ui| {
+                design::field_label(ui, "$ / mtok prompt:");
+                ui.add_sized(
+                    [90.0, 26.0],
+                    egui::TextEdit::singleline(&mut self.price_edit_prompt).hint_text("0.00"),
+                );
+                design::field_label(ui, "completion:");
+                ui.add_sized(
+                    [90.0, 26.0],
+                    egui::TextEdit::singleline(&mut self.price_edit_completion).hint_text("0.00"),
+                );
+                if design::button(ui, "Save Prices", ButtonVariant::Primary).clicked() {
+                    let prompt: Option<f64> = self.price_edit_prompt.trim().parse().ok();
+                    let completion: Option<f64> = self.price_edit_completion.trim().parse().ok();
+                    match (prompt, completion) {
+                        (Some(p), Some(c)) if p >= 0.0 && c >= 0.0 => {
+                            let id = endpoint.id.clone();
+                            let updated = db.with_write(|conn| {
+                                spp_core::ai_hub::update_endpoint_prices(conn, &id, p, c)
+                            });
+                            let id_for_note = endpoint.id.clone();
+                            match updated {
+                                Ok(true) => {
+                                    self.price_edit_for = None;
+                                    self.probe_results
+                                        .insert(id_for_note, "prices saved".into());
+                                    self.reload_hub(db);
+                                }
+                                Ok(false) => {
+                                    self.probe_results.insert(
+                                        id_for_note,
+                                        "endpoint vanished — reload the page".into(),
+                                    );
+                                }
+                                Err(e) => {
+                                    self.probe_results
+                                        .insert(id_for_note, format!("price save failed: {e}"));
+                                }
+                            }
+                        }
+                        _ => {
+                            self.probe_results.insert(
+                                endpoint.id.clone(),
+                                "prices must be non-negative numbers (USD per million tokens)"
+                                    .into(),
+                            );
+                        }
+                    }
+                }
+                if design::button(ui, "Cancel", ButtonVariant::Ghost).clicked() {
+                    self.price_edit_for = None;
+                }
+            });
+        } else {
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new(format!(
+                        "${:.2} prompt · ${:.2} completion / mtok",
+                        endpoint.price_prompt_per_mtok, endpoint.price_completion_per_mtok
+                    ))
+                    .small()
+                    .color(design::tokens(ui).muted_foreground),
+                )
+                .on_hover_text(
+                    "price USD per million tokens — the cost ledger's \
+                     estimation input",
+                );
+                if design::button(ui, "Edit Prices", ButtonVariant::Outline)
+                    .on_hover_text(
+                        "correct the $/mtok pair — the cost ledger \
+                         uses it immediately",
+                    )
+                    .clicked()
+                {
+                    self.price_edit_for = Some(endpoint.id.clone());
+                    self.price_edit_prompt = format!("{}", endpoint.price_prompt_per_mtok);
+                    self.price_edit_completion = format!("{}", endpoint.price_completion_per_mtok);
+                }
+            });
+        }
+    }
+
+    fn add_endpoint_form_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
+        egui::Grid::new("ai-hub-add")
+            .num_columns(2)
+            .spacing(egui::vec2(12.0, 6.0))
+            .show(ui, |ui| {
+                design::field_label(ui, "Name");
+                ui.add_sized(
+                    [220.0, 28.0],
+                    egui::TextEdit::singleline(&mut self.add_name),
+                );
+                ui.end_row();
+                design::field_label(ui, "Base URL");
+                ui.add_sized([280.0, 28.0], egui::TextEdit::singleline(&mut self.add_url));
+                ui.end_row();
+                design::field_label(ui, "API key");
+                ui.add_sized(
+                    [280.0, 28.0],
+                    egui::TextEdit::singleline(&mut self.add_key).password(true),
+                );
+                ui.end_row();
+                design::field_label(ui, "$ / mtok prompt:");
+                ui.add_sized(
+                    [120.0, 28.0],
+                    egui::TextEdit::singleline(&mut self.add_price_prompt),
+                );
+                ui.end_row();
+                design::field_label(ui, "$ / mtok completion:");
+                ui.add_sized(
+                    [120.0, 28.0],
+                    egui::TextEdit::singleline(&mut self.add_price_completion),
+                );
+                ui.end_row();
+            });
+        if design::button(ui, "Add Endpoint", ButtonVariant::Primary).clicked() {
+            self.add_endpoint(db);
+        }
+    }
+
+    fn hub_roles_card_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
+        let t = design::tokens(ui);
         design::card_titled_wide(
             ui,
             "Model-role routing",
@@ -1508,8 +1526,9 @@ impl AiCenterPage {
                     });
             },
         );
-        ui.add_space(10.0);
+    }
 
+    fn hub_features_card_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         design::card_titled_wide(
             ui,
             "Features & kill switches",
@@ -1561,8 +1580,10 @@ impl AiCenterPage {
                 }
             },
         );
-        ui.add_space(10.0);
+    }
 
+    fn hub_ledger_card_ui(&mut self, ui: &mut egui::Ui) {
+        let t = design::tokens(ui);
         design::card_titled_wide(
             ui,
             "Cost ledger — last 7 days",

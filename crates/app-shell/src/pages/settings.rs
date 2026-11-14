@@ -1380,6 +1380,27 @@ impl SettingsPage {
             ),
         }
         ui.add_space(4.0);
+        self.hs_connection_card_ui(ui, db, &status);
+        ui.add_space(10.0);
+
+        self.connection_doctor_ui(ui);
+        ui.add_space(10.0);
+
+        self.hs_credentials_card_ui(ui, db, &status);
+        ui.add_space(10.0);
+
+        self.webhook_relay_card_ui(ui, db);
+        ui.add_space(10.0);
+
+        self.workspace_purge_card_ui(ui, db);
+    }
+
+    fn hs_connection_card_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        db: &DbHandle,
+        status: &HelpScoutStatus,
+    ) {
         design::card_titled_wide(
             ui,
             "Help Scout connection",
@@ -1501,11 +1522,14 @@ impl SettingsPage {
                 }
             },
         );
-        ui.add_space(10.0);
+    }
 
-        self.connection_doctor_ui(ui);
-        ui.add_space(10.0);
-
+    fn hs_credentials_card_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        db: &DbHandle,
+        status: &HelpScoutStatus,
+    ) {
         design::card_titled_wide(
             ui,
             "Help Scout credentials",
@@ -1607,8 +1631,9 @@ impl SettingsPage {
                 });
             },
         );
-        ui.add_space(10.0);
+    }
 
+    fn webhook_relay_card_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         design::card_titled_wide(
             ui,
             "Webhook relay & health",
@@ -1681,8 +1706,9 @@ impl SettingsPage {
                 }
             },
         );
-        ui.add_space(10.0);
+    }
 
+    fn workspace_purge_card_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         design::card_titled_wide(
             ui,
             "Danger zone — Workspace data",
