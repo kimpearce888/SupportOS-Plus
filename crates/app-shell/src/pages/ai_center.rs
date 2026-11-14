@@ -171,22 +171,20 @@ pub(crate) fn load_analytics(conn: &rusqlite::Connection) -> AiAnalytics {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct AiJobRow {
+pub(crate) struct AiJobRow {
     pub id: i64,
     pub run_type: String,
     pub status: String,
     pub conversation_id: Option<i64>,
     pub model: Option<String>,
-    pub error: Option<String>,
     pub created_at: String,
-    pub latency_ms: Option<i64>,
 }
 
 #[must_use]
 pub(crate) fn load_jobs(conn: &rusqlite::Connection, limit: i64) -> Vec<AiJobRow> {
     let limit = limit.clamp(1, 1000);
     conn.prepare(
-        "SELECT id, type, status, conversation_id, model, error, created_at, latency_ms
+        "SELECT id, type, status, conversation_id, model, created_at
            FROM ai_runs ORDER BY id DESC LIMIT ?1",
     )
     .and_then(|mut stmt| {
@@ -197,9 +195,7 @@ pub(crate) fn load_jobs(conn: &rusqlite::Connection, limit: i64) -> Vec<AiJobRow
                 status: r.get(2)?,
                 conversation_id: r.get(3)?,
                 model: r.get(4)?,
-                error: r.get(5)?,
-                created_at: r.get(6)?,
-                latency_ms: r.get(7)?,
+                created_at: r.get(5)?,
             })
         })
         .map(|rows| rows.filter_map(Result::ok).collect())

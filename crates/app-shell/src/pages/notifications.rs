@@ -381,7 +381,7 @@ impl NotificationsPage {
     }
 
     #[must_use]
-    pub fn unread_badge(&self) -> u32 {
+    pub(crate) fn unread_badge(&self) -> u32 {
         self.unread.max(0) as u32
     }
 }

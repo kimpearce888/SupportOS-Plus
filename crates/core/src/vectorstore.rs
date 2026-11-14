@@ -60,7 +60,7 @@ pub(crate) struct CollectionInfo {
     pub point_count: usize,
 }
 
-pub trait VectorStore: Send + Sync {
+pub(crate) trait VectorStore: Send + Sync {
     fn create_collection(&self, name: &str, dense_dim: Option<usize>) -> Result<()>;
 
     fn drop_collection(&self, name: &str) -> Result<()>;

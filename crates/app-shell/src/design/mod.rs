@@ -180,13 +180,12 @@ pub(crate) fn tokens_for(ctx: &egui::Context) -> &'static Tokens {
 }
 
 pub mod scale {
-    pub mod space {
-        pub const SP1: f32 = 4.0;
-        pub const SP2: f32 = 8.0;
-        pub const SP3: f32 = 12.0;
-        pub const SP4: f32 = 16.0;
-        pub const SP5: f32 = 24.0;
-        pub const SP6: f32 = 32.0;
+    pub(crate) mod space {
+        pub(crate) const SP1: f32 = 4.0;
+        pub(crate) const SP2: f32 = 8.0;
+        pub(crate) const SP3: f32 = 12.0;
+        pub(crate) const SP4: f32 = 16.0;
+        pub(crate) const SP5: f32 = 24.0;
         pub(crate) const CLUSTER: f32 = 6.0;
         pub(crate) const PAD_CARD: f32 = 14.0;
         pub(crate) const PAD_TOOL: f32 = 10.0;
@@ -639,7 +638,7 @@ pub fn chip_with_icon(ui: &mut egui::Ui, selected: bool, icon: Icon, text: &str)
     chip_impl(ui, selected, text, Some(icon))
 }
 
-pub fn segmented(
+pub(crate) fn segmented(
     ui: &mut egui::Ui,
     id_salt: &str,
     options: &[&str],
@@ -706,7 +705,7 @@ pub fn segmented(
     clicked
 }
 
-pub fn switch(ui: &mut egui::Ui, on: bool) -> bool {
+pub(crate) fn switch(ui: &mut egui::Ui, on: bool) -> bool {
     let t = tokens(ui);
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(34.0, 20.0), egui::Sense::click());
     let track = if on { t.primary } else { t.border_strong };
@@ -918,7 +917,7 @@ pub fn metric_card(ui: &mut egui::Ui, label: &str, value: &str, hint: Option<&st
     metric_card_w(ui, label, value, hint, 150.0);
 }
 
-pub fn metric_card_w(
+pub(crate) fn metric_card_w(
     ui: &mut egui::Ui,
     label: &str,
     value: &str,
@@ -1473,7 +1472,7 @@ pub fn empty_state_cta(
     empty_state_cta_with(ui, icon, title, hint, Icon::Plus, cta_label)
 }
 
-pub fn empty_state_cta_with(
+pub(crate) fn empty_state_cta_with(
     ui: &mut egui::Ui,
     icon: Icon,
     title: &str,
@@ -1908,7 +1907,7 @@ pub fn day_divider(ui: &mut egui::Ui, label: &str) {
     });
 }
 
-pub fn list_end_note(ui: &mut egui::Ui, text: &str) {
+pub(crate) fn list_end_note(ui: &mut egui::Ui, text: &str) {
     let t = tokens(ui);
     ui.add_space(scale::space::SP3);
     let w = ui.available_width();

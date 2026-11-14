@@ -1,49 +1,41 @@
 # Refactor Progress — Live State
 
-Last updated: session 15 (2026-11-14). Update rule: every session updates
+Last updated: session 16 (2026-11-14). Update rule: every session updates
 this file before ending. Statuses: `pending` / `in_progress` / `done` /
 `terminal` (done + closed in `complete.md`) / `dropped` (with reason in
 `memory.md`).
 
 ## CURRENT POINTER
 
-- Next task: **R4.3 — visibility: minimize `pub` to `pub(crate)`/
-  `pub(super)`** (plan §7 R4). Census-first per the standing discipline:
-  run a pub-surface scanner (every `pub fn`/`pub struct`/`pub mod` in
-  core + app-shell + xtask; grep the consumers tree-wide) BEFORE sizing
-  the batch — the last eight batches' plan letters overcounted every
-  time. Fold only where a symbol has zero out-of-crate consumers.
-  Watch for: `pub mod` re-export seams (core's `pub mod catalog` re-
-  export rides app-shell usage), bench/xtask consumers, and the
-  `pub(crate)`↔`pub(super)` preference inside nested module trees.
-  R4.4 (magic values → catalog constants) and R4.5 (file splits for the
-  >2K-line files) queue behind it.
-- Pre-flight [session 15]: run#347 green on `a18a8ea` (the session-14
-  addendum head — the standard docs-only preflight gate). R4.2-b
-  executed on that green base and is now itself CI-VERIFIED (same
-  session): run#348 (id 43619290868) green on `6eaf8c8`, all four
-  lanes incl. the kittest snapshot drift gate — 203 goldens
-  byte-identical, the definitive pixel-neutrality proof for all nine
-  extractions (D-24's multiset pre-gate predicted it). R4.2 TERMINAL
-  (a + b); see `complete.md`. Green base for R4.3: this addendum
-  head's own docs-only run (the standard next-session preflight gate).
-- Session counter: 15 completed (R1 terminal; R2 TERMINAL; R3 TERMINAL
+- Next task: **R4.4 — magic values → catalog constants** (plan §7 R4).
+  Census-first per the standing discipline (NINE consecutive corrections
+  so far — R4.3's 222 census candidates censused to 82 honest
+  downgrades once rustc's reachability had its say): scan for
+  production-literal repetition (numeric/string literals repeated
+  across modules where one catalog constant wants to own them) BEFORE
+  sizing the batch; fold only groups where the values are the SAME
+  policy (D-17's coincidental-value ruling from R3.6 stands — three
+  unrelated 200s are three policies, not a constant). R4.5 (file splits
+  for the >2K-line files) queues behind it.
+- Pre-flight [session 16]: run#349 (id 43621514210) green on `71f462d`
+  (the session-15 addendum head — the standard docs-only preflight
+  gate). R4.3 executed on that green base; its CI verification rides
+  this push (all four lanes; the kittest drift gate is the pixel
+  proof for the zero-UI-motion batch — visibility prefixes and dead
+  code touch no widget calls by construction).
+- Session counter: 16 completed (R1 terminal; R2 TERMINAL; R3 TERMINAL
   — R3.1 run#332, R3.2 run#335, R3.3 run#337, R3.4 run#339, R3.5
   zero-motion run#341, R3.6 run#342; R4.1 run#344; R4.2-a run#346;
-  R4.2-b run#348 — R4.2 TERMINAL).
-- Environment: session 15 was ANOTHER full reset — repo re-cloned via
-  github-reconnect.sh; toolchain SURVIVED again at /tmp/my-project/
-  {rustup,cargo-home} (export RUSTUP_HOME=/tmp/my-project/rustup
-  CARGO_HOME=/tmp/my-project/cargo-home PATH=/tmp/my-project/
-  cargo-home/bin:$PATH in EVERY bash call); cold core-crate check
-  ~7 min once, warm lanes fast; ONE test lane per tool call (core lib
-  470s, sandbox 464s, app-shell 270s); G-05 applied twice (disk
-  peaked 79% mid-battery; incremental rm between the sandbox and
-  app-shell lanes). Session-15 discovery: the r42b_split_*.py scripts
-  in tool-results were pre-written by the context-exhausted session
-  that queued R4.2-b — they were UNVERIFIED DRAFTS; three slicing
-  bugs + two design bugs fixed before/while running (see session-15
-  log + memory G-12): compile-and-verify every handed-over transform.
+  R4.2-b run#348 — R4.2 TERMINAL; R4.3 rides this push).
+- Environment: session 16 was ANOTHER full reset — repo re-cloned via
+  github-reconnect.sh; toolchain SURVIVED at /tmp/my-project/
+  {rustup,cargo-home} (exports re-applied per bash call per §3); core
+  cold check ~2 min, clippy 60s/41s, ONE test lane per tool call
+  (core lib 465s, sandbox 466s, app-shell 274s); G-05 applied before
+  every link-heavy lane (disk peaked 72% before the app-shell lane).
+  New scanner gotcha G-14 (string line-continuations desync line
+  numbers — caught by assertion BEFORE any damage); visibility
+  ladder direction G-15 (private covers descendants only).
 
 ## Task states
 
@@ -75,7 +67,8 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 | R4.1 naming | terminal (session 13) | census (r41_census.py): 341 bool decls (272 prod) + 118 bool-returning fns + 478 short-id kinds + 232 suspicious-word hits; SEVENTH consecutive census correction — the tree's naming was overwhelmingly honest; 10 surgical renames + 1 deletion (aa_get, D-18 rule): temp→temperature, already→already_exists/already_queued, has→has_column, known/conversation→*_exists, palette_take→query_committed, right→align_right ×3, drill→drillable, assistant→from_assistant, ins→stmt ×2; keep rulings in the R4.1 verdict table; dt_cell ×3 fold candidate recorded, not acted; battery green (520/528/293+2/56, clippy x2, gate, icons, strip-check 207/207); CI run#344 green on `1b653d4` — see complete.md |
 | R4.2 decomposition (batch a) | done (session 14) | census (r42_census.py, cfg-aware fn-span scanner): 3,277 prod fns / 991 test fns; top-20 censused; 6 CORE mega-fns split (execute 1051→79 dispatch + 22 tool fns; derived_edges_touching 686→26 + 11 Kind fns + 4 module helpers + 2 epilogue fns; apply_m046 405→15 manifest + ensure_fk + 10 data consts; execute_job 3 fat arms→3 methods incl. embed×3 fold; build_support_health_report 465→34 manifest + 9 domain fns; analyze_friction 410→manifest + 6 finding fns + finding helper); 6 keeps + 11 queued to R4.2-b (verdict table below); battery green (520/528/293+2/56, clippy ×2, gate, icons, strip 207/207); CI run#346 green on `fa03cad` (all 4 lanes incl. kittest drift gate); D-23 |
 | R4.2 decomposition (batch b) | done (session 15) | all 11 queued fns split: execute_outbound 390→~86-line dispatcher + 6 send_* arm methods + payload_num/payload_str_or module fns (closures promoted per the batch-a recipe); sync_resource 331→19-arm dispatcher table + 16 sync_* methods (conversations/threads delegations + the `customers` since-seam + the unknown-resource fallback stay inline); incidents ui 527→~180 dispatcher + filter_controls/empty_list_ui/lifecycle_card_ui/linked_column_ui/info_column_ui methods + incident_row/incident_detail_header module fns; ai_center hub_ui 481→35-line dispatcher + 8 methods (endpoints card/row/key-edit/price/add-form/roles/features/ledger); organizations ui 393→~170 dispatcher + org_form_card_ui method + org_row/org_detail_header_ui/members_card_ui module fns; inbox list_ui→search_filter_ui/list_toolbar_ui/conversation_rows_ui methods, copilot_pane_ui→copilot_cards_ui/copilot_lmstudio_ui/assistant_ui methods, composer_pane_ui→enqueue_composer_tool/apply_composer_act/mention_popup_ui methods + composer_tool_row module fn + ToolAction enum hoisted to module scope; settings helpscout_ui→4 card methods; diagnostics ui→event_log_card_ui method + audit_trail/sync_reports/outbound_deliveries_card_ui module fns; design composer→composer_header_row/composer_footer_row module fns; ALL 4 too_many_lines allows deleted (every post-split fn under the 100-line threshold — clippy -D warnings green); battery green at EXACT baselines (520/528/293+2/56, clippy ×2, gate, icons, strip 207/207); pixel-neutrality verified locally by the widget-call multiset comparison (design::/ui. call multisets byte-identical old-vs-new on all 9 files after fixes — D-24); the CI kittest drift gate rides this push; D-23/D-24 |
-| R4.3–R4.5 clean code | pending | see plan §7 R4 |
+| R4.3 visibility | done (session 16) | census (r43_census.py, G-08 machinery + G-14 fix): 1,094 pub(prod) items censused against tree-wide consumers → 866 keep-pub + 222 downgrade candidates + 6 dead; applied 223 edits + 6 deletions; rustc-reachability compile loop (5 core rounds + 3 workspace rounds) restored ~140 exposure-proven keeps (pub fn/trait/field signatures, ancestor-module paths, bin-crate return flows); FINAL: pub surface 1,113→1,023 = 82 downgrades surviving (57 pub(crate) incl. 9 module caps + 8 pub(super) + 17 private) + 9 dead items deleted (6 censused + 3 cascade: CustomerTimelineEntry, fts_row, knowledge_store::search_knowledge phantom) + AiJobRow dead-field slim (error/latency_ms); battery green at EXACT baselines (520/528/293/56, clippy ×2, gate, icons, strip 207/207); diff 40 files +101/−321; D-25/G-14/G-15/Q-05 |
+| R4.4–R4.5 clean code | pending | see plan §7 R4; R4.4 queued (census-first) |
 | R5.1–R5.3 guardrails | pending (optional, stage-gated) | |
 | R6.1–R6.2 polish + close | pending | |
 
@@ -303,7 +296,68 @@ Two clippy needlessly-borrow fixes post-extraction (`arg_i64(&args,` →
 trailing-whitespace strip (regex-introduced) that had tripped a rustfmt
 internal error.
 
+### R4.3 — visibility (session 16; census-first: scanner r43_census.py in tool-results — G-08 cross-line string machinery with the G-14 line-continuation fix + newline-position invariant asserted per file; consumer counting over a global identifier token index with use-span leaf skipping, rename-alias resolution, and cfg(test)-region exemption)
+
+**Census (1,094 pub(prod) + 19 pub(test-region) items):** the tree was already 2/3 visibility-honest (587 `pub(crate) fn` + 48 `pub(super) fn` + 136 `pub(crate) struct` existed pre-batch). Token-consumer classification: 866 keep-pub (real out-of-crate-root consumers — the 3-crate app's genuine API), 222 downgrade candidates (crate/file-local tokens only), 6 dead.
+
+| class | items | verdict | outcome |
+|---|---|---|---|
+| keep-pub (out-of-root consumers) | 866 | keep | the genuine cross-crate surface; core→app-shell/xtask, catalog→core-re-export, app-shell-lib→bin/tests seams all hold |
+| census downgrade candidates | 222 | apply, then rustc-reachability loop | applied 223 edits; the compile loop (E0603 + private_interfaces/private_bounds/private_fields under -D warnings discipline) restored ~140 as EXPOSURE-PROVEN keeps: pub-fn signatures (types returned across crate roots — the token census cannot see inference flows: `use super::*`, module aliases `use x as engine`, value-through-return usage), pub TRAIT methods (Hs* DTO family behind HelpScoutProvider), pub STRUCT fields (PageKey in page_header, ConfirmRequest.action, Tokens in design), pub-field chains (EvidenceContext.threads→ThreadEntry), bin-crate return types (StripStats via `pub fn run` into the xtask bin; BootServices/BootMode/AcquireError/InstanceLock via main.rs bootstrap), and ancestor-module paths (G-15: private covers descendants only) |
+| surviving downgrades | 82 | done | 57 pub(crate) (incl. 9 MODULE caps: core maintenance/migrations/mirror/response_state_sql/sandbox/webhook + migrations::intelligence + app-shell app + design::scale::space — the cheapest lever, one line caps a whole subtree) + 8 pub(super) (inbox_geo geometry consts + settings save) + 17 private; pub surface 1,113→1,023 |
+| dead items (zero consumers, compiler-verified) | 9 + 2 fields | delete | SP6; customer_events rebuild; customers customer_timeline (+ cascade: CustomerTimelineEntry struct never constructed, fts_row never used); mentions team_members; operations count_of; response_state_sql filter_by_response_state; knowledge_store search_knowledge (PHANTOM consumer — the token census credited the search/lanes.rs same-named twin's callers; dead_code after downgrade exposed it) + fts_row cascade; AiJobRow slimmed of error/latency_ms (constructed-never-read fields). Unused-import cleanup rode each deletion |
+| pub(test-region) items | 19 | keep (D-10) | test regions exempt; zero API meaning |
+| pub struct fields (1,861) | census only | keep | fields ride their type's decision: capped types cap their fields, kept-pub types keep them (the tree's data surface); a field-level pass would churn 1.8K lines for zero reach change |
+| CopilotTool (catalog) | 1 | keep-pub (Q-05) | dead vocabulary type (zero tree-wide consumers beyond its own root re-export) — kept per the R3.6 GraphHumanRelation::parse precedent (catalog = deliberate closed-vocabulary surface); deletion offered to the owner as Q-05 |
+| `pub use` re-exports | 13 | keep (12) + 1 downgraded→reverted | all root re-exports carry out-of-root consumers (catalog vocabulary via core's glob seam; Error/Result; parse_report_config; execute; EmptyHelpScoutProvider is main's `spp_core::helpscout::` path). The helpscout/mod.rs EmptyHelpScoutProvider re-export downgrade was reverted in-loop (app-shell consumes exactly that path) |
+
+**R4.3 verdict summary:** the NINTH consecutive census correction — the plan's "minimize pub" letter resolved to 82 honest downgrades + ~140 compile-proven keeps + 9 dead deletions; the compile loop IS the visibility arbiter (rustc's effective-reachability computation sees signature/transitive/inference exposure no token census can). Net pub surface −90 (8%), 40 files, +101/−321 (net −220: the dead code the pub veil had hidden). Battery green at exact baselines; pixel-neutral by construction (no widget-call motion — D-24's multiset check unnecessary for prefix-only edits, CI kittest drift gate rides the push).
+
 ## Session log
+
+### Session 16 — 2026-11-14
+- Pre-flight: run#349 (id 43621514210) green on `71f462d` (the session-15
+  addendum head — the standard docs-only preflight gate).
+- Environment: full reset AGAIN (repo re-cloned via github-reconnect.sh;
+  toolchain survived at /tmp/my-project/{rustup,cargo-home}).
+  Context-recovery note: the session-16 handover summary described the
+  R2.5-era ammonia state (STALE by ~20 CI runs) — the ledger was the
+  source of truth again; the RUSTSEC ammonia episode closed long ago
+  (G-09 memory). Recovery via ledger read per plan §8.1.
+- R4.3 executed (visibility, census-first): scanner r43_census.py
+  (token-index consumer census + use-span leaf skipping + rename-alias
+  resolution + cfg(test) exemption). FIRST RUN carried a new G-08-family
+  bug caught by its own apply-assertions: string `\<newline>` line
+  continuations had their newlines BLANKED (sanitize escape branch
+  consumed 2 chars unconditionally) → every later line number desynced
+  (PageKey off by 9). Fix: preserve the newline; assert newline-position
+  identity per file (G-14 recorded). Second census run produced
+  line-verified decisions; apply (223 vis edits + 6 dead deletions +
+  1 pub use downgrade) with hard per-line assertions.
+- Compile loop (the batch's central mechanic — D-25): cargo check with
+  rustc as the reachability arbiter. Core: 5 rounds (89 E0603 + 233
+  private_interfaces → restore script r43_restore.py parsing the
+  warning bodies' "reachable at visibility" text; guards' lifetime-
+  suffixed names handled manually; ThreadEntry name-collision fixed
+  per-module; cascade deletions CustomerTimelineEntry/fts_row/
+  search_knowledge; orphaned #[derive]/#[must_use] attrs from
+  deletions removed; unused imports cleaned). Workspace: 3 rounds
+  (app-shell SP4 grandparent-path → pub(crate); inbox_geo consts →
+  pub(super); StripStats bin-return → pub; BootServices/BootMode/
+  AcquireError/InstanceLock/PageKey/ConfirmRequest/FilterBar/Tokens/
+  ViewFilter/DestructiveAction exposure restores; AiJobRow dead-field
+  slim). Converged: workspace check EXIT=0, ZERO warnings.
+- Battery (post-convergence): gate clean, fmt --check clean, clippy
+  workspace 60s + sandbox 41s (-D warnings), core lib 520 ✓ (465s),
+  sandbox 528 ✓ (466s), app-shell 293 ✓ (274s), catalog 0 + xtask 56 ✓,
+  verify-icons ✓, strip-comments --check 207/207 ✓. G-05 incremental
+  rm before each link-heavy lane (disk peaked 72%).
+- Diff class review: 40 files, +101/−321 — every hunk is a visibility
+  prefix change, a module-cap line, a compiler-verified deletion, a
+  dead-field slim, an unused-import cleanup, or a rustfmt reflow; no
+  logic edits, no test changes (baselines exact).
+- Commits: code + ledger (D-08). CI rides this push; the addendum with
+  the run id follows the green.
 
 ### Session 15 — 2026-11-14
 - Pre-flight: run#347 green on the session-14 addendum head `a18a8ea`

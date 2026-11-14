@@ -7,7 +7,7 @@ use crate::error::{Error, Result};
 
 type HmacSha1 = Hmac<Sha1>;
 
-pub const LEGACY_SECRET_CAP: usize = 40;
+const LEGACY_SECRET_CAP: usize = 40;
 
 fn legacy_capped(secret: &str) -> String {
     secret.chars().take(LEGACY_SECRET_CAP).collect()

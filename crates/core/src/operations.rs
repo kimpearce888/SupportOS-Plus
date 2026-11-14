@@ -137,13 +137,6 @@ pub struct OperationsSnapshot {
     pub waiting_threshold_minutes: i64,
 }
 
-impl OperationsSnapshot {
-    #[must_use]
-    pub fn count_of(&self, key: &str) -> Option<u32> {
-        self.tiles.iter().find(|t| t.key == key).map(|t| t.count)
-    }
-}
-
 #[must_use]
 pub fn waiting_threshold_minutes(conn: &Connection) -> i64 {
     let raw = crate::settings::get_i64(

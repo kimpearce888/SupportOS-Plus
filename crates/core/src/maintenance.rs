@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 use crate::error::Result;
 
-pub fn apply_m037(conn: &Connection) -> Result<()> {
+pub(crate) fn apply_m037(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS products (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -39,7 +39,7 @@ fn add_column_if_missing(conn: &Connection, table: &str, column: &str, decl: &st
     Ok(())
 }
 
-pub fn compute_trends(conn: &Connection) -> Result<()> {
+pub(crate) fn compute_trends(conn: &Connection) -> Result<()> {
     conn.execute(
         "UPDATE issue_clusters SET trend = CASE
            WHEN julianday(first_seen_at) >= julianday('now', '-14 days') THEN 'new'
@@ -86,7 +86,7 @@ pub fn compute_trends(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-pub fn refresh_products(conn: &Connection) -> Result<usize> {
+pub(crate) fn refresh_products(conn: &Connection) -> Result<usize> {
     let before: i64 = conn.query_row("SELECT COUNT(*) FROM products", [], |r| r.get(0))?;
     conn.execute(
         "INSERT OR IGNORE INTO products (name, source, first_seen_at, last_seen_at, provenance)
@@ -105,7 +105,7 @@ pub fn refresh_products(conn: &Connection) -> Result<usize> {
     Ok((after - before).max(0) as usize)
 }
 
-pub fn enforce_retention(conn: &Connection, retention_days: i64) -> Result<usize> {
+pub(crate) fn enforce_retention(conn: &Connection, retention_days: i64) -> Result<usize> {
     if retention_days <= 0 {
         return Ok(0);
     }

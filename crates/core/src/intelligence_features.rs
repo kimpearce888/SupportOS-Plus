@@ -1001,7 +1001,7 @@ pub(crate) fn sweep_doc_freshness(conn: &Connection) -> Result<usize> {
     Ok(pruned + marked + cleared)
 }
 
-pub fn sweep(conn: &Connection) -> Result<()> {
+pub(crate) fn sweep(conn: &Connection) -> Result<()> {
     let mut first_err: Option<crate::error::Error> = None;
     if let Err(e) = sweep_sla_breaches(conn) {
         first_err = first_err.or(Some(e));

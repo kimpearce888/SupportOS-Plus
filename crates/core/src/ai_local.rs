@@ -224,7 +224,7 @@ fn sentences(text: &str) -> Vec<String> {
         .collect()
 }
 
-pub fn analyze(conn: &Connection, conversation_local_id: i64) -> Result<LocalAnalysis> {
+fn analyze(conn: &Connection, conversation_local_id: i64) -> Result<LocalAnalysis> {
     let mut stmt = conn.prepare(
         "SELECT type, COALESCE(body_text, '') FROM conversation_threads
           WHERE conversation_id = ?1 AND deleted_at IS NULL

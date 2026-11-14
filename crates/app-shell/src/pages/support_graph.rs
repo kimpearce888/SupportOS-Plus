@@ -7,7 +7,7 @@ use crate::design::{self, ButtonVariant};
 use crate::icons::Icon;
 
 #[derive(Debug, Clone, Default)]
-pub struct Neighborhood {
+struct Neighborhood {
     pub center: Option<GraphNodeRef>,
     pub edges: Vec<(String, String, serde_json::Value)>,
 }

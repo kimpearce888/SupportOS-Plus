@@ -155,7 +155,7 @@ pub(crate) fn docs_stats(conn: &Connection) -> DocsStats {
 }
 
 #[must_use]
-pub fn docs_collections(conn: &Connection) -> Vec<(i64, String)> {
+fn docs_collections(conn: &Connection) -> Vec<(i64, String)> {
     conn.prepare("SELECT id, name FROM docs_collections ORDER BY name")
         .and_then(|mut stmt| {
             stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))

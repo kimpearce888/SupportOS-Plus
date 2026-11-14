@@ -398,7 +398,7 @@ fn insert_gap_candidate(
     }
 }
 
-pub fn rebuild_gaps(conn: &Connection, days: i64) -> (usize, usize) {
+pub(crate) fn rebuild_gaps(conn: &Connection, days: i64) -> (usize, usize) {
     static TROUBLESHOOTING: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
     static STEP_STRUCTURE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
     let troubleshooting = TROUBLESHOOTING.get_or_init(|| {

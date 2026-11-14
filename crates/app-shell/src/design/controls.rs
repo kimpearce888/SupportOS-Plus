@@ -71,7 +71,7 @@ pub(super) fn chip_impl(
     response
 }
 
-pub fn card<R>(
+pub(crate) fn card<R>(
     ui: &mut egui::Ui,
     add_contents: impl FnOnce(&mut egui::Ui) -> R,
 ) -> egui::InnerResponse<R> {

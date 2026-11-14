@@ -86,7 +86,7 @@ pub(crate) fn apply_m036(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-pub fn sweep(conn: &Connection) -> Result<usize> {
+pub(crate) fn sweep(conn: &Connection) -> Result<usize> {
     let state: String = conn
         .query_row(
             "SELECT value FROM application_settings WHERE key = 'sync_state'",
@@ -251,109 +251,6 @@ fn derive_custom_object_events(conn: &Connection) -> Result<usize> {
          WHERE l.target_kind = 'customer'",
         &[],
     )
-}
-
-pub fn rebuild(conn: &Connection) -> Result<usize> {
-    let mut created = 0;
-    created += counted(
-        conn,
-        "INSERT OR IGNORE INTO customer_events
-           (customer_local_id, event_kind, occurred_at, title, detail, source, source_ref, dedup_key)
-         SELECT c.id, 'signup', c.created_at, 'Customer created in Help Scout',
-                json_object('remote_id', c.remote_id), 'hs_sync', 'customers:' || c.remote_id,
-                'signup:' || c.id
-         FROM customers c WHERE c.created_at IS NOT NULL AND c.deleted_at IS NULL",
-        &[],
-    )?;
-    created += counted(
-        conn,
-        "INSERT OR IGNORE INTO customer_events
-           (customer_local_id, event_kind, occurred_at, title, detail, source, source_ref, dedup_key)
-         SELECT c.customer_local_id, 'support_conversation', c.created_at,
-                'Support conversation #' || c.number || ' started',
-                json_object('conversation_id', c.id, 'number', c.number, 'subject', c.subject, 'status', c.status),
-                'hs_sync', 'conversations:' || c.remote_id,
-                'conv_created:' || c.id
-         FROM conversations c
-         WHERE c.customer_local_id IS NOT NULL AND c.created_at IS NOT NULL AND c.deleted_at IS NULL",
-        &[],
-    )?;
-    created += counted(
-        conn,
-        "INSERT OR IGNORE INTO customer_events
-           (customer_local_id, event_kind, occurred_at, title, detail, source, source_ref, dedup_key)
-         SELECT c.customer_local_id, 'support_conversation', c.closed_at,
-                'Support conversation #' || c.number || ' closed',
-                json_object('conversation_id', c.id, 'number', c.number, 'subject', c.subject, 'status', 'closed'),
-                'hs_sync', 'conversations:' || c.remote_id,
-                'conv_closed:' || c.id
-         FROM conversations c
-         WHERE c.customer_local_id IS NOT NULL AND c.closed_at IS NOT NULL AND c.deleted_at IS NULL",
-        &[],
-    )?;
-    created += counted(
-        conn,
-        "INSERT OR IGNORE INTO customer_events
-           (customer_local_id, event_kind, occurred_at, title, detail, source, source_ref, dedup_key)
-         SELECT c.customer_local_id, 'customer_message', t.created_at,
-                'Customer wrote in: ' || substr(COALESCE(c.subject, ''), 1, 80),
-                json_object('conversation_id', c.id, 'number', c.number, 'subject', c.subject,
-                            'excerpt', substr(COALESCE(t.body_text, ''), 1, 300)),
-                'hs_sync', 'threads:' || t.remote_id,
-                'conv_first_message:' || c.id
-         FROM conversations c
-         JOIN conversation_threads t ON t.conversation_id = c.id AND t.type = 'customer'
-           AND t.deleted_at IS NULL AND t.state = 'published'
-           AND t.created_at = (
-             SELECT MIN(t2.created_at) FROM conversation_threads t2
-             WHERE t2.conversation_id = c.id AND t2.type = 'customer'
-               AND t2.deleted_at IS NULL AND t2.state = 'published'
-           )
-         WHERE c.customer_local_id IS NOT NULL AND c.deleted_at IS NULL",
-        &[],
-    )?;
-    created += counted(
-        conn,
-        "INSERT OR IGNORE INTO customer_events
-           (customer_local_id, event_kind, occurred_at, title, detail, source, source_ref, dedup_key)
-         SELECT r.customer_local_id, 'campaign', r.sent_at,
-                'Outreach campaign sent: ' || COALESCE(oc.name, 'campaign'),
-                json_object('campaign_id', oc.id, 'campaign_name', oc.name, 'conversation_number', r.hs_conversation_number),
-                'local_outreach', 'campaign:' || oc.id,
-                'campaign_sent:' || oc.id || ':' || r.customer_local_id
-         FROM outreach_recipients r JOIN outreach_campaigns oc ON oc.id = r.campaign_id
-         WHERE r.sent_at IS NOT NULL",
-        &[],
-    )?;
-    created += counted(
-        conn,
-        "INSERT OR IGNORE INTO customer_events
-           (customer_local_id, event_kind, occurred_at, title, detail, source, source_ref, dedup_key)
-         SELECT r.customer_local_id, 'campaign_reply', r.replied_at,
-                'Customer replied to outreach: ' || COALESCE(oc.name, 'campaign'),
-                json_object('campaign_id', oc.id, 'campaign_name', oc.name),
-                'local_outreach', 'campaign:' || oc.id,
-                'campaign_replied:' || oc.id || ':' || r.customer_local_id
-         FROM outreach_recipients r JOIN outreach_campaigns oc ON oc.id = r.campaign_id
-         WHERE r.replied_at IS NOT NULL",
-        &[],
-    )?;
-    created += counted(
-        conn,
-        "INSERT OR IGNORE INTO customer_events
-           (customer_local_id, event_kind, occurred_at, title, detail, source, source_ref, dedup_key)
-         SELECT r.customer_local_id, 'rating', r.remote_created_at,
-                'Customer rated the support ' || r.rating,
-                json_object('rating', r.rating, 'comments', r.comments, 'conversation_id', r.conversation_id),
-                'hs_sync', 'ratings:' || r.remote_id,
-                'rating:' || r.id
-         FROM ratings r
-         WHERE r.customer_local_id IS NOT NULL AND r.remote_created_at IS NOT NULL",
-        &[],
-    )?;
-    created += derive_incident_exposure(conn)?;
-    created += derive_custom_object_events(conn)?;
-    Ok(created)
 }
 
 fn hydrate_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {

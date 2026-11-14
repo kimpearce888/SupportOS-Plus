@@ -107,16 +107,16 @@ pub(crate) fn filters_from_bar(
 }
 
 pub mod inbox_geo {
-    pub const RAIL_W: f32 = 168.0;
+    pub(super) const RAIL_W: f32 = 168.0;
     pub const COPILOT_W: f32 = 300.0;
     pub const READER_FLOOR: f32 = 480.0;
-    pub const RAIL_FOLD_W: f32 = 900.0;
-    pub const LIST_SHARE: f32 = 0.30;
-    pub const LIST_MIN_W: f32 = 280.0;
+    pub(super) const RAIL_FOLD_W: f32 = 900.0;
+    pub(super) const LIST_SHARE: f32 = 0.30;
+    pub(super) const LIST_MIN_W: f32 = 280.0;
     pub const COMPOSER_MIN_H: f32 = 120.0;
-    pub const LIST_MAX_W: f32 = 560.0;
-    pub const LIST_RESIZE_MAX_W: f32 = 520.0;
-    pub const COMPOSER_DEFAULT_H: f32 = 348.0;
+    pub(super) const LIST_MAX_W: f32 = 560.0;
+    pub(super) const LIST_RESIZE_MAX_W: f32 = 520.0;
+    pub(super) const COMPOSER_DEFAULT_H: f32 = 348.0;
     pub const COPILOT_INSET: f32 = 12.0;
     pub const COMPOSER_TOP_INSET: f32 = 8.0;
     pub const COMPOSER_X_INSET: f32 = 24.0;

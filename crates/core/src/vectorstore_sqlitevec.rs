@@ -439,7 +439,7 @@ impl VectorStore for SqliteVecStore {
 }
 
 #[derive(Debug, Clone)]
-pub struct VectorPoint {
+pub(crate) struct VectorPoint {
     pub id: i64,
     pub vector: Vec<f32>,
     pub payload: serde_json::Value,
@@ -566,7 +566,7 @@ impl VectorIndex {
             .is_ok()
     }
 
-    pub fn upsert(&self, points: &[VectorPoint]) -> bool {
+    pub(crate) fn upsert(&self, points: &[VectorPoint]) -> bool {
         if points.is_empty() {
             return false;
         }

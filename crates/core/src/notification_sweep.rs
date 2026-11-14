@@ -24,7 +24,10 @@ pub(crate) fn first_sync_settled(conn: &Connection) -> Result<bool> {
 
 type SweepRow = (i64, String, String, Option<String>, Option<String>);
 
-pub fn sweep(conn: &Connection, bus: Option<&crate::event_bus::EventBus>) -> Result<SweepOutcome> {
+pub(crate) fn sweep(
+    conn: &Connection,
+    bus: Option<&crate::event_bus::EventBus>,
+) -> Result<SweepOutcome> {
     let now = now_stamp();
     let cursor_raw = crate::settings::get_i64(conn, CURSOR_KEY, -1)?;
     let sweep_at = crate::settings::get_string(conn, SWEEP_AT_KEY)?;

@@ -279,7 +279,7 @@ impl ServerEvent {
     }
 
     #[must_use]
-    pub fn connector_refreshed(
+    pub(crate) fn connector_refreshed(
         connector_id: i64,
         name: &str,
         ok: bool,

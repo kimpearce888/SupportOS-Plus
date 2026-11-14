@@ -679,7 +679,7 @@ pub fn get(conn: &Connection, conversation_id: i64) -> Result<Option<Value>> {
     })))
 }
 
-pub async fn review_draft(
+pub(crate) async fn review_draft(
     conn: &Connection,
     chat: Option<CoachingChatFn<'_>>,
     conversation_id: i64,

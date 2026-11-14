@@ -4,13 +4,13 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
-pub const DISPLAY_NAME: &str = "SupportOS+";
+const DISPLAY_NAME: &str = "SupportOS+";
 
-pub const PRODUCT_ID: &str = "SupportOS-Plus";
+const PRODUCT_ID: &str = "SupportOS-Plus";
 
-pub const DEB_PACKAGE: &str = "supportos-plus";
+const DEB_PACKAGE: &str = "supportos-plus";
 
-pub const BINARY_NAME: &str = "supportos-plus";
+const BINARY_NAME: &str = "supportos-plus";
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -214,7 +214,7 @@ fn copy_hicolor_icons(icons_dir: &Path, hicolor_root: &Path) -> anyhow::Result<(
     Ok(())
 }
 
-pub fn stage_appdir(workspace_root: &Path, appdir: &Path) -> anyhow::Result<()> {
+fn stage_appdir(workspace_root: &Path, appdir: &Path) -> anyhow::Result<()> {
     if appdir.exists() {
         fs::remove_dir_all(appdir)?;
     }
@@ -271,7 +271,7 @@ pub fn stage_appdir(workspace_root: &Path, appdir: &Path) -> anyhow::Result<()> 
     Ok(())
 }
 
-pub fn stage_deb(workspace_root: &Path, staging: &Path) -> anyhow::Result<()> {
+fn stage_deb(workspace_root: &Path, staging: &Path) -> anyhow::Result<()> {
     let bin_src = workspace_root
         .join("target")
         .join("release")

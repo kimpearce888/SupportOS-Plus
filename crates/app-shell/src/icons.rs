@@ -81,7 +81,7 @@ impl Icon {
         }
     }
 
-    pub fn show(self, ui: &mut egui::Ui, size: f32, color: egui::Color32) -> egui::Response {
+    pub(crate) fn show(self, ui: &mut egui::Ui, size: f32, color: egui::Color32) -> egui::Response {
         let (id, rect) = ui.allocate_space(egui::vec2(size, size));
         self.paint_at(ui.painter(), rect, color);
         let response = ui.interact(rect, id, egui::Sense::hover());

@@ -219,7 +219,7 @@ fn endpoint_by_id<'a>(list: &'a [EndpointConfig], id: &str) -> Option<&'a Endpoi
     list.iter().find(|e| e.id == id && e.enabled)
 }
 
-pub fn backend_configured(conn: &Connection) -> bool {
+pub(crate) fn backend_configured(conn: &Connection) -> bool {
     if AiRole::ALL
         .iter()
         .any(|role| resolve_role(conn, *role).is_some())

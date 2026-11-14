@@ -685,3 +685,68 @@ session ends by adding what the next session must not have to rediscover.
   integration binaries). The core test lane IS `--lib` (520 / 528
   sandbox); a separate `--tests` run is a no-op that re-runs the lib
   lane and costs another ~8 min. Don't run it twice.
+
+- **D-25 (session 16, R4.3).** Visibility end state + the standing
+  recipe. Census: the tree was already 2/3 visibility-honest
+  (587 pub(crate) fn + 48 pub(super) fn pre-existed); the plan's
+  "minimize pub" letter resolved to 82 honest downgrades + ~140
+  compile-proven keeps + 9 dead deletions (pub surface 1,113→1,023).
+  The recipe for ANY future visibility work (also the retroactive
+  explanation of this batch's shape):
+  - **Token censuses see NAMED consumers only.** rustc's
+    effective-reachability sees what tokens cannot: types flowing
+    through return-value inference (`use super::*` chains, module
+    aliases like `use crate::interaction_engine as engine`, values
+    crossing crate roots unnamed), pub TRAIT method signatures, pub
+    STRUCT-field types, and pub-field→type chains. Therefore: apply
+    the census, then let `cargo check` drive restores — the loop is
+    monotone (restores only widen) and converges in ≤3 rounds per
+    crate; parse the `reachable at visibility` text from
+    private_interfaces warnings, it IS the required visibility.
+  - **Module caps are the cheapest lever:** `pub mod X` →
+    `pub(crate) mod X` at the crate root caps a whole subtree in one
+    line while inner items keep their textual `pub` (no churn); nine
+    landed (core maintenance/migrations/mirror/response_state_sql/
+    sandbox/webhook, migrations::intelligence, app-shell app,
+    design::scale::space).
+  - **A `pub` item's signature types must be at least as visible as
+    the item** — the compiler enforces this under -D warnings; never
+    fight it, restore the type.
+  - **Duplicate-name census artifacts:** same-named twins (two fns
+    `search_knowledge`, two structs `ThreadEntry`) share one token
+    stream — a twin's callers credit both defs; dead_code after a
+    downgrade is the truth serum (knowledge_store::search_knowledge
+    was a phantom-consumer dead fn all along — deleted).
+  - **pub-field/struct-field census decision:** fields ride their
+    type's visibility (1,861 pub fields; a field-level pass = churn
+    for zero reach change). Ruled: keep.
+- **G-14 (session 16).** The G-08 sanitize machinery has a THIRD
+  length-preservation trap besides multi-line strings and char
+  literals: **string line-continuations** (`\` followed by newline
+  inside a normal string literal) — an escape branch that blanks 2
+  chars unconditionally EATS the newline and desyncs every later line
+  number (r43's PageKey was off by 9 from 9 continuations). Fix:
+  blank the backslash, leave the newline; assert
+  `[i for i,c in san if c=='\n'] == [i for i,c in text if c=='\n']`
+  per file before trusting ANY line number. The apply script's
+  per-line content assertions are the second net (this is what
+  caught the bug before any wrong edit landed).
+- **G-15 (session 16).** Rust visibility ladder direction, the
+  R4.3 trap: **private covers the defining module and its
+  DESCENDANTS only — never its ancestors or siblings.** An item in a
+  nested module (design::scale::space) used from an ANCESTOR module
+  (design) needs `pub(super)` or wider; `pub(super)` covers exactly
+  ONE level up (the parent tree), so grandparent users (SP4 used
+  from design two levels above space) need `pub(crate)`. Same-file
+  is NOT same-module: inbox_geo's consts sit beside their consumers
+  in inbox.rs but in a CHILD module — private broke them.
+- **Q-05 (session 16, R4.3).** catalog::CopilotTool is a dead
+  vocabulary type: the 22-variant copilot tool enum (as_str/description
+  impls, ~120 lines) has ZERO tree-wide consumers beyond its own root
+  re-export (core's copilot dispatch uses its own wire structs and
+  string literals instead). Kept `pub` this batch per the R3.6
+  GraphHumanRelation::parse precedent (catalog = deliberate
+  closed-vocabulary surface; a visibility pass deletes nothing
+  vocabulary-shaped). If the owner wants it gone, the deletion is:
+  the enum + impl + `pub use copilot::CopilotTool;` root re-export;
+  the same question applies to GraphHumanRelation::parse (R3.6 note).

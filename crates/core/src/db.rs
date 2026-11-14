@@ -18,7 +18,7 @@ pub fn open(path: &Path) -> Result<Connection> {
     Ok(conn)
 }
 
-pub fn ensure_migrations_table(conn: &Connection) -> Result<()> {
+pub(crate) fn ensure_migrations_table(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS _migrations (
             version    INTEGER PRIMARY KEY,
@@ -38,7 +38,12 @@ pub fn latest_version(conn: &Connection) -> Result<u32> {
     Ok(u32::try_from(v).unwrap_or(0))
 }
 
-pub fn apply_migration(conn: &mut Connection, version: u32, label: &str, sql: &str) -> Result<()> {
+pub(crate) fn apply_migration(
+    conn: &mut Connection,
+    version: u32,
+    label: &str,
+    sql: &str,
+) -> Result<()> {
     let tx = conn.transaction()?;
     tx.execute_batch(sql).map_err(|e| Error::Migration {
         version,
@@ -171,7 +176,7 @@ impl DbHandle {
         DbWriteGuard { guard }
     }
 
-    pub fn long_op_guard(&self) -> DbLongOpGuard<'_> {
+    pub(crate) fn long_op_guard(&self) -> DbLongOpGuard<'_> {
         let path = self.with_read(db_file_path);
         if let Some(path) = path
             && let Ok(conn) = open(&path)
@@ -218,7 +223,7 @@ impl DerefMut for DbWriteGuard<'_> {
     }
 }
 
-pub struct DbLongOpGuard<'a> {
+pub(crate) struct DbLongOpGuard<'a> {
     lane: LongOpLane<'a>,
 }
 

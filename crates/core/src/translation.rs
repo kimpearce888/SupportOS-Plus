@@ -532,7 +532,7 @@ fn stopwords_from(cleaned: &str) -> Vec<String> {
 }
 
 #[derive(Debug)]
-pub struct TranslateError(pub String);
+pub(crate) struct TranslateError(pub String);
 
 fn purpose_prompt(purpose: &str) -> &'static str {
     match purpose {
@@ -557,7 +557,7 @@ pub(crate) type ChatFn<'a> = &'a dyn Fn(
     >,
 >;
 
-pub async fn translate(
+pub(crate) async fn translate(
     conn: &Connection,
     chat: ChatFn<'_>,
     text: &str,

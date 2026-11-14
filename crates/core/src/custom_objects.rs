@@ -324,7 +324,7 @@ pub fn delete_type(conn: &Connection, type_id: i64) -> Result<bool> {
     Ok(true)
 }
 
-pub fn validate_properties(
+fn validate_properties(
     fields: &[FieldDef],
     input: &Map<String, Value>,
 ) -> std::result::Result<Map<String, Value>, String> {

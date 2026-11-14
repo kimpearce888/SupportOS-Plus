@@ -425,7 +425,7 @@ pub(crate) fn find_cached_run(
     Ok(run)
 }
 
-pub fn input_hash(conversation_id: i64, content_signature: &str) -> String {
+pub(crate) fn input_hash(conversation_id: i64, content_signature: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(format!("{conversation_id}:{content_signature}"));
     hex(&hasher.finalize())
@@ -1426,7 +1426,7 @@ pub(crate) async fn extract_memories(
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct ClusterOut {
+pub(crate) struct ClusterOut {
     pub title: String,
     pub summary: String,
     pub category: Option<String>,
@@ -1437,7 +1437,7 @@ pub struct ClusterOut {
 
 const CLUSTER_PROMPT_CONVERSATION_CAP: usize = 250;
 
-pub async fn cluster_issues(
+pub(crate) async fn cluster_issues(
     conn: &Connection,
     backend: &AiBackend,
     days: i64,
@@ -1827,7 +1827,7 @@ mod batch13_a3_a6_tests {
     }
 }
 
-pub async fn draft_article(
+pub(crate) async fn draft_article(
     conn: &Connection,
     backend: &AiBackend,
     candidate_id: i64,
@@ -1926,7 +1926,7 @@ pub async fn draft_article(
     Ok(draft_id)
 }
 
-pub async fn weekly_digest(
+pub(crate) async fn weekly_digest(
     conn: &Connection,
     backend: &AiBackend,
     trigger_kind: &str,

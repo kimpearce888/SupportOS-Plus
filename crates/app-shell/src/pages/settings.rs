@@ -162,7 +162,7 @@ impl GeneralSettings {
         }
     }
 
-    pub fn save(&self, conn: &rusqlite::Connection) -> spp_core::Result<()> {
+    pub(super) fn save(&self, conn: &rusqlite::Connection) -> spp_core::Result<()> {
         spp_core::settings::set_i64(conn, "sync_interval_minutes", self.sync_interval_minutes)?;
         spp_core::settings::set_i64(
             conn,

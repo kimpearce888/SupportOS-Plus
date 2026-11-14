@@ -6,7 +6,7 @@
 pub mod activity;
 pub mod attributes;
 pub mod copilot;
-pub mod graph;
+mod graph;
 pub mod notifications;
 pub mod operations;
 pub mod reporting;

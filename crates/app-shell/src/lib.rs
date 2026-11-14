@@ -2,7 +2,7 @@
 #![warn(clippy::all)]
 #![allow(clippy::module_name_repetitions, clippy::missing_errors_doc)]
 
-pub mod app;
+pub(crate) mod app;
 pub(crate) mod chart;
 pub mod design;
 pub mod fatal;

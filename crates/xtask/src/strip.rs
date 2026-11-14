@@ -15,7 +15,7 @@ pub struct StripStats {
 }
 
 #[derive(Default)]
-pub struct SourceStats {
+struct SourceStats {
     pub whole_lines: usize,
     pub inline_comments: usize,
 }
@@ -119,7 +119,7 @@ fn trim_trailing_ws(out: &mut Vec<u8>) {
     }
 }
 
-pub fn strip_source(src: &str) -> (String, SourceStats) {
+fn strip_source(src: &str) -> (String, SourceStats) {
     let b = src.as_bytes();
     let mut out: Vec<u8> = Vec::with_capacity(b.len());
     let mut stats = SourceStats::default();

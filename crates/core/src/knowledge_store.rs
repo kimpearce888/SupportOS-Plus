@@ -52,7 +52,7 @@ pub(crate) fn chunk_text(text: &str, max_len: usize, overlap: usize) -> Vec<Stri
 }
 
 #[must_use]
-pub fn checksum(content: &str) -> String {
+fn checksum(content: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(content.as_bytes());
     crate::crypto::hex(&hasher.finalize())
@@ -438,54 +438,6 @@ pub fn delete_document(conn: &Connection, id: i64) -> Result<bool> {
             Err(e)
         }
     }
-}
-
-#[must_use]
-pub fn search_knowledge(conn: &Connection, query: &str, visibility: Option<&str>) -> Vec<Value> {
-    let fts_query: String = query
-        .replace(['"', '*', '(', ')'], " ")
-        .split_whitespace()
-        .take(8)
-        .map(|t| format!("\"{t}\"*"))
-        .collect::<Vec<_>>()
-        .join(" ");
-    if fts_query.is_empty() {
-        return Vec::new();
-    }
-    let sql = match visibility {
-        Some(_) => {
-            "SELECT f.chunk_id, f.document_id, f.title,
-                    snippet(fts_knowledge, 1, '[', ']', '…', 12) AS snippet, f.visibility
-             FROM fts_knowledge f WHERE fts_knowledge MATCH ?1 AND f.visibility = ?2
-             ORDER BY rank LIMIT 25"
-        }
-        None => {
-            "SELECT f.chunk_id, f.document_id, f.title,
-                    snippet(fts_knowledge, 1, '[', ']', '…', 12) AS snippet, f.visibility
-             FROM fts_knowledge f WHERE fts_knowledge MATCH ?1
-             ORDER BY rank LIMIT 25"
-        }
-    };
-    conn.prepare(sql)
-        .and_then(|mut stmt| {
-            let rows = if visibility.is_some() {
-                stmt.query_map(params![fts_query, visibility], fts_row)?
-            } else {
-                stmt.query_map(params![fts_query], fts_row)?
-            };
-            rows.collect::<rusqlite::Result<Vec<_>>>()
-        })
-        .unwrap_or_default()
-}
-
-fn fts_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
-    Ok(json!({
-        "chunk_id": r.get::<_, i64>(0)?,
-        "document_id": r.get::<_, i64>(1)?,
-        "title": r.get::<_, String>(2)?,
-        "snippet": r.get::<_, String>(3)?,
-        "visibility": r.get::<_, String>(4)?,
-    }))
 }
 
 pub fn mark_reviewed(conn: &Connection, id: i64) -> Result<bool> {

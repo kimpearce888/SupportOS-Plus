@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use rusqlite::{Connection, params};
+use rusqlite::Connection;
 
 use crate::error::Result;
 
@@ -239,17 +239,6 @@ pub fn parse_mentions(body: &str, directory: &MentionDirectory) -> Result<Vec<Pa
         search_from = after_at + token.len();
     }
     Ok(mentions)
-}
-
-pub fn team_members(conn: &Connection, team_local_id: i64) -> Result<Vec<i64>> {
-    let mut stmt = match conn.prepare("SELECT user_id FROM team_members WHERE team_id = ?1") {
-        Ok(stmt) => stmt,
-        Err(_) => return Ok(Vec::new()),
-    };
-    let rows = stmt
-        .query_map(params![team_local_id], |r| r.get::<_, i64>(0))?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    Ok(rows)
 }
 
 #[cfg(test)]

@@ -106,7 +106,7 @@ impl AuditEntry {
         }
     }
 
-    pub fn with_after_state(mut self, state: Value) -> Self {
+    pub(crate) fn with_after_state(mut self, state: Value) -> Self {
         self.after_state = Some(state);
         self
     }

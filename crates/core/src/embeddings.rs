@@ -22,7 +22,7 @@ pub(crate) fn apply_m008(conn: &Connection) -> Result<()> {
 }
 
 #[must_use]
-pub fn content_hash(text: &str) -> String {
+pub(crate) fn content_hash(text: &str) -> String {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     text.hash(&mut hasher);
@@ -529,7 +529,7 @@ struct PendingChunk {
 }
 
 #[must_use]
-pub fn entity_type_for(table: &str) -> &'static str {
+fn entity_type_for(table: &str) -> &'static str {
     match table {
         "knowledge_chunks" => "knowledge_chunk",
         "docs_chunks" => "docs_chunk",
@@ -856,7 +856,7 @@ pub(crate) fn embed_pending_conversation_chunks(
     embed_pending_chunks(conn, "conversation_chunks", qdrant)
 }
 
-pub fn pass_hit_cap(embedded: usize) -> bool {
+pub(crate) fn pass_hit_cap(embedded: usize) -> bool {
     embedded >= EMBED_PASS_LIMIT as usize
 }
 

@@ -4,13 +4,13 @@ pub(crate) mod ai_features;
 pub(crate) mod cleanup;
 pub(crate) mod data_tools;
 pub(crate) mod db_breadth;
-pub mod intelligence;
+pub(crate) mod intelligence;
 pub(crate) mod mirror_parity;
 pub(crate) mod mirror_tables;
 pub(crate) mod side_threads;
 
 #[derive(Debug, Clone, Copy)]
-pub struct Migration {
+pub(crate) struct Migration {
     pub version: u32,
     pub label: &'static str,
     pub sql: &'static str,
