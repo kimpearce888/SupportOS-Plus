@@ -1,41 +1,44 @@
 # Refactor Progress — Live State
 
-Last updated: session 11 (2026-11-13). Update rule: every session updates
+Last updated: session 12 (2026-11-14). Update rule: every session updates
 this file before ending. Statuses: `pending` / `in_progress` / `done` /
 `terminal` (done + closed in `complete.md`) / `dropped` (with reason in
 `memory.md`).
 
 ## CURRENT POINTER
 
-- Next task: **R3.5 — `PageKey` tables** (match-arm duplication
-  label/route/etc. → table-driven single source; names stay stable,
-  invariant 5 — see plan §7 R3). CENSUS FIRST, with the standing
-  R2.5/R3.2/R3.4 lesson (plan numbers overcount; the census decides):
-  enumerate every `match` over `PageKey` tree-wide (app dispatch,
-  titles, labels, route strings, sidebar/nav fields) and classify
-  each arm-set — the table-driven fold only lands where ≥2 match
-  sites repeat the SAME arm payload shape; differing payloads and
-  single-sites get verdict rows as keeps.
-- Pre-flight [session 11]: R3.4 executed on the green base `ae64a25`
-  (run#338 green, all four lanes — the docs-only addendum head, the
-  standard next-session preflight gate). R3.4 head `9edd9b9` is
-  CI-VERIFIED GREEN — run#339 (id 43528209006), all four lanes
-  success incl. the kittest drift gate (the pixel-neutral design held
-  on all goldens; addendum commit below). Green base for R3.5: the
-  addendum head's own docs-only run (the standard next-session
-  preflight gate).
-- Session counter: 11 completed (R1 terminal; R2 stage TERMINAL; R3.1
+- Next task: **R3.6 — cross-crate vocabulary** (constants duplicated
+  between core and catalog move to catalog, its stated role — see plan
+  §7 R3 and memory F-02). CENSUS FIRST, same standing rule: enumerate
+  every vocabulary pair (constant names AND same-value string/number
+  literals) duplicated across crate boundaries, classify each, and fold
+  only where ≥2 crates genuinely share the same token with the same
+  meaning. Seed from the R3.5 census (verdict row below): the operations
+  drill-slug pair — core/src/operations.rs `page_drill("issues"/
+  "automation"/"diagnostics"/"sync-health"/"outreach")` produces the
+  wire vocabulary that app-shell/pages/operations.rs `page_key_from_drill`
+  parses; that pair is core↔app-shell (not core↔catalog), so the census
+  must also decide whether catalog (re-exported through core) is the
+  right home or whether the wire-contract stays duplicated-by-design.
+  Also census: catalog enums' `as_str`/label vocabularies vs any core or
+  app-shell twins (e.g. label/label-ish matches over catalog-owned
+  types), and core constants that catalog already owns copies of
+  (copilot.rs already imports MAX_TOOL_ROUNDS/MAX_TOOL_CALLS/
+  TOOL_RESULT_MAX_CHARS from catalog — verify no shadow twins remain).
+- Pre-flight [session 12]: run#340 green on the addendum head `cf5faa7`
+  (id 43531239531, all four lanes — the docs-only addendum head, the
+  standard next-session preflight gate). R3.5 head is the same tree
+  (zero code motion — census verdicts only) riding this commit.
+- Session counter: 12 completed (R1 terminal; R2 stage TERMINAL; R3.1
   terminal — run#332 green; R3.2 TERMINAL — run#335 green; R3.3
   TERMINAL — run#337 green on `518ba64`; R3.4 TERMINAL — run#339 green
-  on `9edd9b9`).
-- Environment: session 11's sandbox was reset again (the clone under
-  /tmp/my-project gone — empty dir remnant; tool-results, rustup, and
-  cargo-home under /tmp/my-project survived). Re-cloned to the
-  canonical /home/z/SupportOS-Plus (handover §2's stated location —
-  also the only tree the file-edit tool reaches, G-12). Warm build ran
-  detached (G-10 subshell form, cargo test --no-run) while the census
-  executed. G-05 preemptive incremental-rm before every test lane;
-  battery green at exact baselines (520/528/293+2/56).
+  on `9edd9b9`; R3.5 TERMINAL — zero-motion census batch, CI row rides
+  this session's ledger commit).
+- Environment: session 12 partial-reset only — the clone at
+  /home/z/SupportOS-Plus SURVIVED (handover §2 location, G-12) along
+  with tool-results and /tmp/my-project/{rustup,cargo-home}; toolchain
+  verified 1.99.1 via the §3 partial-reset exports. No rebuild needed
+  (tree code-identical to the CI-green base).
 
 ## Task states
 
@@ -62,7 +65,8 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 | R3.2 SQL plumbing | terminal (session 9) | lenient row-collect tail consolidated into db::query_rows + db::rows_ok; 80 sites (73 census + 7 turbofish blind-spot); +657/−823 across 32 files; battery green (520/528/293+2/56); CI run#335 green on `5cc08fc` — see complete.md |
 | R3.3 HTTP/serde plumbing | terminal (session 10) | 4 LM-Studio send tails → `send_json` + `authorized` (byte-identical messages); 2 docs tails → `docs_request_json` (byte-identical friendly strings, verified by continuation-resolution); 122 flat key-indexed extraction sites → `json_fields::json_str`/`json_string` (new module, 9 LOC); 13 send-tails/6 builders/139 idioms censused, keeps recorded in the R3.3 verdict table; battery green (520/528/293+2/56); strip-check 206/206; CI run#337 green on `518ba64` — see complete.md |
 | R3.4 page scaffolding | terminal (session 11) | census: hosting layer ALREADY shared (design:: hosts/page_header; 21/23 pages); the real repeat = the "Sync now" toolbar fragment byte-identical ×4 (dashboard/customers/reports/organizations) → `sync_health::sync_now_button` (button+hover+match+3 note strings in ONE place; re-read flag returns for the caller-side page-specific invalidate()); inbox variant, ensure_loaded latches, RANGES chip loops, LIST_CAP hint censused as keeps (R3.4 verdict table); +41/−97 across 5 files; battery green (520/528/293+2/56); strip-check 206/206; CI run#339 green on `9edd9b9` — see complete.md |
-| R3.5–R3.6 DRY | pending | see plan §7 R3 |
+| R3.5 PageKey tables | terminal (session 12) | census: ZERO folds land — the attribute layer is already single-sourced (label() str site, Icon::for_page Icon site, apply_invalidations field-dispatch, render-dispatch heterogeneous payloads — four disjoint payload shapes, no ≥2 same-shape pair); titles/nav-labels are decoupled roles (2 intentional divergences); NAV_GROUPS + all() already tables; drill-slug pair queued to R3.6 — see complete.md |
+| R3.6 cross-crate vocabulary | pending | see plan §7 R3 + CURRENT POINTER seed |
 | R4.1–R4.5 clean code | pending | see plan §7 R4 |
 | R5.1–R5.3 guardrails | pending (optional, stage-gated) | |
 | R6.1–R6.2 polish + close | pending | |
@@ -188,7 +192,50 @@ Checks: cargo machete (v0.9.2, installed ad hoc) now reports only the 3 document
 
 **R3.4 verdict summary:** the plan's "repeated page composition through the shared host compositor" letter resolves to ONE real consolidation — the 4× Sync-now fragment (25 lines each → 3-line calls + a 32-line helper; net −56: +41/−97 across 5 files). The pointer's 5-site estimate censused to 4 (inbox is a different policy). Dashboard's orphaned ButtonVariant import trimmed with the fold.
 
+### R3.5 — PageKey tables (session 12; census: scanner r35_census.py in tool-results + manual alias-verified sweep — the "titles" enumeration extended beyond matches to the page_header literal sites; ZERO table folds land)
+
+| candidate | sites | verdict | outcome |
+|---|---|---|---|
+| `PageKey::label()` (pages/mod.rs:349) — 23-arm exhaustive match, `&'static str` payload | 1 | keep | THE single source of nav/display labels — already consolidated; consumed by chrome.rs nav_row ×3 (label, interact-id, WidgetInfo) and smoke.rs; no second str-payload match exists tree-wide → fails the ≥2-same-shape fold precondition |
+| `Icon::for_page(key)` (icons.rs:57) — 23-arm exhaustive match, `Icon` variant payload | 1 | keep | THE single source of per-page nav icons; payload shape disjoint from label()'s str — a combined (label, icon) table would be a different-shape merge, explicitly excluded by the fold rule; compiler exhaustiveness (adding a page forces this arm + label()'s arm + all()'s array-length sync) already delivers the table's add-a-page safety |
+| `apply_invalidations` (app/mod.rs:190) — 23-arm exhaustive, `self.<field>.invalidate()` field dispatch | 1 | keep | not table-convertible: arms target distinct struct fields through `&mut self` — a data table cannot pre-bind per-field mutable borrows; the `Shell => {}` arm is the honest no-state case |
+| render dispatch (app/mod.rs:852) — 23-arm exhaustive, heterogeneous payloads | 1 | keep | per-page `ui()` calls with differing arg tuples (sync/bus) + side effects (notifications badge latch); the `Inbox => unreachable!("inbox handled above")` arm is the documented D-14/D-15 exhaustiveness artifact (memory.md:182); fails same-shape precondition |
+| `page_header` title literals across pages (implicit, non-match duplication of label() values) | ~20 byte-match + Shell; 2 diverge | keep | title and nav-label are SEPARATE UI roles — proven by 2 intentional divergences (Onboarding "Welcome to SupportOS+", Operations "Operations Center") and Inbox rendering no title literal at all; pages don't hold their PageKey, so folding = threading a key/label through 20+ ui() signatures for byte-identical output (pixel-neutral by construction but churn-heavy, zero behavior gain); design/mod.rs:2446 "Inbox" call is the D-10 test-region demo — exempt |
+| route strings: `page_key_from_drill(&str)` (pages/operations.rs:112) — 5-arm partial over wire slugs | 1 + cross-crate producer | keep (R3.6 pointer) | intentional subset (only pages operations tiles drill into); slugs are the server wire vocabulary produced by core/src/operations.rs `page_drill(...)` — the core↔app-shell slug pair is cross-crate vocabulary, queued to R3.6's census with the R3.5 seed recorded in the CURRENT POINTER |
+| `invalidated_pages` (pages/queries.rs) — match over `ServerEvent` producing `Vec<PageKey>` groupings | n/a | keep (out of scope) | event-keyed, not PageKey-keyed — the arm payloads are semantic invalidation groupings per event, not per-variant attributes |
+| `NAV_GROUPS` (chrome.rs:50) + `PageKey::all()` (pages/mod.rs:377) | n/a | keep (already tables) | the sidebar order/membership and the ordered enumeration are already data tables; all()'s `[Self; 23]` length type forces compiler-checked sync with the variant count |
+
+**R3.5 verdict summary:** ZERO folds land — the plan's "match-arm duplication (label/route/etc.)" letter is already satisfied by construction: each PageKey attribute has exactly ONE 23-arm match with its own payload shape (str / Icon / field-dispatch / heterogeneous render), no two sites share a shape, and the nav/title/route consumers already route through the single sources (nav_row consumes label() + for_page; NAV_GROUPS drives membership; the drill slugs are a wire contract with an R3.6 pointer). Fourth consecutive census correction (R2.5 panics 30→4, R3.1 duplicate enums 0, R3.4 sync-fragment 5→4, R3.5 fold sites N→0) — the plan's R3 one-liners systematically overcount; the census discipline is load-bearing.
+
 ## Session log
+
+### Session 12 — 2026-11-14
+- Pre-flight: run#340 green on the addendum head `cf5faa7` (id
+  43531239531, all four lanes — the standard next-session preflight
+  gate). Environment: PARTIAL reset only — the canonical clone at
+  /home/z/SupportOS-Plus survived (G-12 intact); toolchain via the §3
+  partial-reset exports (RUSTUP_HOME/CARGO_HOME under
+  /tmp/my-project); rustc 1.99.1 verified; credentials active.
+- R3.5 census executed: r35_census.py (tool-results, G-08
+  discipline; naive brace-tracker + arm regex) found the exhaustive
+  matches, then a MANUAL alias sweep caught what the scanner missed
+  — icons.rs binds `use crate::pages::PageKey as K` (scanner lesson:
+  alias-bound arms need a human pass; recorded for R3.6's scanner
+  work). Verified-by-read: search.rs/reporting.rs matches are over
+  other enums (Scope/Metric — false positives); palette/smoke/page
+  files are constructions/iterations, not matches; queries.rs is
+  ServerEvent-keyed; core's `match key` sites (workload/operations/
+  it_helpscout/sync loops) are non-PageKey types.
+- Census verdict: ZERO table folds (full verdict table above). The
+  attribute layer is already single-sourced — the fourth
+  consecutive plan-overcount correction. One cross-crate seed found
+  for R3.6: the drill-slug vocabulary pair (core `page_drill` ↔
+  app-shell `page_key_from_drill`).
+- Zero code motion → no local battery needed (tree code-identical
+  to the CI-green base; the ledger commit is docs-only per the
+  addendum convention, riding CI run as its own verification).
+- Commits: this session's ledger commit (R3.5 terminal + R3.6
+  pointer + memory D-20).
 
 ### Session 11 — 2026-11-13
 - Pre-flight: run#338 green on `ae64a25` (all four lanes — the

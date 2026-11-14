@@ -346,6 +346,32 @@ session ends by adding what the next session must not have to rediscover.
   the two writes) — recorded so a future reader does not "restore"
   the order.
 
+- **D-20 (session 12, R3.5).** PageKey-table end state — ZERO folds;
+  the attribute layer was already single-sourced and stays that way:
+  `label()` is the ONE str site (pages/mod.rs:349), `Icon::for_page`
+  the ONE icon site (icons.rs:57), `apply_invalidations` the ONE
+  field-dispatch site (app/mod.rs:190 — not table-convertible: arms
+  target distinct struct fields through `&mut self`), render dispatch
+  the ONE heterogeneous site (app/mod.rs:852). Four disjoint payload
+  shapes → the ≥2-same-shape fold precondition never triggers.
+  Durable sub-rulings: (a) page-title literals and nav labels are
+  SEPARATE UI roles — Onboarding's "Welcome to SupportOS+" and
+  Operations' "Operations Center" are the proven intentional
+  divergences; a future "consolidate titles with label()" proposal
+  must thread a PageKey through 20+ page ui() signatures for
+  byte-identical output — rejected unless the owner asks (Q-03
+  family). (b) Adding a page: write the enum variant + label() arm +
+  for_page arm + all() entry + NAV_GROUPS row + the two dispatch
+  arms — the compiler FORCES all six (exhaustive matches + the
+  `[Self; 23]` length type); this is the table's safety property,
+  delivered by matches. (c) The drill-slug wire vocabulary
+  (core/src/operations.rs `page_drill` ↔ app-shell
+  pages/operations.rs `page_key_from_drill`) is the R3.6 seed —
+  cross-crate pair, catalog-home question open there. (d) Scanner
+  lesson: match-arm census regexes miss alias-bound arms
+  (`use ... PageKey as K`) — every future census needs the manual
+  alias sweep after the scanner pass.
+
 
 ## Facts (F-xx)
 
