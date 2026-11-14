@@ -27,12 +27,13 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
   lint threshold after the split; new code comment-free (constraint 3).
 - Pre-flight [session 14]: run#345 green on `155c277` (the session-13
   addendum head — the standard docs-only preflight gate). R4.2-a executed
-  on that green base; its own CI verification is the addendum gate for
-  the next session.
+  on that green base and is now itself CI-VERIFIED (addendum, session 14):
+  run#346 (id 43585107897) green on `fa03cad`, all four lanes incl. the
+  kittest drift gate. Green base for R4.2-b: this addendum head's own
+  docs-only run (the standard next-session preflight gate).
 - Session counter: 14 completed (R1 terminal; R2 TERMINAL; R3 TERMINAL
   — R3.1 run#332, R3.2 run#335, R3.3 run#337, R3.4 run#339, R3.5
-  zero-motion run#341, R3.6 run#342; R4.1 run#344; R4.2-a rides this
-  push).
+  zero-motion run#341, R3.6 run#342; R4.1 run#344; R4.2-a run#346).
 - Environment: session 14 was ANOTHER full reset — repo re-cloned via
   github-reconnect.sh; toolchain SURVIVED at /tmp/my-project/
   {rustup,cargo-home} (the persistent-dir location MOVED this reset —
@@ -71,7 +72,7 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 | R3.5 PageKey tables | terminal (session 12) | census: ZERO folds land — the attribute layer is already single-sourced (label() str site, Icon::for_page Icon site, apply_invalidations field-dispatch, render-dispatch heterogeneous payloads — four disjoint payload shapes, no ≥2 same-shape pair); titles/nav-labels are decoupled roles (2 intentional divergences); NAV_GROUPS + all() already tables; drill-slug pair queued to R3.6 — see complete.md |
 | R3.6 cross-crate vocabulary | terminal (session 12) | census: ZERO core↔catalog const duplication (plan letter overcounted — 6th consecutive correction); real debt = 8 inline-parse twins of existing catalog parse fns (GraphNodeKind ×7 + AiAttributeKey ×1) + the drill-slug wire pair → `catalog::routes` (5 consts, new module); +24/−44 +6 (net −20); battery green (520/528/293+2/56, strip-check 207/207) — see complete.md |
 | R4.1 naming | terminal (session 13) | census (r41_census.py): 341 bool decls (272 prod) + 118 bool-returning fns + 478 short-id kinds + 232 suspicious-word hits; SEVENTH consecutive census correction — the tree's naming was overwhelmingly honest; 10 surgical renames + 1 deletion (aa_get, D-18 rule): temp→temperature, already→already_exists/already_queued, has→has_column, known/conversation→*_exists, palette_take→query_committed, right→align_right ×3, drill→drillable, assistant→from_assistant, ins→stmt ×2; keep rulings in the R4.1 verdict table; dt_cell ×3 fold candidate recorded, not acted; battery green (520/528/293+2/56, clippy x2, gate, icons, strip-check 207/207); CI run#344 green on `1b653d4` — see complete.md |
-| R4.2 decomposition (batch a) | in_progress (session 14) | census (r42_census.py, cfg-aware fn-span scanner): 3,277 prod fns / 991 test fns; top-20 censused; 6 CORE mega-fns split (execute 1051→79 dispatch + 22 tool fns; derived_edges_touching 686→26 + 11 Kind fns + 4 module helpers + 2 epilogue fns; apply_m046 405→15 manifest + ensure_fk + 10 data consts; execute_job 3 fat arms→3 methods incl. embed×3 fold; build_support_health_report 465→34 manifest + 9 domain fns; analyze_friction 410→manifest + 6 finding fns + finding helper); 6 keeps + 11 queued to R4.2-b (verdict table below); battery green (520/528/293+2/56, clippy ×2, gate, icons, strip 207/207); CI row rides this push; D-23 |
+| R4.2 decomposition (batch a) | in_progress (session 14) | census (r42_census.py, cfg-aware fn-span scanner): 3,277 prod fns / 991 test fns; top-20 censused; 6 CORE mega-fns split (execute 1051→79 dispatch + 22 tool fns; derived_edges_touching 686→26 + 11 Kind fns + 4 module helpers + 2 epilogue fns; apply_m046 405→15 manifest + ensure_fk + 10 data consts; execute_job 3 fat arms→3 methods incl. embed×3 fold; build_support_health_report 465→34 manifest + 9 domain fns; analyze_friction 410→manifest + 6 finding fns + finding helper); 6 keeps + 11 queued to R4.2-b (verdict table below); battery green (520/528/293+2/56, clippy ×2, gate, icons, strip 207/207); CI run#346 green on `fa03cad` (all 4 lanes incl. kittest drift gate); D-23 |
 | R4.3–R4.5 clean code | pending | see plan §7 R4 |
 | R5.1–R5.3 guardrails | pending (optional, stage-gated) | |
 | R6.1–R6.2 polish + close | pending | |
@@ -334,8 +335,12 @@ internal error.
   promotion, the ensure_fk fold, or the embed fn-pointer fold; no
   logic edits, no signature changes to any pub surface, no test
   changes (the 520-test suite is the semantic proof).
-- Commits: `refactor(R4.2): decomposition — …` (this push). CI row
-  rides the push; the addendum records it next session.
+- Commits: `fa03cad` (code + ledger, battery-green). CI: run#346
+  (id 43585107897) completed / success on `fa03cad` — all four lanes:
+  check (fmt/clippy/test/deny), packages x86_64, packages arm64,
+  kittest snapshot locks (drift gate green — expected, zero
+  app-shell source contact). Addendum commit records this + queues
+  R4.2-b.
 
 ### Session 13 — 2026-11-14
 - Pre-flight: run#343 green on the session-12 addendum head `66f3968`
