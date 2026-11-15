@@ -15,7 +15,8 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
   quality 16, ai_evidence 1 — cluster mapping recorded in the
   session-21 log). Done: R7.1 (f9c568c), R7.2 (e62bf08), R7.3
   (10c3cde, CI run#361 green all four lanes), R7.4-a sandbox
-  cluster (this commit). Then R7.4-b/c -> R7.5 -> R7.6.
+  cluster (05f7006, CI run#362 green all four lanes incl. kittest
+  drift gate). Then R7.4-b/c -> R7.5 -> R7.6.
 - Last program-1 head `6dd8c8b` CI-green (run#360, all four lanes —
   verified this session before Program 2 opened). Session counter
   resets for Program 2: session 1 of Program 2 = session 21 overall.
@@ -434,6 +435,11 @@ lanes, the no-simulation gate, kittest drift gate).
   webhook 29, ai_pipeline 1109/1740/1744, support_graph 277,
   workers/execute/mod 524). Class D = 3 (workers/mod 30, task_bridge
   41, design/mod 239).
+- CI verification: run#362 (id 43719049086) GREEN on 05f7006,
+  all four lanes (check incl. deny, packages x86_64, packages
+  arm64, kittest drift gate). Session-21 total: 5 batches (R7.1,
+  R7.2, R7.3, R7.4-a/1 + this addendum head), CI runs #361-#362.
+
 - R7.4-a first cluster executed (sandbox.rs x4): the already-Result
   apply_seccomp narrows its two rule-construction sites — fd_rule
   closure returns Result<SeccompRule,String> with map_err(|e|
