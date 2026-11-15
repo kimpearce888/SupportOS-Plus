@@ -10,14 +10,15 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 - **PROGRAM 2 OPEN** (session 21, 2026-11-15) — owner override
   "complete anything ignored and skipped"; operative task list is
   plan §11 (Q-01..Q-06 execution). Program 1 stays closed; every
-  protocol carries over. **CURRENT POINTER: R7.4-a continues** (class-A clusters, 33
-  sites left: coaching 10, interaction_engine 5, quality 16,
-  ai_evidence 1 — cluster mapping in the session-21 log; D-33(d)
-  mandates full-site rg re-census per cluster). Done: R7.1
-  (f9c568c), R7.2 (e62bf08), R7.3 (10c3cde, CI run#361), R7.4-a/1
-  sandbox (05f7006, run#362), R7.4-a/2 security cluster (this
-  commit — the full bubble: security.rs + 4 chains + 16 tool fns,
-  D-33). Then R7.4-b/c -> R7.5 -> R7.6.
+  protocol carries over. **CURRENT POINTER: R7.4-a/3 coaching cluster** (class-A sites
+  left: coaching 10, interaction_engine 5, quality 16, ai_evidence
+  1 — mapping in the session-21 log; D-33(d) mandates full-site rg
+  re-census per cluster). Done: R7.1 (f9c568c), R7.2 (e62bf08),
+  R7.3 (10c3cde, CI run#361), R7.4-a/1 sandbox (05f7006, run#362),
+  R7.4-a/2 security cluster (6c9538a, CI run#364 green all four
+  lanes incl. kittest drift gate; D-33; next-session prep mapping
+  below). Then interaction_engine -> quality -> ai_evidence ->
+  R7.4-b/c -> R7.5 -> R7.6.
 - Last program-1 head `6dd8c8b` CI-green (run#360, all four lanes —
   verified this session before Program 2 opened). Session counter
   resets for Program 2: session 1 of Program 2 = session 21 overall.
@@ -440,6 +441,27 @@ lanes, the no-simulation gate, kittest drift gate).
   all four lanes (check incl. deny, packages x86_64, packages
   arm64, kittest drift gate). Session-21 total: 5 batches (R7.1,
   R7.2, R7.3, R7.4-a/1 + this addendum head), CI runs #361-#362.
+
+- CI verification: run#364 (id 43726134629) GREEN on 6c9538a,
+  all four lanes (check incl. deny, packages x86_64, packages
+  arm64, kittest drift gate).
+- R7.4-a/3 prep (read-only census, recorded for the next session;
+  D-33(d) discipline): the coaching cluster's 10 sites are TWO
+  shapes — (1) coaching/checks.rs x5: LOCAL `let re =
+  Regex::new(...).expect("static regex")` constructors inside
+  check fns returning Value (check_acknowledgment 263,
+  check_detail 402, check_wrong_context 598+641,
+  check_preference_mismatch 702) — conversion: check fns ->
+  Result<Value>, sites become `?`; the caller is the review
+  driver's `let mut checks: Vec<Value> = vec![check_..(), ...]`
+  registry at coaching/mod.rs ~713 (9 arms; the driver fn's own
+  signature decides the boundary — inspect at edit time);
+  (2) coaching/mod.rs x5: OnceLock accessors (ack_markers/
+  frustration_markers -> &'static Regex, timeframe_patterns ->
+  &'static Vec<(Regex, &'static str)>, sites 204/212/221/225/229)
+  — conversion: OnceLock<Result<.,String>> + accessor ->
+  Result<&'static .> with the error clone happening only on the
+  never-taken path; callers at checks.rs 185/278/297 gain `?`.
 
 - R7.4-a/2 executed (security cluster, the full bubble — D-33):
   security.rs 8 sites via the rx() helper + Result signatures;
