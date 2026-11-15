@@ -14,8 +14,7 @@ pub mod routes;
 
 pub use activity::ResponseState;
 pub use attributes::{AI_ATTRIBUTE_SCHEMA_VERSION, AiAttributeKey, AttributeValueType};
-pub use copilot::CopilotTool;
-pub use graph::{GraphHumanRelation, GraphNodeKind};
+pub use graph::GraphNodeKind;
 pub use notifications::NotificationType;
 pub use operations::OperationsTileKey;
 pub use reporting::{ReportDimensionKey, ReportMetricKey};

@@ -56,39 +56,3 @@ impl GraphNodeKind {
         Self::ALL.iter().copied().find(|k| k.as_str() == s)
     }
 }
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum GraphHumanRelation {
-    RelatedTo,
-    DependsOn,
-    Blocks,
-    Mentions,
-    DuplicateOf,
-}
-
-impl GraphHumanRelation {
-    pub const ALL: [Self; 5] = [
-        Self::RelatedTo,
-        Self::DependsOn,
-        Self::Blocks,
-        Self::Mentions,
-        Self::DuplicateOf,
-    ];
-
-    #[must_use]
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::RelatedTo => "related_to",
-            Self::DependsOn => "depends_on",
-            Self::Blocks => "blocks",
-            Self::Mentions => "mentions",
-            Self::DuplicateOf => "duplicate_of",
-        }
-    }
-
-    #[must_use]
-    pub fn parse(s: &str) -> Option<Self> {
-        Self::ALL.iter().copied().find(|r| r.as_str() == s)
-    }
-}

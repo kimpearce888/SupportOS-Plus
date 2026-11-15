@@ -3,13 +3,12 @@
 Read this every session before touching anything. Pairs with `memory.md`
 (durable decisions) and `progress.md` (live state).
 
-**PROGRAM STATE: CLOSED** (session 20, 2026-11-15 — R6.2 terminal;
-20 sessions / 20 batches / CI runs #301–#359). No further batches are
-authorized by this plan; the owner options Q-01..Q-06 in `memory.md` are
-the only standing work items. A future session on this repo is
-MAINTENANCE: steps 1–3 below still apply (memory → handover → progress;
-re-provision per §2; confirm the last head CI-green), and new work
-should open a NEW plan entry rather than extend this one.
+**PROGRAM STATE: PROGRAM 2 OPEN** (session 21, 2026-11-15 — the owner
+overrode every Q-01..Q-06 default with "complete anything ignored and
+skipped"; plan §11 is the operative task list; CURRENT POINTER lives in
+`progress.md`'s Program 2 section). Program 1 (20 sessions / 20 batches /
+CI runs #301–#359) stays closed — its rules, battery, and conventions
+carry over verbatim. Steps 1–3 below still apply at every session start.
 
 ## 1. What this project is (and is not)
 

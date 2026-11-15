@@ -2,7 +2,7 @@ use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::catalog::{GraphHumanRelation, GraphNodeKind};
+use crate::catalog::GraphNodeKind;
 use crate::error::Result;
 use crate::search::escape_like;
 
@@ -151,17 +151,6 @@ pub(crate) fn node_ref(
 
 fn node_ref_or_tombstone(conn: &Connection, kind: GraphNodeKind, id: i64) -> Result<GraphNodeRef> {
     Ok(node_ref(conn, kind, id)?.unwrap_or_else(|| GraphNodeRef::removed(kind, id)))
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct LinkInput {
-    pub source_kind: GraphNodeKind,
-    pub source_local_id: i64,
-    pub target_kind: GraphNodeKind,
-    pub target_local_id: i64,
-    pub relation: GraphHumanRelation,
-    pub note: Option<String>,
-    pub user_local_id: Option<i64>,
 }
 
 pub(crate) fn human_edges_touching(

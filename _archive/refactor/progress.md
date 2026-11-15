@@ -1,29 +1,22 @@
 # Refactor Progress — Live State
 
-Last updated: session 18 (2026-11-15). Update rule: every session updates
+Last updated: session 21 (2026-11-15). Update rule: every session updates
 this file before ending. Statuses: `pending` / `in_progress` / `done` /
 `terminal` (done + closed in `complete.md`) / `dropped` (with reason in
 `memory.md`).
 
 ## CURRENT POINTER
 
-- **PROGRAM CLOSED** (R6.2 terminal — session 20, 2026-11-15). The
-  final code head is `168e71a` (R6.1; CI run#358 green, all 4 lanes);
-  the closing docs-only head `9522cde` is itself CI-VERIFIED: run#359
-  (id 43696107214) green, all 4 lanes (check / packages x86_64 /
-  packages arm64 / kittest drift gate — 203 goldens byte-identical).
-- No further batches. What remains for the owner only (all recorded
-  in `memory.md` §Open questions): Q-01 (R5 guardrails — gate port to
-  xtask, unwrap-policy lint, pedantic subset; dropped unexercised at
-  close), Q-02 (version bump + tagged release), Q-03/Q-04 (strict
-  unwrap/panic readings — the work is itemized), Q-05 (catalog
-  CopilotTool deletion), Q-06 (action-label consts). Any future
-  session on this repo = maintenance: handover §7 steps 1–3 (memory →
-  handover → progress; re-provision if reset; confirm the last head
-  CI-green) still apply; new work should open a NEW plan entry rather
-  than extend this one.
-- Session counter: 20 sessions / 20 batches / CI runs #301–#359.
-  Final metrics + closing report: `complete.md`.
+- **PROGRAM 2 OPEN** (session 21, 2026-11-15) — owner override
+  "complete anything ignored and skipped"; operative task list is
+  plan §11 (Q-01..Q-06 execution). Program 1 stays closed; every
+  protocol carries over. **CURRENT POINTER: R7.1** (Q-05
+  dead-vocabulary deletion, D-31 extension) — code applied, battery
+  pending; then R7.2 -> R7.3 -> R7.4(a/b/c) -> R7.5 -> R7.6.
+- Last program-1 head `6dd8c8b` CI-green (run#360, all four lanes —
+  verified this session before Program 2 opened). Session counter
+  resets for Program 2: session 1 of Program 2 = session 21 overall.
+  Program-1 final metrics + closing report stay in `complete.md`.
 
 ## Task states
 
@@ -386,6 +379,24 @@ lanes, the no-simulation gate, kittest drift gate).
 | build files (root + crates manifests, deny.toml, rust-toolchain, .cargo, .gitignore, workflows, gate script) | R6.1 | comment-free (279 lines removed; D-29 taxonomy; shebang/docstrings functional keeps); functional zero-diff four-way proven; deny lane green against the live advisory DB on run#358 |
 
 ## Session log
+
+### Session 21 — 2026-11-15
+- Maintenance pre-flight (program-1-closed protocol): re-cloned via
+  github-reconnect.sh (sandbox reset again); toolchain survived at
+  /tmp/my-project/{rustup,cargo-home}; last program-1 head 6dd8c8b
+  confirmed CI-green (run#360, all four lanes); terminal metrics
+  spot-checked on the fresh clone (unwrap 0 / expect 56 / panic
+  family 4 / comments 0 — exact match).
+- OWNER OVERRIDE received: "complete anything ignored and skipped"
+  -> Program 2 opened (plan §11; handover state line; memory
+  override addendum + D-31).
+- R7.1 code applied (census-first): copilot.rs cut to its three live
+  consts (enum+impl deleted; lib.rs re-export dropped, module kept —
+  the first draft deleted the whole file and compile-check caught the
+  live consts, D-31 lesson); graph.rs GraphHumanRelation block deleted
+  (94->58 lines); support_graph LinkInput struct deleted + import
+  narrowed; catalog re-export narrowed to GraphNodeKind. Compile check
+  green (-p catalog -p core).
 
 ### Session 20 — 2026-11-15
 - Pre-flight: run#357 (id 43682661859) green on `bf37d97` (the

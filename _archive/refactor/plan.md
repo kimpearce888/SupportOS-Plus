@@ -366,3 +366,48 @@ are not codegen inputs); CI kittest lane confirms.
 - `handover.md` — operations manual: environment, commands, battery, CI
   monitor, gotchas.
 - `memory.md` — durable decisions, facts, gotchas, open questions.
+
+---
+
+## 11. Program 2 — owner-options execution (Q-01..Q-06)
+
+Opened: session 21 (2026-11-15) by explicit owner directive
+("complete anything ignored and skipped") — the blanket override of
+every standing default in Q-01..Q-06. Program 1 stays closed; this
+entry is new work per the handover rule. All Program-1 constraints,
+invariants (§4), battery (handover §4), and session protocol (§8)
+carry over unchanged.
+
+Batches (one battery-green commit each, D-08):
+
+- **R7.1 (Q-05, extended by D-31 census).** Delete dead vocabulary:
+  CopilotTool enum + impl + root re-export per Q-05's letter (the
+  module stays — its MAX_TOOL_ROUNDS/MAX_TOOL_CALLS/
+  TOOL_RESULT_MAX_CHARS consts are live, core consumes them);
+  GraphHumanRelation cascade — LinkInput (the enum's only consumer)
+  has zero tree-wide constructors, so struct + enum + impl +
+  re-export go together (D-31 records the evidence; graph_edges
+  has no production INSERT — the read path is String-typed).
+- **R7.2 (Q-06).** Single-source the 42 prod action-label sites
+  ("Cancel" x17, "Edit" x13, "Delete" x12) into design consts
+  CANCEL_LABEL / EDIT_LABEL / DELETE_LABEL beside MISSING_VALUE;
+  the 2 test-region literals in overlays.rs stay (D-10).
+- **R7.3 (Q-04).** The three exhaustiveness-forced unreachable!
+  arms: app/mod.rs (fold the Inbox if into the match — pixel risk
+  covered by the CI kittest gate per D-05), oauth_state.rs
+  (range-newtype per D-15), execute.rs (outer-arm re-nesting per
+  D-15).
+- **R7.4 (Q-03).** Strict expect conversion by class:
+  R7.4-a class A (45 constant-input sites -> Result propagation,
+  split by module cluster across sessions as required),
+  R7.4-b class C (8 kept sites -> the D-14-noted restructures),
+  R7.4-c class D (3 bootstrap sites -> startup error handling).
+- **R7.5 (Q-01).** R5 guardrails: R5.1 gate port to xtask + drop
+  the python3 install from the release container (G-03); R5.2
+  unwrap-policy lint subcommand enforcing the post-R7.4 zero
+  state; R5.3 clippy pedantic subset in clippy.toml.
+- **R7.6 (Q-02).** Version bump to 1.10.0 + tagged release.
+
+Terminal condition: Q-01..Q-06 all closed in complete.md; new
+final metrics recorded against the §6 baseline; fresh handover
+state line. CI must be green at every pushed head (invariant 1).

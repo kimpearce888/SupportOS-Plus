@@ -566,6 +566,23 @@ session ends by adding what the next session must not have to rediscover.
   of the plan letters, each with its verdict table) → CI runs
   #301–#358 — the CI numbers are the ones that count.
 
+
+- **D-31 (session 21, R7.1).** Owner override received (see the
+  Open-questions addendum); Program 2 opened. R7.1's fresh census
+  EXTENDED Q-05's letter in both directions: (a) copilot the MODULE
+  stays — its MAX_TOOL_ROUNDS/MAX_TOOL_CALLS/TOOL_RESULT_MAX_CHARS
+  consts are live (core/src/copilot.rs consumes all three); only the
+  CopilotTool enum + its two impls + the root re-export are dead;
+  (b) the GraphHumanRelation cascade is deeper than the recorded
+  question — support_graph::LinkInput (the enum's ONLY consumer) has
+  zero tree-wide constructors (graph_edges has no production INSERT;
+  the write path exists only in tests), so the dead set is LinkInput +
+  GraphHumanRelation + impl + re-export. Read path is String-typed
+  (SQL reads thread raw TEXT), so the deletion is behavior-neutral.
+  Lesson for future Q-letters: an option scoped to a TYPE needs a
+  per-item census of its MODULE before whole-file action (the enum was
+  the letter; the module was not the dead unit).
+
 ## Facts (F-xx)
 
 - **F-01.** Baseline (session 1): 204 .rs files, 141,107 LOC — core
@@ -763,6 +780,11 @@ session ends by adding what the next session must not have to rediscover.
 
 
 ## Open questions / deferred owner decisions
+
+- **OWNER OVERRIDE (session 21).** "Complete anything ignored and
+  skipped" — every Q-01..Q-06 default is overridden; execution is
+  Program 2 under plan §11. The option letters below remain the work
+  specs; their "Default (standing unless overridden)" lines are dead.
 
 - **Q-01.** Whether to do R5 (guardrails: gate port to xtask, unwrap lint,
   pedantic subset) — stage-gated, owner's call. CLOSE-OUT ADDENDUM
