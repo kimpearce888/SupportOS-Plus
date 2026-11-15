@@ -5,7 +5,7 @@ use rusqlite::{Connection, params};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 
 pub(crate) const COACHING_NOTE: &str = "Advisory only - coaching never blocks or modifies the send. Every finding cites its evidence; heuristics are labeled as heuristics.";
 const PROMPT_VERSION: &str = "agent_coaching_v1";
@@ -197,40 +197,52 @@ fn is_closing_ack(sentence: &str) -> bool {
     )
 }
 
-fn ack_markers() -> &'static Regex {
-    static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+fn ack_markers() -> Result<&'static Regex> {
+    static RE: std::sync::OnceLock<std::result::Result<Regex, regex::Error>> =
+        std::sync::OnceLock::new();
     RE.get_or_init(|| {
         Regex::new(r"(?i)\b(sorry|apolog\w*|understand\w*|appreciate\w*|thank you|thanks for|patience|hear you|frustrat\w*)\b")
-            .expect("static regex")
     })
+    .as_ref()
+    .map_err(|e| Error::Other(Box::new(e.clone())))
 }
 
-fn frustration_markers() -> &'static Regex {
-    static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+fn frustration_markers() -> Result<&'static Regex> {
+    static RE: std::sync::OnceLock<std::result::Result<Regex, regex::Error>> =
+        std::sync::OnceLock::new();
     RE.get_or_init(|| {
         Regex::new(r"(?i)\b(frustrat\w*|unacceptable|ridiculous|again\?|still not working|third time|last time i|fed up|not happy|disappointed|worst)\b")
-            .expect("static regex")
     })
+    .as_ref()
+    .map_err(|e| Error::Other(Box::new(e.clone())))
 }
 
-fn timeframe_patterns() -> &'static Vec<(Regex, &'static str)> {
-    static PATTERNS: std::sync::OnceLock<Vec<(Regex, &'static str)>> = std::sync::OnceLock::new();
-    PATTERNS.get_or_init(|| {
-        vec![
-            (
-                Regex::new(r"(?i)\b(within|in|before|after)\s+(?:the\s+)?(?:next\s+)?(\d{1,4})\s*(minutes?|mins?|hours?|hrs?|days?|weeks?|business\s+days?)\b").expect("static regex"),
-                "relative timeframe",
-            ),
-            (
-                Regex::new(r"(?i)\bby\s+(tomorrow|today|tonight|eod|end\s+of\s+(?:the\s+)?(?:day|week|month|quarter)|next\s+(?:monday|tuesday|wednesday|thursday|friday)|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b").expect("static regex"),
-                "deadline",
-            ),
-            (
-                Regex::new(r"(?i)\b(as soon as possible|asap|right away|immediately)\b").expect("static regex"),
-                "urgency commitment",
-            ),
-        ]
-    })
+fn timeframe_patterns() -> Result<&'static Vec<(Regex, &'static str)>> {
+    static PATTERNS: std::sync::OnceLock<
+        std::result::Result<Vec<(Regex, &'static str)>, regex::Error>,
+    > = std::sync::OnceLock::new();
+    PATTERNS
+        .get_or_init(|| {
+            [
+                (
+                    r"(?i)\b(within|in|before|after)\s+(?:the\s+)?(?:next\s+)?(\d{1,4})\s*(minutes?|mins?|hours?|hrs?|days?|weeks?|business\s+days?)\b",
+                    "relative timeframe",
+                ),
+                (
+                    r"(?i)\bby\s+(tomorrow|today|tonight|eod|end\s+of\s+(?:the\s+)?(?:day|week|month|quarter)|next\s+(?:monday|tuesday|wednesday|thursday|friday)|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b",
+                    "deadline",
+                ),
+                (
+                    r"(?i)\b(as soon as possible|asap|right away|immediately)\b",
+                    "urgency commitment",
+                ),
+            ]
+            .into_iter()
+            .map(|(pattern, label)| Regex::new(pattern).map(|re| (re, label)))
+            .collect()
+        })
+        .as_ref()
+        .map_err(|e| Error::Other(Box::new(e.clone())))
 }
 
 struct ThreadRow {
@@ -719,13 +731,13 @@ pub(crate) async fn review_draft(
     let mut checks: Vec<Value> = vec![
         check_unanswered_questions(&conv, &threads, trimmed),
         check_duplicated_questions(&threads, trimmed),
-        check_timeframe(conn, &conv, trimmed),
-        check_acknowledgment(&threads, &signals, trimmed),
+        check_timeframe(conn, &conv, trimmed)?,
+        check_acknowledgment(&threads, &signals, trimmed)?,
         check_wording(preference.as_ref(), trimmed),
-        check_detail(&signals, &threads, trimmed),
+        check_detail(&signals, &threads, trimmed)?,
         check_internal_leakage(conn, &conv, &threads, trimmed),
-        check_wrong_context(conn, &conv, customer.as_ref(), trimmed),
-        check_preference_mismatch(preference.as_ref(), &threads, trimmed),
+        check_wrong_context(conn, &conv, customer.as_ref(), trimmed)?,
+        check_preference_mismatch(preference.as_ref(), &threads, trimmed)?,
     ];
 
     let mut ai = json!({ "available": false, "model": Value::Null, "error": Value::Null });

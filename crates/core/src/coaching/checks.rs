@@ -1,5 +1,9 @@
 use super::*;
 
+fn rx(pattern: &'static str) -> Result<Regex> {
+    Regex::new(pattern).map_err(|e| Error::Other(Box::new(e)))
+}
+
 pub(super) fn check_unanswered_questions(
     conv: &ConvRow,
     threads: &[ThreadRow],
@@ -163,7 +167,7 @@ pub(super) fn check_duplicated_questions(threads: &[ThreadRow], draft: &str) -> 
     )
 }
 
-pub(super) fn check_timeframe(conn: &Connection, conv: &ConvRow, draft: &str) -> Value {
+pub(super) fn check_timeframe(conn: &Connection, conv: &ConvRow, draft: &str) -> Result<Value> {
     let kind = "unsupported_timeframe";
     let active_incidents: Vec<(String, String, String)> = crate::db::query_rows(
         conn,
@@ -182,7 +186,7 @@ pub(super) fn check_timeframe(conn: &Connection, conv: &ConvRow, draft: &str) ->
     .unwrap_or_default();
     let mut promises: Vec<(String, &str)> = Vec::new();
     for sentence in split_sentences(draft) {
-        for (re, label) in timeframe_patterns() {
+        for (re, label) in timeframe_patterns()? {
             if re.is_match(&sentence) {
                 promises.push((sentence.chars().take(EXCERPT_CAP).collect(), *label));
                 break;
@@ -190,13 +194,13 @@ pub(super) fn check_timeframe(conn: &Connection, conv: &ConvRow, draft: &str) ->
         }
     }
     if promises.is_empty() {
-        return result(
+        return Ok(result(
             kind,
             "pass",
             "No explicit timeframe commitments found in the draft.",
             vec![],
             false,
-        );
+        ));
     }
     let findings: Vec<Value> = promises
         .iter()
@@ -254,13 +258,16 @@ pub(super) fn check_timeframe(conn: &Connection, conv: &ConvRow, draft: &str) ->
             format!(" and {} linked active incident(s)", active_incidents.len())
         }
     );
-    result(kind, "flagged", detail, findings, false)
+    Ok(result(kind, "flagged", detail, findings, false))
 }
 
-pub(super) fn check_acknowledgment(threads: &[ThreadRow], signals: &str, draft: &str) -> Value {
+pub(super) fn check_acknowledgment(
+    threads: &[ThreadRow],
+    signals: &str,
+    draft: &str,
+) -> Result<Value> {
     let kind = "missing_acknowledgment";
-    let signals_re =
-        Regex::new(r#"(?i)frustration[":\s]*(moderate|strong)"#).expect("static regex");
+    let signals_re = rx(r#"(?i)frustration[":\s]*(moderate|strong)"#)?;
     let mut frustration: Option<(String, String, Option<i64>)> = None;
     if signals_re.is_match(signals) {
         frustration = Some((
@@ -275,7 +282,7 @@ pub(super) fn check_acknowledgment(threads: &[ThreadRow], signals: &str, draft: 
             .rev()
             .take(8)
         {
-            if frustration_markers().is_match(&m.text) {
+            if frustration_markers()?.is_match(&m.text) {
                 frustration = Some((
                     "customer message (frustration markers)".into(),
                     m.text.chars().take(EXCERPT_CAP).collect(),
@@ -286,24 +293,24 @@ pub(super) fn check_acknowledgment(threads: &[ThreadRow], signals: &str, draft: 
         }
     }
     let Some((description, excerpt, thread_id)) = frustration else {
-        return result(
+        return Ok(result(
             kind,
             "not_applicable",
             "No frustration cues detected in recent customer messages or interaction signals.",
             vec![],
             false,
-        );
+        ));
     };
-    if ack_markers().is_match(draft) {
-        return result(
+    if ack_markers()?.is_match(draft) {
+        return Ok(result(
             kind,
             "pass",
             "Frustration cues present and the draft acknowledges them.",
             vec![],
             false,
-        );
+        ));
     }
-    result(
+    Ok(result(
         kind,
         "flagged",
         "Frustration cues detected but the draft contains no acknowledgment markers.",
@@ -313,7 +320,7 @@ pub(super) fn check_acknowledgment(threads: &[ThreadRow], signals: &str, draft: 
             "advice": "Acknowledge the experience before diving into the technical answer (one sentence is enough)."
         })],
         false,
-    )
+    ))
 }
 
 pub(super) fn check_wording(
@@ -383,7 +390,7 @@ pub(super) fn check_wording(
     )
 }
 
-pub(super) fn check_detail(signals: &str, threads: &[ThreadRow], draft: &str) -> Value {
+pub(super) fn check_detail(signals: &str, threads: &[ThreadRow], draft: &str) -> Result<Value> {
     let kind = "insufficient_detail";
     let words = word_count(draft);
     let question_count = threads
@@ -398,11 +405,10 @@ pub(super) fn check_detail(signals: &str, threads: &[ThreadRow], draft: &str) ->
                 .count()
         })
         .sum::<usize>();
-    let technical_re = Regex::new(r#"(?i)technical_language[":\s]*(technical|highly_technical)"#)
-        .expect("static regex");
+    let technical_re = rx(r#"(?i)technical_language[":\s]*(technical|highly_technical)"#)?;
     let technical = technical_re.is_match(signals);
     if words < 15 && (question_count > 0 || technical) {
-        return result(
+        return Ok(result(
             kind,
             "flagged",
             format!(
@@ -423,9 +429,9 @@ pub(super) fn check_detail(signals: &str, threads: &[ThreadRow], draft: &str) ->
                 "advice": "Expand with the concrete steps or answer - one-line replies on substantive questions correlate with follow-up loops."
             })],
             false,
-        );
+        ));
     }
-    result(
+    Ok(result(
         kind,
         "pass",
         format!(
@@ -433,7 +439,7 @@ pub(super) fn check_detail(signals: &str, threads: &[ThreadRow], draft: &str) ->
         ),
         vec![],
         false,
-    )
+    ))
 }
 
 pub(super) fn check_internal_leakage(
@@ -591,11 +597,11 @@ pub(super) fn check_wrong_context(
     conv: &ConvRow,
     customer: Option<&(String, Option<String>)>,
     draft: &str,
-) -> Value {
+) -> Result<Value> {
     let kind = "wrong_customer_context";
     let mut findings: Vec<Value> = Vec::new();
 
-    let number_refs_re = Regex::new(r"#(\d{3,8})\b").expect("static regex");
+    let number_refs_re = rx(r"#(\d{3,8})\b")?;
     let number_refs: Vec<i64> = number_refs_re
         .captures_iter(draft)
         .filter_map(|c| c.get(1).and_then(|m| m.as_str().parse::<i64>().ok()))
@@ -637,8 +643,7 @@ pub(super) fn check_wrong_context(
         }
     }
 
-    let greeting_re =
-        Regex::new(r"(?im)^(?:hi|hello|hey|dear)\s+([a-z][a-z'-]{1,30})\b").expect("static regex");
+    let greeting_re = rx(r"(?im)^(?:hi|hello|hey|dear)\s+([a-z][a-z'-]{1,30})\b")?;
     if let Some(greeting) = greeting_re.captures(draft)
         && let Some((first_name, _)) = customer
         && let Some(greeted) = greeting.get(1).map(|m| m.as_str().to_lowercase())
@@ -669,7 +674,7 @@ pub(super) fn check_wrong_context(
     } else {
         "No cross-customer context mismatches detected.".to_string()
     };
-    result(
+    Ok(result(
         kind,
         if findings.is_empty() {
             "pass"
@@ -679,27 +684,26 @@ pub(super) fn check_wrong_context(
         detail,
         findings,
         false,
-    )
+    ))
 }
 
 pub(super) fn check_preference_mismatch(
     preference: Option<&(String, String, bool, i64)>,
     threads: &[ThreadRow],
     draft: &str,
-) -> Value {
+) -> Result<Value> {
     let kind = "preference_mismatch";
     let Some(&(ref pref, ref confidence, overridden, evidence_count)) = preference else {
-        return result(
+        return Ok(result(
             kind,
             "not_applicable",
             "No communication preference on record for this customer (honest unknown - at least 3 distinct conversations are required before one is inferred).",
             vec![],
             false,
-        );
+        ));
     };
     let words = normalize_words(draft).len();
-    let steps_re =
-        Regex::new(r"(?i)\b(step|first|then|next|finally)\b|\d\.").expect("static regex");
+    let steps_re = rx(r"(?i)\b(step|first|then|next|finally)\b|\d\.")?;
     let has_steps = steps_re.is_match(draft);
     let open_question = threads
         .iter()
@@ -739,7 +743,7 @@ pub(super) fn check_preference_mismatch(
         None,
     )];
     if let Some(mismatch) = mismatch {
-        return result(
+        return Ok(result(
             kind,
             "flagged",
             format!(
@@ -751,9 +755,9 @@ pub(super) fn check_preference_mismatch(
                 "advice": format!("This customer's observed preference is \"{pref}\". Reshaping the draft may land better - your call.")
             })],
             false,
-        );
+        ));
     }
-    result(
+    Ok(result(
         kind,
         "pass",
         format!(
@@ -766,5 +770,5 @@ pub(super) fn check_preference_mismatch(
         ),
         vec![],
         false,
-    )
+    ))
 }
