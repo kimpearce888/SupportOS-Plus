@@ -8,8 +8,8 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 ## CURRENT POINTER
 
 - Next task: **R4.5 — file splits for the >2K-line files** (plan §5.3/§7
-  R4; the last R4 item — R4.4 is executed, battery-green, CI rides this
-  push). Census-first per the standing discipline (TEN consecutive
+  R4; the last R4 item — R4.4 is TERMINAL, run#352 green). Census-first
+  per the standing discipline (TEN consecutive
   corrections — R4.4's 7,823 production numeric + 17,350 production string
   occurrences censused to SIX same-policy families / 166 sites; see the
   R4.4 verdict table): re-measure the CURRENT line counts (the R1 strip +
@@ -24,13 +24,18 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
   close-out.
 - Pre-flight [session 17]: run#351 (id 43635267151) green on `8f41c19`
   (the session-16 addendum head — the standard docs-only preflight
-  gate). R4.4 executed on that green base; its own CI verification rides
-  the push at session end (the standard hand-off).
+  gate). R4.4 executed on that green base and is now itself CI-VERIFIED
+  (same session): run#352 (id 43655562331) green on `3885eb4`, all four
+  lanes incl. the kittest snapshot drift gate — 203 goldens
+  byte-identical, pixel-neutrality confirmed for the value-identical
+  const folds. R4.4 TERMINAL; see `complete.md`. Green base for R4.5:
+  this addendum head's own docs-only run (the standard next-session
+  preflight gate).
 - Session counter: 17 completed (R1 terminal; R2 TERMINAL; R3 TERMINAL
   — R3.1 run#332, R3.2 run#335, R3.3 run#337, R3.4 run#339, R3.5
   zero-motion run#341, R3.6 run#342; R4.1 run#344; R4.2-a run#346;
   R4.2-b run#348 — R4.2 TERMINAL; R4.3 run#350 — R4.3 TERMINAL; R4.4
-  executed session 17, CI rides this push).
+  run#352 — R4.4 TERMINAL).
 - Environment: session 16 was ANOTHER full reset — repo re-cloned via
   github-reconnect.sh; toolchain SURVIVED at /tmp/my-project/
   {rustup,cargo-home} (exports re-applied per bash call per §3); core
@@ -72,7 +77,7 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 | R4.2 decomposition (batch a) | done (session 14) | census (r42_census.py, cfg-aware fn-span scanner): 3,277 prod fns / 991 test fns; top-20 censused; 6 CORE mega-fns split (execute 1051→79 dispatch + 22 tool fns; derived_edges_touching 686→26 + 11 Kind fns + 4 module helpers + 2 epilogue fns; apply_m046 405→15 manifest + ensure_fk + 10 data consts; execute_job 3 fat arms→3 methods incl. embed×3 fold; build_support_health_report 465→34 manifest + 9 domain fns; analyze_friction 410→manifest + 6 finding fns + finding helper); 6 keeps + 11 queued to R4.2-b (verdict table below); battery green (520/528/293+2/56, clippy ×2, gate, icons, strip 207/207); CI run#346 green on `fa03cad` (all 4 lanes incl. kittest drift gate); D-23 |
 | R4.2 decomposition (batch b) | done (session 15) | all 11 queued fns split: execute_outbound 390→~86-line dispatcher + 6 send_* arm methods + payload_num/payload_str_or module fns (closures promoted per the batch-a recipe); sync_resource 331→19-arm dispatcher table + 16 sync_* methods (conversations/threads delegations + the `customers` since-seam + the unknown-resource fallback stay inline); incidents ui 527→~180 dispatcher + filter_controls/empty_list_ui/lifecycle_card_ui/linked_column_ui/info_column_ui methods + incident_row/incident_detail_header module fns; ai_center hub_ui 481→35-line dispatcher + 8 methods (endpoints card/row/key-edit/price/add-form/roles/features/ledger); organizations ui 393→~170 dispatcher + org_form_card_ui method + org_row/org_detail_header_ui/members_card_ui module fns; inbox list_ui→search_filter_ui/list_toolbar_ui/conversation_rows_ui methods, copilot_pane_ui→copilot_cards_ui/copilot_lmstudio_ui/assistant_ui methods, composer_pane_ui→enqueue_composer_tool/apply_composer_act/mention_popup_ui methods + composer_tool_row module fn + ToolAction enum hoisted to module scope; settings helpscout_ui→4 card methods; diagnostics ui→event_log_card_ui method + audit_trail/sync_reports/outbound_deliveries_card_ui module fns; design composer→composer_header_row/composer_footer_row module fns; ALL 4 too_many_lines allows deleted (every post-split fn under the 100-line threshold — clippy -D warnings green); battery green at EXACT baselines (520/528/293+2/56, clippy ×2, gate, icons, strip 207/207); pixel-neutrality verified locally by the widget-call multiset comparison (design::/ui. call multisets byte-identical old-vs-new on all 9 files after fixes — D-24); the CI kittest drift gate rides this push; D-23/D-24 |
 | R4.3 visibility | terminal (session 16) | CI run#350 green — see `complete.md` |
-| R4.4 magic values | done (session 17) | census (r44_census.py: 7,823 prod numeric + 17,350 prod string occs) — TENTH consecutive correction: SIX same-policy families / 166 sites folded (catalog::NO_SUBJECT ×14 cross-crate; design::MISSING_VALUE ×38 incl. the `== "—"` sentinel comparator; design::error_note ×17 byte-identical sites; design::scale::CONTROL_H ×72 single-line control heights; design::scale::ROW_H replacing the 3 identical page-local ROW_HEIGHT decls; coaching::EXCERPT_CAP ×15 private); everything else = keeps (verdict table below — coincidental values, wire vocab, algorithm constants, serde attr machinery, per-site layout); battery green at EXACT baselines (520/528/293/56, clippy ×2, gate, icons, strip 207/207); 30 files +254/−184; CI rides the push — see complete.md for the terminal entry |
+| R4.4 magic values | terminal (session 17) | CI run#352 green — see `complete.md` |
 | R4.5 file splits | pending | see plan §5.3/§7 R4; census-first (re-measure current line counts — the session-1 list is stale) |
 | R5.1–R5.3 guardrails | pending (optional, stage-gated) | |
 | R6.1–R6.2 polish + close | pending | |
@@ -387,9 +392,12 @@ internal error.
   literal→const-path replacement, or a rustfmt reflow — value-identical
   by construction (pixel-neutral; the CI kittest drift gate rides this
   push as the verifier, F-06).
-- Commits: code + ledger (D-08). CI verification of the R4.4 head rides
-  the push; the terminal entry lands in complete.md at addendum time
-  once green.
+- Commits: code + ledger (D-08). CI closure (same session): run#352
+  (id 43655562331) completed / success on `3885eb4` — all four lanes
+  (check fmt/clippy/test/deny; packages x86_64; packages arm64; kittest
+  snapshot locks drift gate, 203 goldens byte-identical). R4.4
+  TERMINAL; this addendum rides the next docs-only run (the standard
+  next-session preflight gate).
 
 ### Session 16 — 2026-11-14
 - Pre-flight: run#349 (id 43621514210) green on `71f462d` (the session-15
