@@ -10,16 +10,16 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 - **PROGRAM 2 OPEN** (session 21, 2026-11-15) — owner override
   "complete anything ignored and skipped"; operative task list is
   plan §11 (Q-01..Q-06 execution). Program 1 stays closed; every
-  protocol carries over. **CURRENT POINTER: R7.4-a/4 interaction_engine
-  cluster** (class-A sites left: interaction_engine 5, quality 16,
-  ai_evidence 1 — prep mapping for interaction_engine in the
+  protocol carries over. **CURRENT POINTER: R7.4-a/5 quality
+  cluster** (class-A sites left: quality 16, ai_evidence 1 — full
+  prep mapping incl. the cascading owner-fn registry in the
   session-21 log; D-33(d) mandates full-site rg re-census per
   cluster). Done: R7.1 (f9c568c), R7.2 (e62bf08), R7.3 (10c3cde,
   CI run#361), R7.4-a/1 sandbox (05f7006, run#362), R7.4-a/2
-  security cluster (6c9538a, CI run#364), R7.4-a/3 coaching
-  cluster (dd9c3da, CI run#366 green all four lanes incl. kittest
-  drift gate; prod_expect 34). Then quality -> ai_evidence ->
-  R7.4-b/c -> R7.5 -> R7.6.
+  security cluster (6c9538a, run#364), R7.4-a/3 coaching cluster
+  (dd9c3da, run#366), R7.4-a/4 interaction_engine (c391955,
+  run#368; prod_expect 29). Then ai_evidence -> R7.4-b/c ->
+  R7.5 -> R7.6.
 - Last program-1 head `6dd8c8b` CI-green (run#360, all four lanes —
   verified this session before Program 2 opened). Session counter
   resets for Program 2: session 1 of Program 2 = session 21 overall.
@@ -442,6 +442,76 @@ lanes, the no-simulation gate, kittest drift gate).
   all four lanes (check incl. deny, packages x86_64, packages
   arm64, kittest drift gate). Session-21 total: 5 batches (R7.1,
   R7.2, R7.3, R7.4-a/1 + this addendum head), CI runs #361-#362.
+
+- CI verification: run#367 (id 43752563443) GREEN on f870a77
+  (docs-only ledger addendum head — the R3.5 docs-only
+  precedent).
+- CI verification: run#368 (id 43755169348) GREEN on c391955,
+  all four lanes (check incl. deny, packages x86_64, packages
+  arm64, kittest drift gate). Session-21 tally: 9 commits
+  (5 batch + 4 addendum), CI runs #361-#368; prod_expect 29.
+- R7.4-a/4 executed (interaction_engine cluster, 5 sites, the
+  prep-mapped two shapes): (1) baseline.rs x4 — private rx()
+  helper, sites '?'; the step_re ctor hoisted OUT of the
+  response_style .then closure (non-Result closures cannot host
+  '?', D-34(d)); compute_outcome already Result — signature
+  untouched, callers already Result-aware. (2) mod.rs:23 fp!
+  macro bubble: macro body '?', forbidden_patterns -> crate
+  Result<&'static [ForbiddenPattern]> via
+  OnceLock<Result<Vec<..>, regex::Error>> with the
+  .as_ref().map(|v| v.as_slice()).map_err(...) tail —
+  Result::as_deref does NOT unsize &Vec (D-34(b), empirically
+  E0308-verified); sanitize_interaction_text /
+  assert_interaction_text_safe -> Result<TextScan>; the 5
+  ai_pipeline/interaction.rs field-read fanout sites
+  (205/231/240/260/269 — '.ok' was the TextScan STRUCT FIELD)
+  go fail-closed per the recorded ruling: matches!(.., Ok(scan)
+  if scan.ok) — on the never-taken Err the text is dropped
+  (D-34(c), the sanitizer gates AI-bound text). Pattern strings
+  byte-identical (indentation-only restructure, verified in the
+  diff). Full re-census before edits: exactly the 5 recorded
+  sites + 5 fanout, no other/test-region callers. Battery green
+  at exact baselines: gate, fmt, clippy workspace --all-targets
+  (27s) + core sandbox (15s) with -D warnings, core 520 (470s),
+  sandbox 528 (462s), app-shell 293+2 (264s), catalog+xtask 56,
+  verify-icons, strip 259/259. Post-batch census: prod_expect
+  34 -> 29. Commit c391955. Memory: D-34.
+- R7.4-a/5 prep (read-only census, recorded for the next session;
+  D-33(d) discipline): quality = 16 sites (mod.rs x13 +
+  qa_ai.rs x3) in SIX owner fns + two accessors, with a
+  cascading signature plan — (1) is_closing_acknowledgment
+  (mod.rs:66, sites 74/80 inline OnceLocks, -> bool) ->
+  Result<bool>; fanout 4: interaction_engine/baseline.rs:304
+  (compute_outcome, already Result — gains '?'),
+  quality/qa_ai.rs:262 (derive_outcome), quality/mod.rs:980
+  (troubleshooting_loop_findings), quality/mod.rs:1300
+  (compute_qa_deterministic -> Option<Value> — itself converts
+  to Result<Option<Value>>). WARNING: compute_qa_deterministic's
+  TEST-REGION callers (batch18_tests 'first compute' etc.)
+  currently .expect on the Option — after the conversion .expect
+  unwraps the Result leaving Option<Value>: those test arms need
+  one more expect/unwrap (D-10 permits; census the arms at edit
+  time). (2) rebuild_gaps (mod.rs:400, sites 406/410, ->
+  (usize,usize)) -> Result<(usize,usize)>; caller = the workers
+  rebuild_gaps job arm (workers/execute/ops.rs:207 region). (3)
+  loop_problem_re (750, site 756) + direct_complaint_re (760,
+  site 766): the D-34(a) accessor form; callers mod.rs:979
+  (troubleshooting_loop_findings) and mod.rs:1200 — inside
+  rebuild_friction's .filter closure -> HOIST per D-34(d). (4)
+  duplicated_request_findings (mod.rs:1153, sites 1156-1169 x8
+  local ctors, -> Vec<..>) -> Result<Vec<..>> via an rx helper;
+  caller mod.rs:806 findings.extend in analyze_friction (->
+  Vec<Value>; its conversion -> Result<Vec<Value>> — census
+  analyze_friction's callers at edit time). (5) rebuild_friction
+  (mod.rs:1237, -> (usize,usize)) contains the 1200 filter;
+  converts -> Result<(usize,usize)>; census its callers at edit
+  time. (6) qa_ai.rs derive_outcome (240, -> DerivedOutcome
+  plain struct; sites 270/312 fn-level locals + 279 inside the
+  .any(|n|{..}) escalated closure -> HOIST) ->
+  Result<DerivedOutcome>; census derive_outcome's callers at
+  edit time. ai_evidence x1 (chrono midnight) is the trivial
+  last class-A site after this cluster. Sub-batching is the
+  next session's call by remaining context budget.
 
 - CI verification: run#366 (id 43750059829) GREEN on dd9c3da,
   all four lanes (check incl. deny, packages x86_64, packages

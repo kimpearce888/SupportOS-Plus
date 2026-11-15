@@ -653,6 +653,43 @@ session ends by adding what the next session must not have to rediscover.
   8 security @this batch); test-region +4 (batch29/attributes
   test expects — D-10).
 
+- **D-34 (session 21, R7.4-a/3 + R7.4-a/4).** OnceLock-accessor
+  and gate-consumer conversion shapes (the Q-03 strict letter
+  applied to the coaching + interaction_engine clusters):
+  (a) Accessor form: OnceLock<Result<T, regex::Error>> (the
+  constructor's natural error — regex::Error is Clone; avoids
+  the double String conversion of the recorded prep sketch)
+  + accessor -> crate Result<&'static T>, with the error clone
+  happening ONLY on the never-taken path (.as_ref() +
+  map_err(|e| Error::Other(Box::new(e.clone())))).
+  (b) API SEMANTICS GOTCHA (empirically E0308-verified):
+  Result::as_deref does NOT unsize &Vec<T> -> &[T] — the impl
+  is <T: Deref, E> Result<T, E> and T = &Vec (references Deref
+  to their pointee Vec) yields &Vec, never [T]. The correct
+  tail for &'static-slice accessors is
+  .as_ref().map(|v| v.as_slice()).map_err(...). Relevant to
+  every remaining OnceLock cluster (quality x13).
+  (c) Fail-closed ruling for SANITIZER gates: when a bool-gate
+  consumer reads a STRUCT FIELD (`.ok` on TextScan was a field,
+  not Result::ok()), the honest conversion is
+  matches!(fn(..), Ok(scan) if scan.ok) — on the never-taken Err
+  the text is treated as not-safe and dropped (cannot-certify
+  must not pass through an AI-bound-text gate). Distinct from
+  (d):
+  (d) Hoist-and-propagate for ANALYSIS regexes: a ctor/accessor
+  consumed inside a non-Result closure (.then(||), .filter(|m|),
+  .any(|n|)) cannot host '?' — hoist the construction to the
+  Result-returning fn body (baseline.rs step_re hoisted out of
+  the response_style .then closure; quality mod.rs:1200's
+  direct_complaint_re filter-closure caller will need the same
+  hoist in R7.4-a/5). Same restructure class as D-33(c)'s
+  two-pass rusqlite closures.
+  (e) Registry-preserving conversion: `?` is expression-
+  position — vec![a, b, c?] is legal, so the coaching checks
+  registry kept byte-identical order with per-arm '?'.
+  Post-batch census: prod_expect 29 (44 - 10 coaching @a/3 -
+  5 interaction_engine @a/4).
+
 ## Facts (F-xx)
 
 - **F-01.** Baseline (session 1): 204 .rs files, 141,107 LOC — core
