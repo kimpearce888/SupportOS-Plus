@@ -34,7 +34,7 @@ fn candidate_kinds(conn: &Connection) -> Vec<String> {
 #[test]
 fn repeated_uncovered_question_becomes_gap() {
     let conn = db_with_question("how do I rotate the gateway keys");
-    let (_, created) = rebuild_gaps(&conn, 90);
+    let (_, created) = rebuild_gaps(&conn, 90).expect("rebuild gaps");
     assert!(created >= 1, "one candidate expected, created {created}");
     let kinds = candidate_kinds(&conn);
     assert!(
@@ -68,7 +68,7 @@ fn docs_mirror_counts_as_documented() {
         params![article],
     )
     .expect("docs fts");
-    let (_, created) = rebuild_gaps(&conn, 90);
+    let (_, created) = rebuild_gaps(&conn, 90).expect("rebuild gaps");
     assert_eq!(created, 0, "a documented question is not a gap");
     let kinds = candidate_kinds(&conn);
     assert!(
@@ -101,7 +101,7 @@ fn friction_rebuild_is_deterministic_and_deduped() {
         )
         .expect("customer thread");
     }
-    let (scanned_first, found_first) = rebuild_friction(&conn);
+    let (scanned_first, found_first) = rebuild_friction(&conn).expect("rebuild friction");
     assert!(scanned_first >= 1, "the seeded conversation is scanned");
     assert!(found_first >= 1, "repeated spans detected: {found_first}");
     let rows_first: i64 = conn
@@ -111,7 +111,7 @@ fn friction_rebuild_is_deterministic_and_deduped() {
         rows_first >= 1,
         "findings persist for the agent tool to read"
     );
-    let (_, found_second) = rebuild_friction(&conn);
+    let (_, found_second) = rebuild_friction(&conn).expect("rebuild friction");
     assert!(found_second >= 1, "the findings are still detected");
     let rows_second: i64 = conn
         .query_row("SELECT COUNT(*) FROM friction_findings", [], |r| r.get(0))

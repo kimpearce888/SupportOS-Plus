@@ -195,14 +195,14 @@ impl WorkerManager {
         }
         let db = self.db.clone();
         let (friction_scanned, friction_created, gaps_scanned, gaps_created) =
-            tokio::task::spawn_blocking(move || {
+            tokio::task::spawn_blocking(move || -> Result<(usize, usize, usize, usize)> {
                 let conn = db.long_op_guard();
-                let (scanned, created) = crate::quality::rebuild_friction(&conn);
-                let (g_scanned, g_created) = crate::quality::rebuild_gaps(&conn, 90);
-                (scanned, created, g_scanned, g_created)
+                let (scanned, created) = crate::quality::rebuild_friction(&conn)?;
+                let (g_scanned, g_created) = crate::quality::rebuild_gaps(&conn, 90)?;
+                Ok((scanned, created, g_scanned, g_created))
             })
             .await
-            .map_err(|e| Error::Other(e.to_string().into()))?;
+            .map_err(|e| Error::Other(e.to_string().into()))??;
         tracing::info!(
             operation = "rebuild_gaps",
             friction_scanned,

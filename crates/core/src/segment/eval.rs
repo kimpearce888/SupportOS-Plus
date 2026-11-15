@@ -1291,8 +1291,9 @@ impl<'a> SegmentEngine<'a> {
                         .ok()
                         .flatten()
                     else { continue };
-                    let out = crate::quality::derive_outcome(
-                        &threads, &status, (conv_id, 0, None));
+                    let Ok(out) = crate::quality::derive_outcome(
+                        &threads, &status, (conv_id, 0, None),
+                    ) else { continue };
                     let sample: Option<f64> = if effort {
                         out.effort_score
                     } else if resolved {

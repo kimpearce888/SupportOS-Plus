@@ -79,7 +79,7 @@ fn repeated_unsolved_question_becomes_gap_on_real_interaction_data() {
     for id in conversation_ids(&conn) {
         seed_outcome(&conn, id, 1, 0);
     }
-    let (_, created) = rebuild_gaps(&conn, 90);
+    let (_, created) = rebuild_gaps(&conn, 90).expect("rebuild gaps");
     let kinds = candidate_kinds(&conn);
     assert!(
         created >= 1 && kinds.iter().any(|k| k == "repeated_question_unsolved"),
@@ -94,7 +94,7 @@ fn cleanly_resolved_repeated_questions_stay_out_of_the_unsolved_gap() {
     for id in conversation_ids(&conn) {
         seed_outcome(&conn, id, 0, 0);
     }
-    rebuild_gaps(&conn, 90);
+    let _ = rebuild_gaps(&conn, 90);
     let kinds = candidate_kinds(&conn);
     assert!(
         !kinds.iter().any(|k| k == "repeated_question_unsolved"),
@@ -125,7 +125,9 @@ fn qa_recompute_preserves_the_stored_ai_layer() {
         .expect("thread");
     }
 
-    compute_qa_deterministic(&conn, conv).expect("first compute");
+    compute_qa_deterministic(&conn, conv)
+        .expect("first compute")
+        .expect("conversation found");
     conn.execute(
         "UPDATE post_resolution_qa
             SET ai = '{\"answered\":\"yes\"}', ai_run_id = 42,
@@ -135,7 +137,9 @@ fn qa_recompute_preserves_the_stored_ai_layer() {
     )
     .expect("seed ai layer");
 
-    compute_qa_deterministic(&conn, conv).expect("second compute");
+    compute_qa_deterministic(&conn, conv)
+        .expect("second compute")
+        .expect("conversation found");
 
     let (rows, ai, ai_run_id, recomputed): (i64, Option<String>, Option<i64>, Option<String>) =
         conn.query_row(
@@ -184,7 +188,7 @@ fn qa_compute_still_inserts_when_the_row_is_missing() {
     )
     .expect("thread");
 
-    assert!(compute_qa_deterministic(&conn, conv).is_some());
+    assert!(matches!(compute_qa_deterministic(&conn, conv), Ok(Some(_))));
     let rows: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM post_resolution_qa WHERE conversation_id = ?1",

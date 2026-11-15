@@ -1130,7 +1130,7 @@ impl WorkerManager {
                     crate::settings::get_i64(&conn, "ai_qa_rebuild_last_run", 0).unwrap_or(0);
                 let now_unix = chrono::Utc::now().timestamp();
                 if now_unix - last_run_unix >= 20 * 3600 {
-                    let rebuilt = crate::quality::rebuild_qa(&conn);
+                    let rebuilt = crate::quality::rebuild_qa(&conn).unwrap_or(0);
                     let _ = crate::settings::set_i64(&conn, "ai_qa_rebuild_last_run", now_unix);
                     if rebuilt > 0 {
                         tracing::info!(

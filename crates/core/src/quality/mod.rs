@@ -2,12 +2,16 @@ use rusqlite::{Connection, params};
 use serde_json::{Value, json};
 
 use crate::business_hours::now_iso;
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::migrations::add_column_if_missing;
 
 mod qa_ai;
 pub(crate) use qa_ai::compute_qa_ai_layer;
 pub(crate) use qa_ai::derive_outcome;
+
+fn rx(pattern: &'static str) -> Result<regex::Regex> {
+    regex::Regex::new(pattern).map_err(|e| Error::Other(Box::new(e)))
+}
 
 const FRICTION_FINDINGS_SQL: &str = r#"
     CREATE TABLE IF NOT EXISTS friction_findings (
@@ -64,29 +68,35 @@ pub(crate) fn published_threads(conn: &Connection, conversation_local: i64) -> V
     .unwrap_or_default()
 }
 
-pub(crate) fn is_closing_acknowledgment(text: &str) -> bool {
-    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    static START: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    let re = RE.get_or_init(|| {
-        regex::Regex::new(
-            r"(?i)still|again|but\b|however|issue|problem|not work|broken|error|fail|doesn'?t|didn'?t|can'?t|cannot",
-        )
-        .expect("closing-ack exclusion regex")
-    });
-    let start = START.get_or_init(|| {
-        regex::Regex::new(
-            r"(?i)^(thanks|thank you|thankyou|thx|appreciate|that (is|was|'s|sounds|seems) (exactly |just |very )?(what i|great|perfect|helpful|awesome|amazing|clear)|perfect|great|works|working|resolved|closing|closed|all set|confirmed|done|sorted)",
-        )
-        .expect("closing-ack start regex")
-    });
+pub(crate) fn is_closing_acknowledgment(text: &str) -> Result<bool> {
+    static RE: std::sync::OnceLock<std::result::Result<regex::Regex, regex::Error>> =
+        std::sync::OnceLock::new();
+    static START: std::sync::OnceLock<std::result::Result<regex::Regex, regex::Error>> =
+        std::sync::OnceLock::new();
+    let re = RE
+        .get_or_init(|| {
+            regex::Regex::new(
+                r"(?i)still|again|but\b|however|issue|problem|not work|broken|error|fail|doesn'?t|didn'?t|can'?t|cannot",
+            )
+        })
+        .as_ref()
+        .map_err(|e| Error::Other(Box::new(e.clone())))?;
+    let start = START
+        .get_or_init(|| {
+            regex::Regex::new(
+                r"(?i)^(thanks|thank you|thankyou|thx|appreciate|that (is|was|'s|sounds|seems) (exactly |just |very )?(what i|great|perfect|helpful|awesome|amazing|clear)|perfect|great|works|working|resolved|closing|closed|all set|confirmed|done|sorted)",
+            )
+        })
+        .as_ref()
+        .map_err(|e| Error::Other(Box::new(e.clone())))?;
     let t = text.trim();
     if t.is_empty() || t.chars().count() > 400 || t.contains('?') {
-        return false;
+        return Ok(false);
     }
     if re.is_match(t) {
-        return false;
+        return Ok(false);
     }
-    start.is_match(t)
+    Ok(start.is_match(t))
 }
 
 fn excerpt_of(text: &str, max: usize) -> String {
@@ -398,17 +408,23 @@ fn insert_gap_candidate(
     }
 }
 
-pub(crate) fn rebuild_gaps(conn: &Connection, days: i64) -> (usize, usize) {
-    static TROUBLESHOOTING: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    static STEP_STRUCTURE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    let troubleshooting = TROUBLESHOOTING.get_or_init(|| {
-        regex::Regex::new(r"(?i)\b(error|fail(ed|ing)?|broken|not working|crash|issue|bug|fix|doesn'?t work|stopped working)\b")
-            .expect("troubleshooting regex")
-    });
-    let step_structure = STEP_STRUCTURE.get_or_init(|| {
-        regex::Regex::new(r"(?is)(\n\s*\d+[.)]\s|\bstep\s*\d|\bfirst\b.*\bthen\b|\n\s*[-*]\s)")
-            .expect("step-structure regex")
-    });
+pub(crate) fn rebuild_gaps(conn: &Connection, days: i64) -> Result<(usize, usize)> {
+    static TROUBLESHOOTING: std::sync::OnceLock<std::result::Result<regex::Regex, regex::Error>> =
+        std::sync::OnceLock::new();
+    static STEP_STRUCTURE: std::sync::OnceLock<std::result::Result<regex::Regex, regex::Error>> =
+        std::sync::OnceLock::new();
+    let troubleshooting = TROUBLESHOOTING
+        .get_or_init(|| {
+            regex::Regex::new(r"(?i)\b(error|fail(ed|ing)?|broken|not working|crash|issue|bug|fix|doesn'?t work|stopped working)\b")
+        })
+        .as_ref()
+        .map_err(|e| Error::Other(Box::new(e.clone())))?;
+    let step_structure = STEP_STRUCTURE
+        .get_or_init(|| {
+            regex::Regex::new(r"(?is)(\n\s*\d+[.)]\s|\bstep\s*\d|\bfirst\b.*\bthen\b|\n\s*[-*]\s)")
+        })
+        .as_ref()
+        .map_err(|e| Error::Other(Box::new(e.clone())))?;
 
     let mut created = 0;
     let questions = repeated_questions(conn, days);
@@ -586,7 +602,7 @@ pub(crate) fn rebuild_gaps(conn: &Connection, days: i64) -> (usize, usize) {
         })
         .map(|n| usize::try_from(n).unwrap_or(0))
         .unwrap_or(0);
-    (total, created)
+    Ok((total, created))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -747,36 +763,42 @@ const MIN_REPEAT_WORDS: usize = 6;
 
 type AgentQuestion = (i64, Option<String>, String);
 
-fn loop_problem_re() -> &'static regex::Regex {
-    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+fn loop_problem_re() -> Result<&'static regex::Regex> {
+    static RE: std::sync::OnceLock<std::result::Result<regex::Regex, regex::Error>> =
+        std::sync::OnceLock::new();
     RE.get_or_init(|| {
         regex::Regex::new(
             r"(?i)still (not|doesn'?t|no)|same (issue|problem|error)|happens again|again (the|it)|persist|not fixed|didn'?t (work|help|fix)|problem (is|persists|continues)|error (persists|continues|still)",
         )
-        .expect("loop-problem regex")
     })
+    .as_ref()
+    .map_err(|e| Error::Other(Box::new(e.clone())))
 }
 
-fn direct_complaint_re() -> &'static regex::Regex {
-    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+fn direct_complaint_re() -> Result<&'static regex::Regex> {
+    static RE: std::sync::OnceLock<std::result::Result<regex::Regex, regex::Error>> =
+        std::sync::OnceLock::new();
     RE.get_or_init(|| {
         regex::Regex::new(
             r"(?i)(as|per) i (already |previously )?(said|mentioned|sent|wrote|provided|explained)|i already (sent|gave|provided|mentioned|told)|re-?sending|again[:,] |already (shared|attached)",
         )
-        .expect("direct-complaint regex")
     })
+    .as_ref()
+    .map_err(|e| Error::Other(Box::new(e.clone())))
 }
+
+type Finding = (String, String, Vec<Value>, String);
 
 fn finding(
     kind: &str,
     severity: &str,
     evidence: Vec<Value>,
     detail: String,
-) -> (String, String, Vec<Value>, String) {
+) -> Finding {
     (kind.to_string(), severity.to_string(), evidence, detail)
 }
 
-pub(crate) fn analyze_friction(conn: &Connection, conversation_id: i64) -> Vec<Value> {
+pub(crate) fn analyze_friction(conn: &Connection, conversation_id: i64) -> Result<Vec<Value>> {
     let conv: Option<(i64, Option<i64>)> = conn
         .query_row(
             "SELECT number, customer_local_id FROM conversations
@@ -786,24 +808,24 @@ pub(crate) fn analyze_friction(conn: &Connection, conversation_id: i64) -> Vec<V
         )
         .ok();
     let Some((number, customer_local_id)) = conv else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
     let threads = published_threads(conn, conversation_id);
     let customer: Vec<&ThreadLite> = threads.iter().filter(|t| t.kind == "customer").collect();
     let agents: Vec<&ThreadLite> = threads.iter().filter(|t| t.kind == "reply").collect();
 
     let now = now_iso();
-    let mut findings: Vec<(String, String, Vec<Value>, String)> = Vec::new();
+    let mut findings: Vec<Finding> = Vec::new();
     findings.extend(repeated_customer_explanations_findings(&customer));
     findings.extend(repeated_agent_questions_findings(&agents));
-    findings.extend(troubleshooting_loop_findings(&threads));
+    findings.extend(troubleshooting_loop_findings(&threads)?);
     findings.extend(repeated_handoff_findings(conn, conversation_id));
     findings.extend(repeated_unresolved_findings(
         conn,
         customer_local_id,
         conversation_id,
     ));
-    findings.extend(duplicated_request_findings(&threads, &customer));
+    findings.extend(duplicated_request_findings(&threads, &customer)?);
 
     for (kind, severity, evidence, detail) in &findings {
         let _ = conn.execute(
@@ -843,7 +865,7 @@ pub(crate) fn analyze_friction(conn: &Connection, conversation_id: i64) -> Vec<V
         let _ = conn.execute(&sql, params_vec.as_slice());
     }
 
-    findings
+    Ok(findings
         .into_iter()
         .map(|(kind, severity, evidence, detail)| {
             json!({
@@ -857,13 +879,13 @@ pub(crate) fn analyze_friction(conn: &Connection, conversation_id: i64) -> Vec<V
                 "computed_at": now,
             })
         })
-        .collect()
+        .collect())
 }
 
 fn repeated_customer_explanations_findings(
     customer: &[&ThreadLite],
-) -> Vec<(String, String, Vec<Value>, String)> {
-    let mut out: Vec<(String, String, Vec<Value>, String)> = Vec::new();
+) -> Vec<Finding> {
+    let mut out: Vec<Finding> = Vec::new();
     let customer_repeats = repeated_spans(customer, MIN_REPEAT_WORDS);
     if !customer_repeats.is_empty() {
         let mut sorted = customer_repeats;
@@ -900,8 +922,8 @@ fn repeated_customer_explanations_findings(
 
 fn repeated_agent_questions_findings(
     agents: &[&ThreadLite],
-) -> Vec<(String, String, Vec<Value>, String)> {
-    let mut out: Vec<(String, String, Vec<Value>, String)> = Vec::new();
+) -> Vec<Finding> {
+    let mut out: Vec<Finding> = Vec::new();
     let mut question_groups: Vec<(String, Vec<AgentQuestion>)> = Vec::new();
     let mut group_index: std::collections::HashMap<String, usize> =
         std::collections::HashMap::new();
@@ -967,8 +989,8 @@ fn repeated_agent_questions_findings(
 
 fn troubleshooting_loop_findings(
     threads: &[ThreadLite],
-) -> Vec<(String, String, Vec<Value>, String)> {
-    let mut out: Vec<(String, String, Vec<Value>, String)> = Vec::new();
+) -> Result<Vec<Finding>> {
+    let mut out: Vec<Finding> = Vec::new();
     let mut saw_agent_reply = false;
     let mut loop_restatements: Vec<(i64, String, Option<String>)> = Vec::new();
     for t in threads {
@@ -976,8 +998,8 @@ fn troubleshooting_loop_findings(
             saw_agent_reply = true;
         } else if t.kind == "customer"
             && saw_agent_reply
-            && loop_problem_re().is_match(&t.text)
-            && !is_closing_acknowledgment(&t.text)
+            && loop_problem_re()?.is_match(&t.text)
+            && !is_closing_acknowledgment(&t.text)?
         {
             loop_restatements.push((t.thread_id, t.text.clone(), t.at.clone()));
         }
@@ -1006,14 +1028,14 @@ fn troubleshooting_loop_findings(
             ),
         ));
     }
-    out
+    Ok(out)
 }
 
 fn repeated_handoff_findings(
     conn: &Connection,
     conversation_id: i64,
-) -> Vec<(String, String, Vec<Value>, String)> {
-    let mut out: Vec<(String, String, Vec<Value>, String)> = Vec::new();
+) -> Vec<Finding> {
+    let mut out: Vec<Finding> = Vec::new();
     let handoffs: Vec<(Option<String>, Option<String>)> = crate::db::query_rows(
         conn,
         "SELECT occurred_at, metadata FROM activity_events
@@ -1073,8 +1095,8 @@ fn repeated_unresolved_findings(
     conn: &Connection,
     customer_local_id: Option<i64>,
     conversation_id: i64,
-) -> Vec<(String, String, Vec<Value>, String)> {
-    let mut out: Vec<(String, String, Vec<Value>, String)> = Vec::new();
+) -> Vec<Finding> {
+    let mut out: Vec<Finding> = Vec::new();
     if let Some(customer_local) = customer_local_id {
         let related: Vec<RelatedConversation> = crate::db::query_rows(
             conn,
@@ -1149,24 +1171,19 @@ fn repeated_unresolved_findings(
 fn duplicated_request_findings(
     threads: &[ThreadLite],
     customer: &[&ThreadLite],
-) -> Vec<(String, String, Vec<Value>, String)> {
-    let mut out: Vec<(String, String, Vec<Value>, String)> = Vec::new();
+) -> Result<Vec<Finding>> {
+    let mut out: Vec<Finding> = Vec::new();
     let mut dup_requests: Vec<(i64, String, Option<String>)> = Vec::new();
     let mut supplied = (false, false, false);
-    let digits_re = regex::Regex::new(r"\b\d{4,}\b").expect("digits regex");
-    let email_re = regex::Regex::new(r"[\w.+-]+@[\w-]+\.[\w.]+").expect("email regex");
-    let error_re = regex::Regex::new(r"(?i)error|fail|exception|crash").expect("error regex");
-    let ask_pattern = regex::Regex::new(
-        r"(?i)\?|could you (send|share|provide|confirm)|please (send|share|provide|confirm)",
-    )
-    .expect("ask-pattern regex");
-    let order_re = regex::Regex::new(
-        r"(?i)\border\b|\binvoice\b|account\s*(id|number)?|reference\b|ticket number",
-    )
-    .expect("order regex");
-    let email_ask_re = regex::Regex::new(r"(?i)email").expect("email-ask regex");
-    let error_ask_re =
-        regex::Regex::new(r"(?i)error|log|trace|screenshot").expect("error-ask regex");
+    let digits_re = rx(r"\b\d{4,}\b")?;
+    let email_re = rx(r"[\w.+-]+@[\w-]+\.[\w.]+")?;
+    let error_re = rx(r"(?i)error|fail|exception|crash")?;
+    let ask_pattern =
+        rx(r"(?i)\?|could you (send|share|provide|confirm)|please (send|share|provide|confirm)")?;
+    let order_re =
+        rx(r"(?i)\border\b|\binvoice\b|account\s*(id|number)?|reference\b|ticket number")?;
+    let email_ask_re = rx(r"(?i)email")?;
+    let error_ask_re = rx(r"(?i)error|log|trace|screenshot")?;
     for t in threads {
         if t.kind == "customer" {
             if digits_re.is_match(&t.text) {
@@ -1194,10 +1211,11 @@ fn duplicated_request_findings(
             }
         }
     }
+    let complaint_re = direct_complaint_re()?;
     let direct_complaints: Vec<&ThreadLite> = customer
         .iter()
         .copied()
-        .filter(|m| direct_complaint_re().is_match(&m.text))
+        .filter(|m| complaint_re.is_match(&m.text))
         .collect();
     if !dup_requests.is_empty() || !direct_complaints.is_empty() {
         let mut evidence: Vec<Value> = Vec::new();
@@ -1231,10 +1249,10 @@ fn duplicated_request_findings(
             ),
         ));
     }
-    out
+    Ok(out)
 }
 
-pub(crate) fn rebuild_friction(conn: &Connection) -> (usize, usize) {
+pub(crate) fn rebuild_friction(conn: &Connection) -> Result<(usize, usize)> {
     let ids: Vec<i64> = crate::db::query_rows(
         conn,
         "SELECT DISTINCT c.id FROM conversations c
@@ -1246,9 +1264,9 @@ pub(crate) fn rebuild_friction(conn: &Connection) -> (usize, usize) {
     .unwrap_or_default();
     let mut findings = 0usize;
     for id in &ids {
-        findings += analyze_friction(conn, *id).len();
+        findings += analyze_friction(conn, *id)?.len();
     }
-    (ids.len(), findings)
+    Ok((ids.len(), findings))
 }
 
 const QA_PROMPT_VERSION: &str = "post_resolution_qa_v1";
@@ -1276,7 +1294,10 @@ fn minutes_between(later: &str, earlier: &str) -> Option<i64> {
 
 type RelatedConversation = (i64, i64, Option<String>, String, Option<String>);
 
-pub(crate) fn compute_qa_deterministic(conn: &Connection, conversation_id: i64) -> Option<Value> {
+pub(crate) fn compute_qa_deterministic(
+    conn: &Connection,
+    conversation_id: i64,
+) -> Result<Option<Value>> {
     type QaConversationRow = (String, Option<String>, Option<String>, Option<String>, i64);
     let conv: Option<QaConversationRow> = conn
         .query_row(
@@ -1287,7 +1308,9 @@ pub(crate) fn compute_qa_deterministic(conn: &Connection, conversation_id: i64) 
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
         )
         .ok();
-    let (status, closed_at, created_at, first_response_at, history_complete) = conv?;
+    let Some((status, closed_at, created_at, first_response_at, history_complete)) = conv else {
+        return Ok(None);
+    };
     let threads = published_threads(conn, conversation_id);
     let customer: Vec<&ThreadLite> = threads.iter().filter(|t| t.kind == "customer").collect();
     let replies: Vec<&ThreadLite> = threads.iter().filter(|t| t.kind == "reply").collect();
@@ -1297,7 +1320,7 @@ pub(crate) fn compute_qa_deterministic(conn: &Connection, conversation_id: i64) 
     for t in &threads {
         if t.kind == "reply" {
             saw_reply = true;
-        } else if t.kind == "customer" && saw_reply && !is_closing_acknowledgment(&t.text) {
+        } else if t.kind == "customer" && saw_reply && !is_closing_acknowledgment(&t.text)? {
             back_and_forth += 1;
         }
     }
@@ -1404,7 +1427,7 @@ pub(crate) fn compute_qa_deterministic(conn: &Connection, conversation_id: i64) 
             params![conversation_id, deterministic.to_string()],
         );
     }
-    Some(deterministic)
+    Ok(Some(deterministic))
 }
 
 fn string_gt(a: &str, b: &str) -> bool {
@@ -1441,7 +1464,7 @@ pub fn get_qa(conn: &Connection, conversation_id: i64, ai_available: bool) -> Op
     let row = match qa_row(conn, conversation_id) {
         Some(row) => row,
         None => {
-            compute_qa_deterministic(conn, conversation_id)?;
+            compute_qa_deterministic(conn, conversation_id).ok()?;
             qa_row(conn, conversation_id)?
         }
     };
@@ -1457,7 +1480,7 @@ pub fn get_qa(conn: &Connection, conversation_id: i64, ai_available: bool) -> Op
     }))
 }
 
-pub(crate) fn rebuild_qa(conn: &Connection) -> usize {
+pub(crate) fn rebuild_qa(conn: &Connection) -> Result<usize> {
     let ids: Vec<i64> = crate::db::query_rows(
         conn,
         "SELECT id FROM conversations WHERE deleted_at IS NULL AND status = 'closed'",
@@ -1467,9 +1490,9 @@ pub(crate) fn rebuild_qa(conn: &Connection) -> usize {
     .unwrap_or_default();
     let count = ids.len();
     for id in ids {
-        compute_qa_deterministic(conn, id);
+        compute_qa_deterministic(conn, id)?;
     }
-    count
+    Ok(count)
 }
 
 pub fn qa_overview(conn: &Connection) -> Value {

@@ -63,7 +63,7 @@ fn db_with_shared_tag_pattern() -> (Connection, i64) {
 #[test]
 fn audit52_shared_tag_is_shared_with_related_conversations() {
     let (conn, current) = db_with_shared_tag_pattern();
-    let findings = analyze_friction(&conn, current);
+    let findings = analyze_friction(&conn, current).expect("analyze friction");
     let finding = findings
         .iter()
         .find(|f| f["kind"] == json!("repeated_unresolved_interactions"))
@@ -95,7 +95,7 @@ fn audit52_no_tag_is_named_when_nothing_is_shared() {
             |r| r.get(0),
         )
         .expect("current id");
-    let findings = analyze_friction(&conn, current);
+    let findings = analyze_friction(&conn, current).expect("analyze friction");
     assert!(
         findings
             .iter()

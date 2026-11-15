@@ -301,7 +301,7 @@ pub(crate) fn compute_outcome(
                     .unwrap_or("");
                 crate::textutil::html_to_text(raw)
             };
-            if !is_closing_acknowledgment(&plain) {
+            if !is_closing_acknowledgment(&plain)? {
                 follow_up_count += 1;
             }
         }

@@ -67,7 +67,14 @@ pub(crate) async fn compute_qa_ai_layer(
     backend: &crate::ai_pipeline::AiBackend,
     conversation_id: i64,
 ) -> QaAiOutcome {
-    let deterministic = compute_qa_deterministic(conn, conversation_id);
+    let deterministic = match compute_qa_deterministic(conn, conversation_id) {
+        Ok(v) => v,
+        Err(e) => {
+            return QaAiOutcome {
+                error: Some(format!("deterministic QA layer failed: {e}")),
+            };
+        }
+    };
     if deterministic.is_none() {
         return QaAiOutcome {
             error: Some("conversation not found".into()),
@@ -241,7 +248,7 @@ pub(crate) fn derive_outcome(
     threads: &[ThreadLite],
     status: &str,
     conv: (i64, i64, Option<String>),
-) -> DerivedOutcome {
+) -> Result<DerivedOutcome> {
     let customer: Vec<&ThreadLite> = threads.iter().filter(|t| t.kind == "customer").collect();
     let replies: Vec<&ThreadLite> = threads.iter().filter(|t| t.kind == "reply").collect();
     let notes: Vec<&ThreadLite> = threads.iter().filter(|t| t.kind == "note").collect();
@@ -259,26 +266,23 @@ pub(crate) fn derive_outcome(
     for t in threads {
         if t.kind == "reply" {
             saw_reply = true;
-        } else if t.kind == "customer" && saw_reply && !is_closing_acknowledgment(&t.text) {
+        } else if t.kind == "customer" && saw_reply && !is_closing_acknowledgment(&t.text)? {
             follow_up_count += 1;
         }
     }
 
-    let clarification_re = regex::Regex::new(
+    let clarification_re = rx(
         r"still|again|re-?send|clarif|you didn'?t|that didn'?t|not what i|same issue|as i (said|mentioned|wrote)",
-    )
-    .expect("clarification regex");
+    )?;
     let clarification_count: i64 = customer_texts
         .iter()
         .skip(1)
         .filter(|t| clarification_re.is_match(t))
         .count() as i64;
 
-    let escalated = notes.iter().any(|n| {
-        regex::Regex::new(r"(?i)escalat|urgent|priority|vip")
-            .expect("static regex")
-            .is_match(&n.text)
-    }) || reply_texts.iter().any(|t| t.contains("escalat"));
+    let escalation_re = rx(r"(?i)escalat|urgent|priority|vip")?;
+    let escalated = notes.iter().any(|n| escalation_re.is_match(&n.text))
+        || reply_texts.iter().any(|t| t.contains("escalat"));
 
     let resolved_after_first: Option<i64> = if replies.is_empty() {
         None
@@ -309,7 +313,7 @@ pub(crate) fn derive_outcome(
         total_reply_chars as f64 / replies.len() as f64
     };
     let joined = reply_texts.join(" ");
-    let step_re = regex::Regex::new(r"\b(step|first|then|next|finally)\b|1\.").expect("step regex");
+    let step_re = rx(r"\b(step|first|then|next|finally)\b|1\.")?;
     let response_style = if replies.is_empty() {
         String::new()
     } else if avg_reply_len > 700.0 {
@@ -323,9 +327,9 @@ pub(crate) fn derive_outcome(
     };
 
     let _ = (conv, &response_style, follow_up_count, clarification_count);
-    DerivedOutcome {
+    Ok(DerivedOutcome {
         resolved_after_first,
         effort_score,
         friction,
-    }
+    })
 }
