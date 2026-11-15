@@ -1,7 +1,7 @@
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::interaction_signals::{CurrentInteraction, InteractionSignal, MessageStats};
 use crate::quality::is_closing_acknowledgment;
 
@@ -20,54 +20,59 @@ struct ForbiddenPattern {
 macro_rules! fp {
     ($re:expr, $reason:expr) => {
         ForbiddenPattern {
-            regex: regex::Regex::new(&format!("(?i){}", $re)).expect("static pattern"),
+            regex: regex::Regex::new(&format!("(?i){}", $re))?,
             reason: $reason,
         }
     };
 }
 
-fn forbidden_patterns() -> &'static [ForbiddenPattern] {
-    static PATTERNS: std::sync::OnceLock<Vec<ForbiddenPattern>> = std::sync::OnceLock::new();
-    PATTERNS.get_or_init(|| {
-        vec![
-            fp!(
-                r"\b(narcissis|anxiet|depress|bipolar|adhd|autis|schizo|paranoid|delusional|mentally|insane|unstable|unhinged)\w*",
-                "mental-health language"
-            ),
-            fp!(
-                r"\b(personality (disorder|type|trait)|myers.?briggs|big five|temperament|character flaw)\b",
-                "personality typing"
-            ),
-            fp!(
-                r"\b(difficult (person|customer|human)|problem (person|customer)|is (a )?(narcissist|aggressive person)|emotionally (unstable|volatile))\b",
-                "fixed person label"
-            ),
-            fp!(
-                r"\b(race|ethnicity|religion|politic|sexual orientation|gay|lesbian|trans|muslim|christian|jew|hindu|atheist|white supremacy|nationalist)\b",
-                "protected attribute inference"
-            ),
-            fp!(
-                r"\b(diagnos\w+|symptom of|suffers? from|patholog\w+)\b",
-                "clinical diagnosis language"
-            ),
-            fp!(
-                r"\b(intelligen(t|ce) (level|of)|iq|cognitive ability|stupid|dumb|incompetent person)\b",
-                "cognitive-ability judgment"
-            ),
-            fp!(
-                r"\b(manipulative|toxic person|evil|malicious person|bad person|liar|dishonest person)\b",
-                "moral character judgment"
-            ),
-            fp!(
-                r"\b((customer|client|user|person|he|she|they) (is|are|seems|acts|behaves) (a )?(rude|entitled|needy|demanding|lazy|clueless|hostile|abrasive|belligerent|passive.?aggressive|bully)|rude (person|customer|client)|entitled (person|customer|client)|needy (person|customer|client))\b",
-                "fixed trait label"
-            ),
-            fp!(
-                r"\b(passive.?aggressive|bullying|arrogant|condescending (person|customer)|vindictive|vengeful)\b",
-                "character judgment"
-            ),
-        ]
-    })
+fn forbidden_patterns() -> Result<&'static [ForbiddenPattern]> {
+    static PATTERNS: std::sync::OnceLock<std::result::Result<Vec<ForbiddenPattern>, regex::Error>> =
+        std::sync::OnceLock::new();
+    PATTERNS
+        .get_or_init(|| {
+            Ok(vec![
+                fp!(
+                    r"\b(narcissis|anxiet|depress|bipolar|adhd|autis|schizo|paranoid|delusional|mentally|insane|unstable|unhinged)\w*",
+                    "mental-health language"
+                ),
+                fp!(
+                    r"\b(personality (disorder|type|trait)|myers.?briggs|big five|temperament|character flaw)\b",
+                    "personality typing"
+                ),
+                fp!(
+                    r"\b(difficult (person|customer|human)|problem (person|customer)|is (a )?(narcissist|aggressive person)|emotionally (unstable|volatile))\b",
+                    "fixed person label"
+                ),
+                fp!(
+                    r"\b(race|ethnicity|religion|politic|sexual orientation|gay|lesbian|trans|muslim|christian|jew|hindu|atheist|white supremacy|nationalist)\b",
+                    "protected attribute inference"
+                ),
+                fp!(
+                    r"\b(diagnos\w+|symptom of|suffers? from|patholog\w+)\b",
+                    "clinical diagnosis language"
+                ),
+                fp!(
+                    r"\b(intelligen(t|ce) (level|of)|iq|cognitive ability|stupid|dumb|incompetent person)\b",
+                    "cognitive-ability judgment"
+                ),
+                fp!(
+                    r"\b(manipulative|toxic person|evil|malicious person|bad person|liar|dishonest person)\b",
+                    "moral character judgment"
+                ),
+                fp!(
+                    r"\b((customer|client|user|person|he|she|they) (is|are|seems|acts|behaves) (a )?(rude|entitled|needy|demanding|lazy|clueless|hostile|abrasive|belligerent|passive.?aggressive|bully)|rude (person|customer|client)|entitled (person|customer|client)|needy (person|customer|client))\b",
+                    "fixed trait label"
+                ),
+                fp!(
+                    r"\b(passive.?aggressive|bullying|arrogant|condescending (person|customer)|vindictive|vengeful)\b",
+                    "character judgment"
+                ),
+            ])
+        })
+        .as_ref()
+        .map(|v| v.as_slice())
+        .map_err(|e| Error::Other(Box::new(e.clone())))
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -76,9 +81,9 @@ pub(crate) struct TextScan {
     pub warnings: Vec<String>,
 }
 
-pub(crate) fn sanitize_interaction_text(text: &str) -> TextScan {
+pub(crate) fn sanitize_interaction_text(text: &str) -> Result<TextScan> {
     let mut warnings = Vec::new();
-    for p in forbidden_patterns() {
+    for p in forbidden_patterns()? {
         if p.regex.is_match(text) {
             warnings.push(format!(
                 "Removed {} — SupportOS only reports observable support-communication behavior.",
@@ -86,19 +91,19 @@ pub(crate) fn sanitize_interaction_text(text: &str) -> TextScan {
             ));
         }
     }
-    TextScan {
+    Ok(TextScan {
         ok: warnings.is_empty(),
         warnings,
-    }
+    })
 }
 
-pub(crate) fn assert_interaction_text_safe(text: Option<&str>) -> TextScan {
+pub(crate) fn assert_interaction_text_safe(text: Option<&str>) -> Result<TextScan> {
     match text {
         Some(t) if !t.is_empty() => sanitize_interaction_text(t),
-        _ => TextScan {
+        _ => Ok(TextScan {
             ok: true,
             warnings: Vec::new(),
-        },
+        }),
     }
 }
 

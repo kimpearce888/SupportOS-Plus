@@ -1,4 +1,9 @@
 use super::*;
+
+fn rx(pattern: &'static str) -> Result<regex::Regex> {
+    regex::Regex::new(pattern).map_err(|e| Error::Other(Box::new(e)))
+}
+
 fn closed_conversation_ids(conn: &Connection, customer_id: i64) -> std::collections::HashSet<i64> {
     get_customer_conversations(conn, customer_id, None)
         .map(|rows| {
@@ -301,17 +306,16 @@ pub(crate) fn compute_outcome(
             }
         }
     }
-    let clarification_re = regex::Regex::new(
+    let clarification_re = rx(
         r"still|again|re-?send|clarif|you didn'?t|that didn'?t|not what i|same issue|as i (said|mentioned|wrote)",
-    )
-    .expect("static");
+    )?;
     let clarification_count = customer_msgs
         .iter()
         .skip(1)
         .filter(|t| clarification_re.is_match(t))
         .count() as i64;
-    let note_re = regex::Regex::new(r"(?i)escalat|urgent|priority|vip").expect("static");
-    let reply_re = regex::Regex::new(r"(?i)escalat").expect("static");
+    let note_re = rx(r"(?i)escalat|urgent|priority|vip")?;
+    let reply_re = rx(r"(?i)escalat")?;
     let escalated = note_msgs.iter().any(|t| note_re.is_match(t))
         || reply_msgs.iter().any(|t| reply_re.is_match(t));
     let resolved_after_first: Option<bool> =
@@ -328,11 +332,10 @@ pub(crate) fn compute_outcome(
         _ => "none",
     }
     .to_string();
+    let step_re = rx(r"(?i)\b(step|first|then|next|finally)\b|1\.")?;
     let joined = reply_msgs.concat();
     let response_style: Option<String> = (!reply_msgs.is_empty()).then(|| {
         let avg = joined.len() as f64 / reply_msgs.len() as f64;
-        let step_re =
-            regex::Regex::new(r"(?i)\b(step|first|then|next|finally)\b|1\.").expect("static");
         if avg > 700.0 {
             "detailed_explanation".to_string()
         } else if step_re.is_match(&joined) {

@@ -202,7 +202,10 @@ fn parse_observation(
                 .and_then(|v| v.as_str())
                 .filter(|e| !e.is_empty());
             let excerpt_safe = excerpt.is_some_and(|e| {
-                crate::interaction_engine::assert_interaction_text_safe(Some(e)).ok
+                matches!(
+                    crate::interaction_engine::assert_interaction_text_safe(Some(e)),
+                    Ok(scan) if scan.ok
+                )
             });
             let thread_id = s
                 .get("evidence_thread_local_id")
@@ -228,7 +231,11 @@ fn parse_observation(
     let goal_check = obj.get("customer_goal").and_then(|v| v.as_str());
     let customer_goal = goal_check
         .filter(|g| {
-            !g.is_empty() && crate::interaction_engine::assert_interaction_text_safe(Some(g)).ok
+            !g.is_empty()
+                && matches!(
+                    crate::interaction_engine::assert_interaction_text_safe(Some(g)),
+                    Ok(scan) if scan.ok
+                )
         })
         .map(String::from);
     let notes = obj
@@ -237,7 +244,12 @@ fn parse_observation(
         .map(|a| {
             a.iter()
                 .filter_map(|n| n.as_str())
-                .filter(|n| crate::interaction_engine::assert_interaction_text_safe(Some(n)).ok)
+                .filter(|n| {
+                    matches!(
+                        crate::interaction_engine::assert_interaction_text_safe(Some(n)),
+                        Ok(scan) if scan.ok
+                    )
+                })
                 .take(6)
                 .map(String::from)
                 .collect()
@@ -257,7 +269,12 @@ fn parse_recommendation(
     let clean = |v: Option<&serde_json::Value>| -> Option<String> {
         v.and_then(|x| x.as_str())
             .filter(|s| !s.is_empty())
-            .filter(|s| crate::interaction_engine::sanitize_interaction_text(s).ok)
+            .filter(|s| {
+                matches!(
+                    crate::interaction_engine::sanitize_interaction_text(s),
+                    Ok(scan) if scan.ok
+                )
+            })
             .map(String::from)
     };
     let clean_list = |key: &str, cap: usize| -> Vec<String> {
@@ -266,7 +283,12 @@ fn parse_recommendation(
             .map(|a| {
                 a.iter()
                     .filter_map(|x| x.as_str())
-                    .filter(|s| crate::interaction_engine::assert_interaction_text_safe(Some(s)).ok)
+                    .filter(|s| {
+                        matches!(
+                            crate::interaction_engine::assert_interaction_text_safe(Some(s)),
+                            Ok(scan) if scan.ok
+                        )
+                    })
                     .take(cap)
                     .map(String::from)
                     .collect()
