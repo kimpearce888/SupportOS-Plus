@@ -481,6 +481,21 @@ session ends by adding what the next session must not have to rediscover.
     VALUE collection, sanitized-text numeric scan, `.take(N)` and
     SQL-`LIMIT N` overlays, and a const-initializer inventory (to
     distinguish already-named values from raw call-site literals).
+- **D-27 (session 18, R4.5-a).** File-split end state, two-tier ruling:
+  the "~2,000-line file" policy is remediated in tiers with different
+  risk profiles. **Tier 1 = cfg(test) mod extraction** (inline `mod X
+  {}` → `#[cfg(test)] mod X;` + sibling file): pure file-layout move —
+  module tree byte-identical (paths, visibility, `use super::*`
+  resolution all unchanged); this is the right tool when the overage
+  is test mass (workers/mod was 2,807 total but 1,373 prod — the
+  split took it under threshold with zero code motion). **Tier 2 =
+  prod-region splits** along R4.2 method clusters with the G-15
+  visibility ladder for moved items. Threshold measures the file as
+  the editor sees it (total lines), but the RECIPE is chosen by the
+  prod/test split. At-threshold ruling: ai_center 2,003 post-batch =
+  keep (the "~" tolerance + R4.2-b already decomposed its fns).
+  Sub-2K files with big test mods (custom_objects 1961, sync_engine
+  1811) stay unsplit — no trigger, no churn (D-23 discipline).
 
 ## Facts (F-xx)
 
@@ -627,6 +642,22 @@ session ends by adding what the next session must not have to rediscover.
   github-reconnect.sh's exists-branch only re-sets the remote URL —
   after a reset that leaves an EMPTY dir remnant, remove it first or
   the clone silently never happens (bit session 11's pre-flight).
+- **G-16 (session 18).** Naive brace counting is unusable for span
+  location: reports.rs's two cfg(test) mods were INVISIBLE to the
+  raw-count scanner because their bodies carry string literals whose
+  braces don't balance (format templates etc.) — depth drifts inside
+  the region and never returns to 0 at the true close (the r42 census
+  hit the same class). Any span-finding machinery needs the full
+  G-08/G-14 string-aware walk (strings, raw strings, char literals
+  incl. `'\u{...}'` + `'\''` forms, and line continuations that must
+  NOT swallow the newline bookkeeping — the trap recurred in the
+  r45a lexer itself and was only caught by the reports.rs dry-run
+  diff). Sister lesson: a conservation assert must compare the SAME
+  artifact on both sides — r45a's first design compared
+  region-with-braces to decl-with-semicolon and failed at mod #1
+  (compare the BODY pre/post dedent, whitespace-insensitively, plus
+  an exact dedent-equality pass); the failure cost one clean
+  `git reset --hard` + rerun, no damage escaped the assert.
 
 
 ## Open questions / deferred owner decisions

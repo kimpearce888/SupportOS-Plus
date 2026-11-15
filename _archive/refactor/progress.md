@@ -1,50 +1,40 @@
 # Refactor Progress — Live State
 
-Last updated: session 17 (2026-11-14). Update rule: every session updates
+Last updated: session 18 (2026-11-15). Update rule: every session updates
 this file before ending. Statuses: `pending` / `in_progress` / `done` /
 `terminal` (done + closed in `complete.md`) / `dropped` (with reason in
 `memory.md`).
 
 ## CURRENT POINTER
 
-- Next task: **R4.5 — file splits for the >2K-line files** (plan §5.3/§7
-  R4; the last R4 item — R4.4 is TERMINAL, run#352 green). Census-first
-  per the standing discipline (TEN consecutive
-  corrections — R4.4's 7,823 production numeric + 17,350 production string
-  occurrences censused to SIX same-policy families / 166 sites; see the
-  R4.4 verdict table): re-measure the CURRENT line counts (the R1 strip +
-  R4.2 decompositions shrank the plan's session-1 list — inbox 4715,
-  settings 3316, workers/mod 2826, ai_pipeline/mod 2780, design/mod 2698,
-  helpscout_real/mod 2675, knowledge 2647, workers/execute 2537, reports
-  2374, ai_center 2299 are all stale), split along EXISTING module seams
-  (mechanical moves only — D-23's flat-manifest ruling warns against
-  artificial seams), D-06 (kittest suite/fn names stable), the CI kittest
-  drift gate verifies pixel-neutrality (moves are pixel-neutral by
-  construction). After R4.5: R5 is optional owner-gated (Q-01); R6
+- Next task: **R4.5-b — prod-region file splits** for the six files
+  still >2K after batch a (inbox 3590 / settings 2539 / workers/execute
+  2455 / helpscout_real 2344 / design 2283 / reports 2160 — exact
+  post-batch-a counts), split along EXISTING seams only (the R4.2
+  method clusters: inbox list/copilot/composer families, settings
+  helpscout-card/oauth/doctor families, execute's 22 tool fns, design's
+  composer/scaffold clusters); mechanical moves; G-15 visibility ladder
+  for moved items; D-24 multiset pre-gate on the four UI files; D-06 +
+  the CI kittest drift gate verify. ai_center 2003 = at-threshold KEEP
+  (verdict table). After R4.5: R5 optional owner-gated (Q-01); R6
   close-out.
-- Pre-flight [session 17]: run#351 (id 43635267151) green on `8f41c19`
-  (the session-16 addendum head — the standard docs-only preflight
-  gate). R4.4 executed on that green base and is now itself CI-VERIFIED
-  (same session): run#352 (id 43655562331) green on `3885eb4`, all four
-  lanes incl. the kittest snapshot drift gate — 203 goldens
-  byte-identical, pixel-neutrality confirmed for the value-identical
-  const folds. R4.4 TERMINAL; see `complete.md`. Green base for R4.5:
-  this addendum head's own docs-only run (the standard next-session
-  preflight gate).
-- Session counter: 17 completed (R1 terminal; R2 TERMINAL; R3 TERMINAL
-  — R3.1 run#332, R3.2 run#335, R3.3 run#337, R3.4 run#339, R3.5
-  zero-motion run#341, R3.6 run#342; R4.1 run#344; R4.2-a run#346;
-  R4.2-b run#348 — R4.2 TERMINAL; R4.3 run#350 — R4.3 TERMINAL; R4.4
-  run#352 — R4.4 TERMINAL).
-- Environment: session 16 was ANOTHER full reset — repo re-cloned via
-  github-reconnect.sh; toolchain SURVIVED at /tmp/my-project/
-  {rustup,cargo-home} (exports re-applied per bash call per §3); core
-  cold check ~2 min, clippy 60s/41s, ONE test lane per tool call
-  (core lib 465s, sandbox 466s, app-shell 274s); G-05 applied before
-  every link-heavy lane (disk peaked 72% before the app-shell lane).
-  New scanner gotcha G-14 (string line-continuations desync line
-  numbers — caught by assertion BEFORE any damage); visibility
-  ladder direction G-15 (private covers descendants only).
+- Pre-flight [session 18]: run#353 (id 43658004337) green on `70ab546`
+  (the session-17 addendum head — the standard docs-only preflight
+  gate). R4.5-a (cfg(test) mod extraction) executed on that green
+  base; battery green at exact baselines; CI closure rides this push.
+- Session counter: 18 completed batches (R1 terminal; R2 TERMINAL; R3
+  TERMINAL — runs #332/#335/#337/#339/#341/#342; R4.1 run#344; R4.2-a
+  run#346; R4.2-b run#348 — R4.2 TERMINAL; R4.3 run#350; R4.4 run#352;
+  R4.5-a battery-green, CI rides this push).
+- Environment: session 18 = ANOTHER full reset — repo re-cloned via
+  github-reconnect.sh; toolchain SURVIVED again at
+  /tmp/my-project/{rustup,cargo-home} (exports re-applied per bash
+  call per §3). New gotchas G-16 (string-literal braces defeat naive
+  brace counting — reports.rs's cfg(test) mods were invisible to the
+  raw-count scanner; the extractor is string-aware with per-mod
+  conservation asserts; the setsid background form re-confirmed G-10's
+  death list — cargo runs foreground per call, killed runs resume from
+  the warm target/ cache).
 
 ## Task states
 
@@ -78,7 +68,8 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 | R4.2 decomposition (batch b) | done (session 15) | all 11 queued fns split: execute_outbound 390→~86-line dispatcher + 6 send_* arm methods + payload_num/payload_str_or module fns (closures promoted per the batch-a recipe); sync_resource 331→19-arm dispatcher table + 16 sync_* methods (conversations/threads delegations + the `customers` since-seam + the unknown-resource fallback stay inline); incidents ui 527→~180 dispatcher + filter_controls/empty_list_ui/lifecycle_card_ui/linked_column_ui/info_column_ui methods + incident_row/incident_detail_header module fns; ai_center hub_ui 481→35-line dispatcher + 8 methods (endpoints card/row/key-edit/price/add-form/roles/features/ledger); organizations ui 393→~170 dispatcher + org_form_card_ui method + org_row/org_detail_header_ui/members_card_ui module fns; inbox list_ui→search_filter_ui/list_toolbar_ui/conversation_rows_ui methods, copilot_pane_ui→copilot_cards_ui/copilot_lmstudio_ui/assistant_ui methods, composer_pane_ui→enqueue_composer_tool/apply_composer_act/mention_popup_ui methods + composer_tool_row module fn + ToolAction enum hoisted to module scope; settings helpscout_ui→4 card methods; diagnostics ui→event_log_card_ui method + audit_trail/sync_reports/outbound_deliveries_card_ui module fns; design composer→composer_header_row/composer_footer_row module fns; ALL 4 too_many_lines allows deleted (every post-split fn under the 100-line threshold — clippy -D warnings green); battery green at EXACT baselines (520/528/293+2/56, clippy ×2, gate, icons, strip 207/207); pixel-neutrality verified locally by the widget-call multiset comparison (design::/ui. call multisets byte-identical old-vs-new on all 9 files after fixes — D-24); the CI kittest drift gate rides this push; D-23/D-24 |
 | R4.3 visibility | terminal (session 16) | CI run#350 green — see `complete.md` |
 | R4.4 magic values | terminal (session 17) | CI run#352 green — see `complete.md` |
-| R4.5 file splits | pending | see plan §5.3/§7 R4; census-first (re-measure current line counts — the session-1 list is stale) |
+| R4.5 file splits (batch a — cfg(test) mod extraction) | done (session 18) | census: 12 files >2K re-measured; 11 carried 37 inline test mods (6,843 lines) extracted to module files (string-aware extractor, per-mod conservation asserts); module tree byte-identical; 6 files exit the >2K set; battery green at exact baselines; CI rides this push |
+| R4.5 file splits (batch b — prod-region splits) | pending | six files still >2K: inbox 3590 / settings 2539 / workers/execute 2455 / helpscout_real 2344 / design 2283 / reports 2160; R4.2 method clusters are the seams (see verdict table) |
 | R5.1–R5.3 guardrails | pending (optional, stage-gated) | |
 | R6.1–R6.2 polish + close | pending | |
 
@@ -349,7 +340,69 @@ internal error.
 
 **R4.4 verdict summary:** the TENTH consecutive census correction — the plan's "magic values become named constants" letter resolved to 6 folds / 166 sites out of 7,823+17,350 production literal occurrences. All folds value-identical (const value byte-equals the replaced literal) → pixel-neutral BY CONSTRUCTION; the CI kittest drift gate is the verifier. 30 files +254/−184 after fmt (reflow accounted); battery green at EXACT baselines (520/528/293/56, clippy ×2, gate, icons, strip 207/207). New policy recorded as memory D-26; the action-label option recorded as Q-06.
 
+### R4.5 — file splits, batch a (session 18; census-first: line counts re-measured for every .rs file — 12 files now sit >2K, the session-1 top-10 plus quality/outreach; the prod/`#[cfg(test)]` split via the extractor's string-aware walk decides the tier; counts below are pre-batch)
+
+| file (pre-batch total) | prod / test split | verdict | outcome |
+|---|---|---|---|
+| pages/inbox.rs 4543 | 3578 / 965 (6 mods) | split a+b | dir conversion + 6 mod files → host 3590; prod-region split queued to b (list/copilot/composer clusters) |
+| pages/settings.rs 3235 | 2533 / 702 (3 mods) | split a+b | dir conversion + 3 files → 2539; queued to b (helpscout cards / oauth / doctor families) |
+| core/workers/mod.rs 2807 | 1373 / 1434 (7 mods) | split a ONLY | 7 files extracted → 1387 — UNDER threshold, done |
+| core/ai_pipeline/mod.rs 2768 | 1935 / 831 (5 mods) | split a ONLY | 5 files extracted → 1947 — under ~2K, done (the `#[cfg(test)] fn digest_row` helper and the interstitial prod fns stay) |
+| core/helpscout_real/mod.rs 2658 | 2336 / 322 (4 mods) | split a+b | 4 files extracted → 2344; queued to b |
+| pages/knowledge.rs 2516 | 1914 / 602 (1 mod) | split a ONLY | dir conversion + 1 file → 1916 — under, done |
+| design/mod.rs 2510 | 2281 / 229 (1 mod) | split a+b | 1 file extracted → 2283; queued to b |
+| core/workers/execute.rs 2455 | 2452 / — | b only | no test mass; the 22 R4.2-a tool fns are the seams |
+| pages/reports.rs 2304 | 2160 / 148 (2 mods) | split a+b | dir conversion + 2 files → 2160; queued to b (csv_contains_id/toggle_csv_id helpers stay in mod.rs — they sit BETWEEN the two mods) |
+| pages/ai_center.rs 2269 | 2001 / 268 (1 mod) | split a ONLY → at-threshold keep | extraction → 2003; the prod region sits AT the ~2,000 threshold after R4.2-b's 8-method decomposition — KEEP (D-27 ruling) |
+| core/quality/mod.rs 2159 | 1618 / 541 (4 mods) | split a ONLY | 4 files extracted → 1626 — done |
+| core/outreach/mod.rs 2144 | 1343 / 801 (4 mods) | split a ONLY | 4 files extracted → 1351 — done |
+
+**R4.5-a verdict summary:** the ELEVENTH consecutive census correction — the plan's six named candidates met twelve current >2K files, but the honest first split point was the cfg(test) mod boundary: 37 inline test mods / 6,843 lines moved to 37 module files with ZERO semantic change (module paths, visibility, and `use super::*` resolution identical by construction — the move is pure file layout; `git mv` preserves rename history for the five flat→dir conversions: inbox/settings/knowledge/ai_center/reports). Six files exit the >2K set entirely; six remain for batch b. Keeps recorded: ai_center at-threshold; custom_objects 1961 and sync_engine 1811 carry big test mods but sit under 2K — no trigger, no churn (D-23 discipline). Battery green at EXACT baselines (520/528/293+2/56, clippy ×2, gate, icons, strip 245/245 — the 37 new files ride the whole-tree check); kittest-ui feature `--all-targets` compile pre-verified locally (the CI kittest lane compiles the suites with the feature on — their imports are unchanged). Pixel-neutrality: no widget call touched (module layout only); the CI kittest drift gate rides this push as verifier. New memory: D-27 (two-tier split ruling) + G-16 (string-brace span trap); G-10's background-death list re-confirmed.
+
 ## Session log
+
+### Session 18 — 2026-11-15
+- Pre-flight: run#353 (id 43658004337) green on `70ab546` (the
+  session-17 addendum head — the standard docs-only preflight gate).
+- Environment: FULL reset again — repo re-cloned via
+  github-reconnect.sh; toolchain survived at /tmp/my-project/
+  {rustup,cargo-home}; exports re-applied per bash call per §3. The
+  incoming handover summary was AGAIN the stale R2.5-era ammonia text
+  (third time) — the committed ledger is the source of truth; R4.4
+  TERMINAL since run#352.
+- R4.5-a executed (file splits, census-first): re-measured every .rs
+  file — 12 files >2K (the session-1 top-10 plus quality 2159 and
+  outreach 2143); the prod/test split decided the two-tier remediation
+  (verdict table above). Extraction machinery r45a_extract.py
+  (tool-results): the G-08/G-14-family string-aware lexer — naive brace
+  counting MISSES mods whose bodies carry unbalanced string braces
+  (reports.rs proved it; G-16) — plus per-mod moved-line conservation
+  asserts, dedent invariants, collision checks, and `git mv` dir
+  conversions for the five flat pages. One mid-run assert redesign
+  (the first char-conservation design compared region-with-braces to
+  decl-with-semicolon — both sides must be the same BODY) cost a
+  clean `git reset --hard` + rerun; no damage escaped the assert.
+- Moves: 37 cfg(test) mod blocks / 6,843 lines → 37 module files;
+  hosts trimmed to `#[cfg(test)] mod X;` declarations. Six files exit
+  the >2K set (workers 1387 / ai_pipeline 1947 / knowledge 1916 /
+  quality 1626 / outreach 1351 / ai_center 2003-keep); six queued to
+  R4.5-b with exact post-batch counts.
+- Battery: gate clean; fmt --check clean (fmt --all run in write mode
+  between extraction and battery per D-12); clippy workspace 72s +
+  sandbox 72s (-D warnings) clean; core lib 520 ✓ (435s), sandbox
+  528 ✓ (445s), app-shell 293+2 ✓ (279s), catalog+xtask 56 ✓;
+  verify-icons ✓; strip-comments --check 245/245 ✓; kittest-ui
+  feature --all-targets check green (39s). G-05 before every
+  link-heavy lane; cold-start dep tree needed one killed-window
+  continuation (G-10) — foreground per call per G-10's fallback pattern
+  (the setsid launch form re-confirmed G-10's death list: 0-byte logs).
+- Module-tree invariance proof: test counts byte-equal at every lane —
+  the moved tests compile and run from their new files with identical
+  results (520/528/293+2/56); clippy -D warnings green over
+  --all-targets (cfg(test) modules compile under test cfg).
+- Commits: code + ledger (D-08). CI closure rides this push; the run id
+  lands in the next session's pre-flight line if the window closes
+  first (standard handoff per §5).
 
 ### Session 17 — 2026-11-14
 - Pre-flight: run#351 (id 43635267151) green on `8f41c19` (the session-16
