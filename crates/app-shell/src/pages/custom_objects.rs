@@ -719,10 +719,14 @@ impl CustomObjectsPage {
                             {
                                 picked = Some(t.id);
                             }
-                            if design::button(ui, "Edit", ButtonVariant::Outline).clicked() {
+                            if design::button(ui, design::EDIT_LABEL, ButtonVariant::Outline)
+                                .clicked()
+                            {
                                 edit_type = Some(t.clone());
                             }
-                            if design::button(ui, "Delete", ButtonVariant::Destructive).clicked() {
+                            if design::button(ui, design::DELETE_LABEL, ButtonVariant::Destructive)
+                                .clicked()
+                            {
                                 deleted_type = Some((t.id, t.name.clone()));
                             }
                         });
@@ -849,11 +853,17 @@ impl CustomObjectsPage {
                                         .strong()
                                         .color(tokens.foreground),
                                 );
-                                if design::button(ui, "Edit", ButtonVariant::Outline).clicked() {
+                                if design::button(ui, design::EDIT_LABEL, ButtonVariant::Outline)
+                                    .clicked()
+                                {
                                     edit_object = Some(object.clone());
                                 }
-                                if design::button(ui, "Delete", ButtonVariant::Destructive)
-                                    .clicked()
+                                if design::button(
+                                    ui,
+                                    design::DELETE_LABEL,
+                                    ButtonVariant::Destructive,
+                                )
+                                .clicked()
                                 {
                                     deleted =
                                         Some((i64_field(object, "id"), str_field(object, "title")));
@@ -1068,7 +1078,8 @@ impl CustomObjectsPage {
                         }
                     }
                     if editing_object
-                        && design::button(ui, "Cancel", ButtonVariant::Outline).clicked()
+                        && design::button(ui, design::CANCEL_LABEL, ButtonVariant::Outline)
+                            .clicked()
                     {
                         self.cancel_object_edit();
                     }
@@ -1206,7 +1217,8 @@ impl CustomObjectsPage {
                     self.create_type(db);
                 }
             }
-            if editing && design::button(ui, "Cancel", ButtonVariant::Outline).clicked() {
+            if editing && design::button(ui, design::CANCEL_LABEL, ButtonVariant::Outline).clicked()
+            {
                 self.cancel_type_edit();
             }
         });

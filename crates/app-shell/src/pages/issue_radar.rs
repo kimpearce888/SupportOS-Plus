@@ -971,7 +971,9 @@ impl IssueRadarPage {
                     }
                     ui.add_space(design::scale::space::SP1);
                     ui.horizontal(|ui| {
-                        if design::button(ui, "Edit", ButtonVariant::Secondary).clicked() {
+                        if design::button(ui, design::EDIT_LABEL, ButtonVariant::Secondary)
+                            .clicked()
+                        {
                             self.edit_known = Some((
                                 issue.id,
                                 issue.title.clone(),
@@ -985,7 +987,7 @@ impl IssueRadarPage {
                             self.link_known_target = Some(issue.id);
                             self.link_conversation_id.clear();
                         }
-                        if design::button(ui, "Delete", ButtonVariant::Ghost)
+                        if design::button(ui, design::DELETE_LABEL, ButtonVariant::Ghost)
                             .on_hover_text("delete this known issue and its links")
                             .clicked()
                             && nav.is_none()
@@ -1021,7 +1023,7 @@ impl IssueRadarPage {
                     if design::button(ui, "Save Changes", ButtonVariant::Primary).clicked() {
                         self.save_known_edit(db, id, &title, &symptoms, &workaround);
                     }
-                    if design::button(ui, "Cancel", ButtonVariant::Ghost).clicked() {
+                    if design::button(ui, design::CANCEL_LABEL, ButtonVariant::Ghost).clicked() {
                         self.edit_known = None;
                     }
                 });

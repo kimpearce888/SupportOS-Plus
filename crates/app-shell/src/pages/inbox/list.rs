@@ -747,7 +747,7 @@ impl InboxPage {
                             self.editing_chip = None;
                         }
                     }
-                    if ui.button("Cancel").clicked() {
+                    if ui.button(design::CANCEL_LABEL).clicked() {
                         self.editing_chip = None;
                     }
                 });

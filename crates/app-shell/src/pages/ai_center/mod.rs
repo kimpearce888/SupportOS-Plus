@@ -1269,7 +1269,7 @@ impl AiCenterPage {
                 self.key_edit_for = None;
                 self.key_edit_value.clear();
             }
-            if design::button(ui, "Cancel", ButtonVariant::Ghost).clicked() {
+            if design::button(ui, design::CANCEL_LABEL, ButtonVariant::Ghost).clicked() {
                 self.key_edit_for = None;
                 self.key_edit_value.clear();
             }
@@ -1333,7 +1333,7 @@ impl AiCenterPage {
                         }
                     }
                 }
-                if design::button(ui, "Cancel", ButtonVariant::Ghost).clicked() {
+                if design::button(ui, design::CANCEL_LABEL, ButtonVariant::Ghost).clicked() {
                     self.price_edit_for = None;
                 }
             });

@@ -516,13 +516,13 @@ impl AutomationPage {
                             {
                                 toggled = Some((id, !rule.enabled));
                             }
-                            if design::button(ui, "Edit", ButtonVariant::Outline)
+                            if design::button(ui, design::EDIT_LABEL, ButtonVariant::Outline)
                                 .on_hover_text("open this rule in the form above")
                                 .clicked()
                             {
                                 edit_requested = Some(rule.clone());
                             }
-                            if design::button(ui, "Delete", ButtonVariant::Destructive)
+                            if design::button(ui, design::DELETE_LABEL, ButtonVariant::Destructive)
                                 .on_hover_text("asks for confirmation before deleting")
                                 .clicked()
                             {
@@ -739,7 +739,9 @@ impl AutomationPage {
                 {
                     self.create_rule(db);
                 }
-                if editing && design::button(ui, "Cancel", ButtonVariant::Outline).clicked() {
+                if editing
+                    && design::button(ui, design::CANCEL_LABEL, ButtonVariant::Outline).clicked()
+                {
                     self.close_form();
                 }
             });

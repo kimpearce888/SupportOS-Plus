@@ -258,7 +258,7 @@ impl ReportsPage {
                                 if design::button(ui, "Inspect", ButtonVariant::Outline).clicked() {
                                     self.inspect_graph_node(db, node.id);
                                 }
-                                if design::button(ui, "Delete", ButtonVariant::Ghost)
+                                if design::button(ui, design::DELETE_LABEL, ButtonVariant::Ghost)
                                     .on_hover_text("delete this node and its human edges")
                                     .clicked()
                                     && self.pending_confirm.is_none()

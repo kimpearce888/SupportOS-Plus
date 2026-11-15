@@ -413,7 +413,10 @@ impl OrganizationsPage {
                             self.create(db);
                         }
                     }
-                    if editing && design::button(ui, "Cancel", ButtonVariant::Outline).clicked() {
+                    if editing
+                        && design::button(ui, design::CANCEL_LABEL, ButtonVariant::Outline)
+                            .clicked()
+                    {
                         self.close_form();
                     }
                 });
@@ -498,13 +501,13 @@ fn org_row(
             {
                 pick_id = Some(id);
             }
-            if design::button(ui, "Edit", ButtonVariant::Outline)
+            if design::button(ui, design::EDIT_LABEL, ButtonVariant::Outline)
                 .on_hover_text(format!("edit {name} — its name and domains"))
                 .clicked()
             {
                 edit_req = Some(org.clone());
             }
-            if design::button(ui, "Delete", ButtonVariant::Destructive)
+            if design::button(ui, design::DELETE_LABEL, ButtonVariant::Destructive)
                 .on_hover_text(format!("delete {name} — asks for confirmation first"))
                 .clicked()
             {
@@ -556,13 +559,13 @@ fn org_detail_header_ui(
         );
     }
     ui.horizontal(|ui| {
-        if design::button(ui, "Edit", ButtonVariant::Outline)
+        if design::button(ui, design::EDIT_LABEL, ButtonVariant::Outline)
             .on_hover_text("edit this organization's name and domains")
             .clicked()
         {
             edit_req = Some(org.clone());
         }
-        if design::button(ui, "Delete", ButtonVariant::Destructive)
+        if design::button(ui, design::DELETE_LABEL, ButtonVariant::Destructive)
             .on_hover_text("delete this organization — asks for confirmation first")
             .clicked()
         {

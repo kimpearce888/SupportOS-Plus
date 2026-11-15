@@ -378,7 +378,9 @@ impl SettingsPage {
                     );
                     ui.add_space(4.0);
                     ui.horizontal(|ui| {
-                        if design::button(ui, "Cancel", ButtonVariant::Outline).clicked() {
+                        if design::button(ui, design::CANCEL_LABEL, ButtonVariant::Outline)
+                            .clicked()
+                        {
                             self.purge_armed = false;
                         }
                         if design::button(

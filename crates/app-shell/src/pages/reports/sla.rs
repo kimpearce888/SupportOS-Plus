@@ -526,7 +526,9 @@ impl ReportsPage {
                         if design::button(ui, "Load", ButtonVariant::Outline).clicked() {
                             self.load_saved_report(&saved.config);
                         }
-                        if design::button(ui, "Delete", ButtonVariant::Destructive).clicked() {
+                        if design::button(ui, design::DELETE_LABEL, ButtonVariant::Destructive)
+                            .clicked()
+                        {
                             self.pending_confirm =
                                 Some(ConfirmRequest::delete_saved_report(saved.id, &saved.name));
                         }

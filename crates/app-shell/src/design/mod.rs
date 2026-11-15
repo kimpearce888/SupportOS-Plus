@@ -187,6 +187,12 @@ pub(crate) fn tokens_for(ctx: &egui::Context) -> &'static Tokens {
 
 pub(crate) const MISSING_VALUE: &str = "—";
 
+pub(crate) const CANCEL_LABEL: &str = "Cancel";
+
+pub(crate) const EDIT_LABEL: &str = "Edit";
+
+pub(crate) const DELETE_LABEL: &str = "Delete";
+
 pub mod scale {
     pub(crate) mod space {
         pub(crate) const SP1: f32 = 4.0;

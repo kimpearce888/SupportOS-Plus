@@ -107,7 +107,9 @@ impl ConfirmDialog {
                         {
                             outcome = DialogOutcome::Confirmed;
                         }
-                        if design::button(ui, "Cancel", ButtonVariant::Outline).clicked() {
+                        if design::button(ui, design::CANCEL_LABEL, ButtonVariant::Outline)
+                            .clicked()
+                        {
                             outcome = DialogOutcome::Cancelled;
                         }
                     });

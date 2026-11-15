@@ -1590,7 +1590,7 @@ impl SettingsPage {
                                 } else {
                                     design::badge(ui, "not configured", BadgeTone::Warning);
                                 }
-                                if design::button(ui, "Edit", ButtonVariant::Outline).clicked() {
+                                if design::button(ui, design::EDIT_LABEL, ButtonVariant::Outline).clicked() {
                                     edit = Some(row.clone());
                                 }
                             });
@@ -1659,7 +1659,7 @@ impl SettingsPage {
                         Err(e) => self.error = Some(e.to_string()),
                     }
                 }
-                if design::button(ui, "Cancel", ButtonVariant::Ghost).clicked() {
+                if design::button(ui, design::CANCEL_LABEL, ButtonVariant::Ghost).clicked() {
                     self.hours_edit = None;
                 }
             });
@@ -1783,7 +1783,9 @@ impl SettingsPage {
                     );
                     ui.add_space(4.0);
                     ui.horizontal(|ui| {
-                        if design::button(ui, "Cancel", ButtonVariant::Outline).clicked() {
+                        if design::button(ui, design::CANCEL_LABEL, ButtonVariant::Outline)
+                            .clicked()
+                        {
                             self.restore_armed = None;
                         }
                         if design::button(ui, "Really Restore", ButtonVariant::Destructive)

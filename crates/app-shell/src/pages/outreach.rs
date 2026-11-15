@@ -641,7 +641,7 @@ impl OutreachPage {
                         );
                         ui.horizontal(|ui| {
                             if str_field(campaign, "status") == "draft"
-                                && design::button(ui, "Edit", ButtonVariant::Outline)
+                                && design::button(ui, design::EDIT_LABEL, ButtonVariant::Outline)
                                     .on_hover_text("open this draft in the form above")
                                     .clicked()
                             {
@@ -919,7 +919,9 @@ impl OutreachPage {
                         self.create_campaign(db);
                     }
                 }
-                if editing && design::button(ui, "Cancel", ButtonVariant::Outline).clicked() {
+                if editing
+                    && design::button(ui, design::CANCEL_LABEL, ButtonVariant::Outline).clicked()
+                {
                     self.cancel_campaign_edit();
                 }
             });
@@ -968,8 +970,12 @@ impl OutreachPage {
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
-                                    if design::button(ui, "Delete", ButtonVariant::Destructive)
-                                        .clicked()
+                                    if design::button(
+                                        ui,
+                                        design::DELETE_LABEL,
+                                        ButtonVariant::Destructive,
+                                    )
+                                    .clicked()
                                     {
                                         deleted = Some((
                                             i64_field(segment, "id"),
@@ -982,9 +988,13 @@ impl OutreachPage {
                                     {
                                         preview_requested = Some((id, criteria.clone()));
                                     }
-                                    if design::button(ui, "Edit", ButtonVariant::Outline)
-                                        .on_hover_text("open this segment in the form above")
-                                        .clicked()
+                                    if design::button(
+                                        ui,
+                                        design::EDIT_LABEL,
+                                        ButtonVariant::Outline,
+                                    )
+                                    .on_hover_text("open this segment in the form above")
+                                    .clicked()
                                     {
                                         edit_requested = Some(segment.clone());
                                     }
@@ -1087,7 +1097,7 @@ impl OutreachPage {
                     self.preview_new_segment(db);
                 }
                 if editing.is_some()
-                    && design::button(ui, "Cancel", ButtonVariant::Outline).clicked()
+                    && design::button(ui, design::CANCEL_LABEL, ButtonVariant::Outline).clicked()
                 {
                     self.cancel_segment_edit();
                 }

@@ -516,10 +516,13 @@ impl ConnectorsPage {
                         {
                             refreshed = Some(id);
                         }
-                        if design::button(ui, "Edit", ButtonVariant::Outline).clicked() {
+                        if design::button(ui, design::EDIT_LABEL, ButtonVariant::Outline).clicked()
+                        {
                             edit_requested = Some(record.clone());
                         }
-                        if design::button(ui, "Delete", ButtonVariant::Destructive).clicked() {
+                        if design::button(ui, design::DELETE_LABEL, ButtonVariant::Destructive)
+                            .clicked()
+                        {
                             deleted = Some((id, name.clone()));
                         }
                     });
@@ -728,7 +731,9 @@ impl ConnectorsPage {
                         self.create(db);
                     }
                 }
-                if editing && design::button(ui, "Cancel", ButtonVariant::Outline).clicked() {
+                if editing
+                    && design::button(ui, design::CANCEL_LABEL, ButtonVariant::Outline).clicked()
+                {
                     self.close_form();
                 }
             });

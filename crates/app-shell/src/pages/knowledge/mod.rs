@@ -934,7 +934,7 @@ impl KnowledgePage {
                     {
                         read = Some(id);
                     }
-                    if design::button(ui, "Edit", ButtonVariant::Outline)
+                    if design::button(ui, design::EDIT_LABEL, ButtonVariant::Outline)
                         .on_hover_text("edit title, visibility and content in place")
                         .clicked()
                     {
@@ -977,7 +977,7 @@ impl KnowledgePage {
                             }
                             if ui
                                 .button(
-                                    egui::RichText::new("Delete")
+                                    egui::RichText::new(design::DELETE_LABEL)
                                         .size(13.0)
                                         .color(design::tokens(ui).destructive),
                                 )
@@ -1732,7 +1732,7 @@ impl KnowledgePage {
                 });
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                if design::button(ui, "Edit", ButtonVariant::Outline)
+                if design::button(ui, design::EDIT_LABEL, ButtonVariant::Outline)
                     .on_hover_text("edit title, visibility and content in place")
                     .clicked()
                 {
@@ -1809,7 +1809,7 @@ impl KnowledgePage {
                     } else {
                         let _ = ui.add_enabled(false, egui::Button::new("Save Changes"));
                     }
-                    if design::button(ui, "Cancel", ButtonVariant::Outline).clicked() {
+                    if design::button(ui, design::CANCEL_LABEL, ButtonVariant::Outline).clicked() {
                         cancel = true;
                     }
                 });

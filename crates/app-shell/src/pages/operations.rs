@@ -842,10 +842,10 @@ impl OperationsPage {
                     row.name,
                     row.preview.as_deref().unwrap_or("(no preview)")
                 ));
-                if design::button(ui, "Edit", ButtonVariant::Outline).clicked() {
+                if design::button(ui, design::EDIT_LABEL, ButtonVariant::Outline).clicked() {
                     action = LibraryAction::EditReply(row.remote_id);
                 }
-                if design::button(ui, "Delete", ButtonVariant::Destructive).clicked() {
+                if design::button(ui, design::DELETE_LABEL, ButtonVariant::Destructive).clicked() {
                     action = LibraryAction::DeleteReply(row.remote_id);
                 }
             });
@@ -892,7 +892,9 @@ impl OperationsPage {
                                 text: edit.text.trim().to_string(),
                             };
                         }
-                        if design::button(ui, "Cancel", ButtonVariant::Outline).clicked() {
+                        if design::button(ui, design::CANCEL_LABEL, ButtonVariant::Outline)
+                            .clicked()
+                        {
                             act = LibraryAction::CancelEdit;
                         }
                     });
