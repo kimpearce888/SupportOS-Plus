@@ -3,10 +3,6 @@ name: CI
 on:
   push:
     branches: [main]
-    # AUD-P2-9 (I1): release tags ran none of this — in practice tags
-    # came from main so the artifacts were CI-verified by ancestry, but
-    # nothing enforced it. Tags now run the same battery (deny + the
-    # kittest drift gate + packaging) as branches.
     tags: ['v*']
   pull_request:
 
@@ -16,9 +12,6 @@ env:
 permissions:
   contents: read
 
-# Hygiene (audit §4): a new push to the same ref supersedes the run that
-# is still going — the fresh one reuses the warm cache and the cancelled
-# run's result is moot.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -29,39 +22,25 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          # Hygiene (audit §4): the default persists the API token into
-          # .git/config for the rest of the job; nothing here needs it.
           persist-credentials: false
 
-      # 1.4.0 R7 (D14): production code must never reintroduce simulated/
-      # fake/demo data markers. Runs before anything expensive.
       - name: No-simulation gate
         run: python3 scripts/gate_no_simulation.py
 
       - name: Install pinned Rust toolchain
-        # rust-toolchain.toml is the single source of truth for the exact
-        # toolchain version; `rustup toolchain install` reads it directly.
         run: |
           rustup toolchain install
           rustup show active-toolchain
           rustc --version
 
       - name: Cache cargo state
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
 
-      # Phase 4 cutover is done: the Leptos/WASM ui crate and the Tauri
-      # app are gone, the egui app-shell needs no system deps, so every
-      # check runs workspace-wide.
       - name: Format check
         run: cargo fmt --all --check
 
-      # The checked-in icon set is packaging's contract (PNG dimensions,
-      # ICO/ICNS structure); the packaging lanes verify it before staging
-      # too. CI validates it directly so icon corruption fails before any
-      # expensive lane runs (audit item 164 — the check had no automation
-      # caller before).
       - name: Verify icons
         run: cargo run --locked -p supportos-plus-xtask -- verify-icons
 
@@ -71,10 +50,6 @@ jobs:
       - name: Test (workspace)
         run: cargo test --locked --workspace
 
-      # Landlock + seccomp sandbox (plan row): the sandboxed pdf/zip
-      # parsing paths only compile on Linux with the feature on, so they
-      # need their own clippy/test pass (ubuntu-latest kernels also
-      # actually enforce Landlock, exercising the real restriction).
       - name: Clippy (sandbox feature)
         run: cargo clippy --locked -p supportos-plus-core --all-targets --features sandbox -- -D warnings
 
@@ -82,19 +57,11 @@ jobs:
         run: cargo test --locked -p supportos-plus-core --features sandbox
 
       - name: Install cargo-deny
-        uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2
+        uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177
         with:
           tool: cargo-deny
 
-      # `bans` joined the check in audit item 161: duplicate crate
-      # versions are denied (see the documented skip list in deny.toml),
-      # and running the section here is what makes that real — bans were
-      # configured once but never evaluated anywhere.
       - name: Deny (advisories, licenses, bans, sources)
-        # AUD-P2-9 (I1): the new [sources] section fails the check on any
-        # dependency that does not come from the crates.io registry or an
-        # allow-listed git source — the graph is registry-only today, so
-        # anything else is a supply-chain surprise.
         run: cargo deny check advisories licenses bans sources
 
   packages:
@@ -102,90 +69,61 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
 
       - name: Install pinned Rust toolchain
-        # rust-toolchain.toml is the single source of truth for the exact
-        # toolchain version; `rustup toolchain install` reads it directly.
         run: |
           rustup toolchain install
           rustup show active-toolchain
           rustc --version
 
       - name: Cache cargo state
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
 
       - name: Install the libraries the AppImage bundles
-        # The AppImage bundles libxkbcommon/-x11/libxcb-xkb from the
-        # build host (winit dlopens them at window creation; not every
-        # target host ships the X11 flavor), so the build host must have
-        # them. Desktop machines do; runners must install them.
         run: sudo apt-get install -y libxkbcommon0 libxkbcommon-x11-0 libxcb-xkb1
 
       - name: Build the AppImage (xtask package)
-        # Builds the release binary (sandbox feature on), stages the
-        # AppDir (desktop entry, hicolor icons, AppRun) and packs the
-        # type-2 AppImage; appimagetool is downloaded (and cached under
-        # target/tools) by the xtask itself.
         run: cargo run --locked -p supportos-plus-xtask -- package
 
       - name: Smoke test (boot chain inside the AppImage)
-        # APPIMAGE_EXTRACT_AND_RUN self-extracts and executes AppRun —
-        # that validates the packaging (paths, icons, entry). SPP_SMOKE=1
-        # makes the binary verify logging, single-instance lock, all boot
-        # migrations, boot services, background workers and the loopback
-        # listener, then exit 0 without opening a window (a GUI cannot run
-        # on a headless runner).
         run: |
           APPIMAGE_EXTRACT_AND_RUN=1 SPP_SMOKE=1 \
             ./target/appimage/SupportOS-Plus-x86_64.AppImage
 
       - name: Build the .deb (xtask deb)
-        # Stages the dpkg tree (control metadata, absolute-path desktop
-        # entry, hicolor icons) and packs it with dpkg-deb from the same
-        # release binary as the AppImage.
         run: cargo run --locked -p supportos-plus-xtask -- deb --skip-build
 
       - name: Inspect the .deb (control metadata)
         run: dpkg-deb -I target/deb/supportos-plus_*_amd64.deb
 
       - name: Smoke test (boot chain inside the extracted .deb payload)
-        # dpkg-deb -x extracts the payload exactly as APT would install
-        # it; SPP_SMOKE=1 then exercises the same boot chain as above.
         run: |
           dpkg-deb -x target/deb/supportos-plus_*_amd64.deb /tmp/deb-payload
           SPP_SMOKE=1 /tmp/deb-payload/usr/bin/supportos-plus
 
       - name: Upload AppImage artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: SupportOS-Plus-x86_64.AppImage
           path: target/appimage/SupportOS-Plus-x86_64.AppImage
           if-no-files-found: error
 
       - name: Upload .deb artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: supportos-plus_amd64.deb
           path: target/deb/supportos-plus_*_amd64.deb
           if-no-files-found: error
 
   packages-arm64:
-    # AUD-P2-9 (I1): the aarch64 packaging support (arch map, pinned
-    # arm64 appimagetool + type-2 runtime, arm64 .deb naming) existed
-    # and was even asserted by tests — but no CI lane ever built it, so
-    # the "both CI arches" claims were aspirational. This lane builds
-    # and smoke-tests the arm64 artifacts natively (the repo is public,
-    # so GitHub's free ubuntu-24.04-arm runners are available). It
-    # mirrors the x86_64 packages job; the xtask resolves the arch on
-    # its own from the host.
     name: AppImage + .deb build, smoke (arm64)
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
 
@@ -196,14 +134,12 @@ jobs:
           rustc --version
 
       - name: Cache cargo state
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
 
       - name: Install the libraries the AppImage bundles
         run: sudo apt-get install -y libxkbcommon0 libxkbcommon-x11-0 libxcb-xkb1
 
       - name: Build the AppImage (xtask package)
-        # Same xtask path as x86_64 — the host arch drives the binary,
-        # the appimagetool pin and the embedded type-2 runtime.
         run: cargo run --locked -p supportos-plus-xtask -- package
 
       - name: Smoke test (boot chain inside the AppImage)
@@ -223,33 +159,25 @@ jobs:
           SPP_SMOKE=1 /tmp/deb-payload/usr/bin/supportos-plus
 
       - name: Upload AppImage artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: SupportOS-Plus-aarch64.AppImage
           path: target/appimage/SupportOS-Plus-aarch64.AppImage
           if-no-files-found: error
 
       - name: Upload .deb artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: supportos-plus_arm64.deb
           path: target/deb/supportos-plus_*_arm64.deb
           if-no-files-found: error
 
-  # RS-4 (R4, G4-rejection wave): the reskin's drift lock. The 26 suites (207 tests — 205 kittest
-  # + 2 style lint — over 203 goldens) diff-lock every rebuilt page — the REAL
-  # pages over seeded
-  # mirrors, 1440/1024/800 × 900, light + dark, a11y check ON — against the
-  # checked-in baselines. The runner has no GPU, so the frames render through
-  # Mesa's lavapipe, the same software-rasterizer family the baselines were
-  # produced with (RS-16..RS-20's diff-locked-twice discipline). A visual
-  # drift on any page now fails CI instead of shipping silently.
   snapshots:
     name: kittest snapshot locks (reskin drift gate)
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
 
@@ -260,13 +188,9 @@ jobs:
           rustc --version
 
       - name: Cache cargo state
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
 
       - name: Install the software Vulkan rasterizer (lavapipe)
-        # egui_kittest renders headless through wgpu; the runner has no GPU,
-        # so the goldens render through Mesa's lavapipe. Both env vars point
-        # wgpu at the ICD (VK_DRIVER_FILES is the current name,
-        # VK_ICD_FILENAMES the legacy one some wgpu versions read).
         run: |
           sudo apt-get update
           sudo apt-get install -y mesa-vulkan-drivers
@@ -275,10 +199,6 @@ jobs:
       - name: Test (kittest suites, snapshots diff-locked)
         env:
           WGPU_BACKEND: vulkan
-        # UPDATE_SNAPSHOTS is deliberately NOT set: the suites diff against
-        # the committed baselines and fail on any drift. The ICD filename
-        # differs across runner images (lvp_icd.json on newer Ubuntu,
-        # lvp_icd.x86_64.json on older ones) — resolve it at runtime.
         run: |
           ICD="$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -1)"
           test -n "$ICD" || { echo "no lavapipe ICD found"; ls /usr/share/vulkan/icd.d/; exit 1; }
@@ -287,11 +207,8 @@ jobs:
           cargo test --locked -p supportos-plus-app-shell --features kittest-ui
 
       - name: Upload diff images (diagnosis, on failure)
-        # A failing golden leaves its *.diff.png next to the baselines;
-        # uploading them makes a CI-side drift diagnosable without a local
-        # reproduction.
         if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: kittest-diff-images
           path: crates/app-shell/tests/snapshots/*.diff.png

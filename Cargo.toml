@@ -10,9 +10,6 @@ members = [
 [workspace.package]
 version = "1.9.8"
 edition = "2024"
-# MSRV = the pinned toolchain (rust-toolchain.toml, D1/D5: stability
-# first). Older compilers are never tested, so claiming 1.85 would be
-# dishonest.
 rust-version = "1.99"
 license = "MIT"
 authors = ["kimpearce888"]
@@ -30,14 +27,6 @@ serde_json = "1"
 chrono = { version = "0.4" }
 chrono-tz = { version = "0.10", default-features = false, features = ["std"] }
 
-# Plan row 12 ("tokio full → slim"): the port uses exactly rt (spawn,
-# spawn_blocking, runtime builders, handles), rt-multi-thread (the
-# 2-thread background worker runtime), time (interval/sleep timers),
-# sync (broadcast event bus, oneshot channels) and fs (the connectors
-# file tailer). net/io come in through reqwest's own dependency via
-# feature unification; process/signal have zero call sites and stay
-# off (AUD-P2-8: the old comment lumped fs in with them — connectors.rs
-# has called tokio::fs since it landed).
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "time", "sync", "fs"] }
 
 rusqlite = { version = "0.41", features = ["bundled"] }
@@ -45,23 +34,7 @@ rusqlite = { version = "0.41", features = ["bundled"] }
 aes-gcm = "0.11"
 rand = "0.10"
 
-# --- egui stack (decision D1): exact pins. Only what a member actually
-# consumes is declared here — `eframe` (which re-exports `egui`) is the
-# sole entry point; bare `egui`/`egui_extras` workspace entries had no
-# consumer in any crate (egui_extras was not even in Cargo.lock) and were
-# removed (audit item 162). Adopt a dedicated entry in both places if a
-# crate ever needs one directly.
-# v1.1.1: `glow` is compiled into every build and is the default
-# renderer (see app-shell `resolve_renderer`). eframe's own default
-# (wgpu alone) needs a Vulkan driver or a GLES stack — neither is
-# guaranteed on real machines, which is exactly how 1.1.0 failed to
-# start outside CI. wgpu stays compiled in via eframe defaults; it is
-# reachable again with SPP_RENDERER=wgpu.
 eframe = { version = "=0.37", features = ["glow"] }
-# NOTE: egui_plot 0.37 builds against egui 0.36 (no release targets 0.37
-# yet — releases lag one minor). Re-pin and adopt it once it catches up;
-# until then the shell renders its charts with the egui painter
-# (crates/app-shell/src/chart.rs).
 
 
 regex = "1"
@@ -82,9 +55,4 @@ opt-level = "s"
 strip = true
 
 [profile.dev]
-# No debuginfo: keeps memory/disk footprint low when compiling in
-# constrained environments (AUD-P2-8: the original justification named
-# the embedded qdrant engine — that engine is gone; the vector index is
-# sqlite-vec inside the main database now, and the slim dev profile
-# stays worth having).
 debug = 0

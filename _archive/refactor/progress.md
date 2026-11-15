@@ -7,38 +7,21 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 
 ## CURRENT POINTER
 
-- Next task: **R6.1 — build-file comment strip** (Cargo.toml, workflows,
-  .gitignore, deny.toml, .cargo, rust-toolchain.toml, gate script):
-  functional zero-diff only; battery + CI after. Then R6.2 final audit
-  (full battery, CI green, final metrics vs plan §6 baseline,
-  every-line verification statement per module cluster, closing report
-  in complete.md). R5 stays optional owner-gated (Q-01) — if the owner
-  answers, R5.1–R5.3 slot before R6.2; otherwise R6 closes the plan.
-- Pre-flight [session 19]: run#355 (id 43672660744) green on `5f69ada`
-  (the session-18 addendum head — the standard docs-only preflight
-  gate). R4.5-b (prod-region splits) executed on that green base and
-  is CI-VERIFIED same session: run#356 (id 43681170622) green on
-  `9139e8d`, all four lanes — check (fmt/clippy/test/deny), packages
-  x86_64, packages arm64, and the kittest snapshot drift gate: 203
-  goldens byte-identical, the definitive pixel-neutrality proof for
-  the prod-region moves. R4.5 TERMINAL (a+b) — evidence in
-  `complete.md`. Green base for R6.1: this addendum head's own
-  docs-only run (the standard next-session preflight gate).
-- Session counter: 19 completed batches (R1 terminal; R2 TERMINAL; R3
+- Next task: **R6.2 — final audit** (full battery, CI green, final
+  metrics vs plan §6 baseline, every-line verification statement per
+  module cluster, closing report in `complete.md`). R5 stays optional
+  owner-gated (Q-01) — if the owner answers, R5.1–R5.3 slot before R6.2;
+  otherwise R6.2 closes the plan.
+- Pre-flight [session 20]: run#357 (id 43682661859) green on `bf37d97`
+  (the session-19 addendum head — the standard docs-only preflight
+  gate). R6.1 (build-file comment strip) executed on that green base;
+  CI verification rides this session's push (next session's step 3
+  closes it if the window ends first).
+- Session counter: 20 completed batches (R1 terminal; R2 TERMINAL; R3
   TERMINAL — runs #332/#335/#337/#339/#341/#342; R4.1 run#344; R4.2-a
   run#346; R4.2-b run#348 — R4.2 TERMINAL; R4.3 run#350; R4.4 run#352;
-  R4.5-a run#354; R4.5-b run#356 — R4.5 TERMINAL).
-- Environment: session 19 = full reset again — repo re-cloned via
-  github-reconnect.sh; toolchain SURVIVED at
-  /tmp/my-project/{rustup,cargo-home} (exports re-applied per bash
-  call per §3); cold dep tree needed one killed-window continuation
-  (G-10) on the first `cargo check`. New gotchas G-17 (audit current
-  declaration levels BEFORE writing the visibility-rewrite table —
-  four draft names were already pub(crate)/pub(super)), G-18 (the
-  G-15 sibling corollary: a moved private struct whose fields are read
-  from a sibling needs pub(super) on BOTH struct and fields), G-19
-  (git mv into a NEW nested dir fails unless the dir is pre-created —
-  the apply died mid-run after two hosts; clean reset+clean+rerun).
+  R4.5-a run#354; R4.5-b run#356 — R4.5 TERMINAL; R6.1 pushed this
+  session, CI pending).
 
 ## Task states
 
@@ -75,7 +58,8 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 | R4.5 file splits (batch a — cfg(test) mod extraction) | done (session 18) | CI run#354 green on `c503d02` (all 4 lanes incl. kittest drift gate — 203 goldens byte-identical); census: 12 files >2K re-measured; 11 carried 37 inline test mods (6,843 lines) extracted to module files (string-aware extractor, per-mod conservation asserts); module tree byte-identical; 6 files exit the >2K set |
 | R4.5 file splits (batch b — prod-region splits) | terminal (session 19) | CI run#356 green on `9139e8d` (all 4 lanes incl. kittest drift gate — 203 goldens byte-identical) — see `complete.md`; local battery green at exact baselines (520/528/293+2/56, clippy ×2, gate, fmt, icons, strip 259/259); six hosts split along R4.2 seams into 14 child files, 6,198 lines moved; D-24 multiset 4/4 identical; post-split largest file = ai_center 2003 (the D-27 at-threshold KEEP) — the >2K set is empty |
 | R5.1–R5.3 guardrails | pending (optional, stage-gated) | |
-| R6.1–R6.2 polish + close | pending | |
+| R6.1 build-file comment strip | done (session 20) | 279 comment lines removed across the 12 build files (root + 4 crate Cargo.tomls, deny.toml, rust-toolchain.toml, .cargo/config.toml, .gitignore, ci.yml, release.yml, gate script): 259 whole-line TOML/YAML (incl. 21 shell comments inside YAML run-block scalars) + 20 trailing action-pin `# vN` annotations; functional zero-diff proven four ways (tomllib equality, PyYAML normalized equality, Python AST equality, multiset comment-only diff audit); battery green at exact baselines (520/528/293+2/56, clippy ×2 -D warnings, gate, icons, strip 259/259) + LOCAL cargo-deny four-way ok (G-09 protocol, deny.toml touched); CI rides this push |
+| R6.2 final audit | pending | full battery + CI green + final metrics vs plan §6 + closing report |
 
 ## Review verdict tables (R2–R4 passes)
 
@@ -377,6 +361,49 @@ internal error.
 **R4.5-b verdict summary:** six hosts / 6,198 lines / 14 new child files; every split rides the R4.2 method-cluster seams named in the batch-a verdict table (reports had no R4.2 seam — its Tab families are the standing structure, the two >250-line families moved, the small tab views stay, D-23). G-15 ladder end state: impl-member moves need ONLY visibility (method-call syntax is path-free) — 78 private methods widened to exactly pub(super) (parent-dispatcher / cross-sibling / test-mod callers each proven by the consumer census; run_attachment_downloads was already pub(super) and kept its level); mailbox_local_id stayed private (its only caller moved with it); TokenRow + 4 fields widened to pub(super) (G-18 — the http.rs sibling reads them); design/helpscout_real top-level items keep their pub/pub(crate) levels with `pub use` re-exports keeping every existing path byte-stable (the pub consts SECRET_DOCS_API_KEY/SECRET_OAUTH_* included), while the four sibling-used private helpers (token_row/base64_of/urlencode/stored_api_concurrency/TOKEN_EXPIRY) got pub(super) + host `use` bindings so http.rs's `use super::*` glob still resolves them unchanged. Conservation machinery (r45b_split.py): string-aware boundary-depth asserts, per-child marker-count asserts, per-child and per-host whitespace-insensitive char-multiset conservation (old + additions == new — G-16's same-artifact lesson), git-mv rename history for execute.rs → execute/. D-24 multiset pre-gate: 4/4 UI hosts byte-identical widget-call multisets (268/255/240/272 calls). Battery green at EXACT baselines (520/528/293+2/56, clippy ×2 -D warnings, gate, fmt, icons, strip 259/259 = 245+14 new files); kittest-ui --all-targets compile green locally (42.8s); the CI kittest drift gate rides this push as the final pixel-neutrality verifier. Post-split tree: largest file = ai_center 2003 (the D-27 at-threshold KEEP) — the >2K set is EMPTY. New memory: D-28 + G-17/G-18/G-19.
 
 ## Session log
+
+### Session 20 — 2026-11-15
+- Pre-flight: run#357 (id 43682661859) green on `bf37d97` (the
+  session-19 addendum head — the standard docs-only preflight gate).
+- Environment: full reset AGAIN — clone wiped; re-cloned via
+  github-reconnect.sh (credentials survived in tool-results);
+  toolchain + registry cache survived at /tmp/my-project/
+  {rustup,cargo-home} (third reset in a row; exports re-applied per
+  bash call per §3); cold dep tree cost one killed-window continuation
+  (G-10) on the first clippy lane, as always.
+- R6.1 executed (build-file comment strip, plan §7 R6 letter):
+  census-first (r61_strip.py census mode — 279 lines across the 12
+  target files; .gitattributes censused ZERO comments, left
+  byte-identical; `_archive/` deliberately out of scope — it is the
+  program's own memory, not build machinery). Taxonomy from the
+  census: 238 whole-line YAML/TOML comments + 21 shell comments
+  inside YAML run-block scalars + 20 trailing `# vN` action-pin
+  annotations on `uses:` lines. Applied by the same tool in apply
+  mode with per-file equivalence asserts.
+- Functional zero-diff proof, four independent layers: (1) tomllib
+  loads(before)==loads(after) for all 8 TOML files incl. deny.toml;
+  (2) PyYAML recursive structural equality for both workflows with
+  run-block shell-comment-line normalization applied to BOTH sides;
+  (3) Python AST dump equality for the gate script (comments are
+  trivia; shebang + docstrings kept — D-29); (4) r61_audit.py
+  multiset conservation audit over git HEAD vs worktree: 279 removed
+  lines all comments, 20 added lines all pin-rewrite counterparts,
+  per-file count reconciliation green.
+- Battery (one lane per tool call, G-05 watch): gate clean; fmt
+  --check clean; clippy workspace + sandbox (-D warnings) clean
+  (cold tree: one killed-window continuation on lane 1); core 520 ✓
+  (476s); core-sandbox 528 ✓ (466s, G-05 cleanup before it);
+  app-shell 293+2 ✓ (288s); catalog+xtask 56 ✓; verify-icons ✓;
+  strip-comments --check crates 259/259 ✓ (the .rs tree untouched).
+  G-09 protocol for the touched deny.toml: cargo-deny 0.20.2
+  installed as the PREBUILT musl release binary (G-20) and run
+  locally — advisories ok, bans ok, licenses ok, sources ok (the
+  advisory DB fetched live; no new advisories against the tree).
+- Commits: code + ledger (D-08). CI closure: rides this session's
+  push; next session's step 3 records the run id (or same-session if
+  the window allows).
+- New memory: D-29 (build-file comment taxonomy + the docstring/
+  shebang ruling) + G-20 (cargo-deny prebuilt musl asset).
 
 ### Session 19 — 2026-11-16
 - Pre-flight: run#355 (id 43672660744) green on `5f69ada` (the

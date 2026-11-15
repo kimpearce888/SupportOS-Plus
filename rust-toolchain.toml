@@ -1,5 +1,4 @@
 [toolchain]
-# Exact pin (D1/D5: stability first). Upgrade deliberately, never silently.
 channel = "1.99.1"
 components = ["rustfmt", "clippy", "rust-analyzer"]
 profile = "default"

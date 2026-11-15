@@ -1,19 +1,9 @@
-# cargo-deny configuration (cargo-deny 0.20+ schema)
-# Docs: https://embarkstudios.github.io/cargo-deny/
 
 [graph]
-# Check the dependency graph for the native Linux target.
 targets = [{ triple = "x86_64-unknown-linux-gnu" }]
 
 [advisories]
-# Advisory IDs / yanked crate versions that must be ignored land here, each
-# with a reason. Anything ignored shows up as a note in the report.
-# Current entries are "unmaintained" notices (not vulnerabilities); most
-# disappear at the Phase 4 cutover when the Leptos/Tauri trees are deleted.
 ignore = [
-    # Batch 7 note: the leptos/tauri trees and qdrant-edge are gone, so the
-    # bincode/paste/proc-macro-error/serde_cbor entries were dropped with
-    # them. The egui/accesskit tree still pulls the crates below.
     { id = "RUSTSEC-2026-0192", reason = "ttf-parser unmaintained; pulled via epaint (egui font parsing)" },
     { id = "RUSTSEC-2026-0370", reason = "zvariant unmaintained (merged into zbus 6); pulled via accesskit_unix (Linux accessibility bus)" },
     { id = "RUSTSEC-2026-0371", reason = "zbus_names unmaintained; pulled via accesskit_unix (Linux accessibility bus)" },
@@ -34,42 +24,16 @@ allow = [
     "MPL-2.0",
     "BSL-1.0",
     "CC0-1.0",
-    # egui's bundled fonts (epaint_default_fonts): emoji + Ubuntu family.
     "OFL-1.1",
     "Ubuntu-font-1.0",
 ]
 
 [licenses.private]
-# Workspace members are not published; their licenses are MIT via the
-# workspace manifest, so skipping private-crate noise is safe.
 ignore = true
 
 [bans]
-# Duplicate crate versions are DENIED, and CI evaluates this section
-# (`cargo deny check advisories licenses bans`) since audit item 161 —
-# before that, bans were configured but never run anywhere, and the
-# comment promised a future "deny" that nothing tracked anymore.
-#
-# The premise of the old promise (a reqwest 0.12/0.13 dedupe "still to
-# do") is gone: Cargo.lock carries exactly one reqwest. New duplicate
-# versions therefore fail CI, and a maintainer either dedupes (preferred)
-# or adds a documented skip line here.
-#
-# The skips below are today's pre-existing transitive duplicates of the
-# checked graph (x86_64-unknown-linux-gnu) — semver-incompatible
-# generations required by different upstreams (crypto-stack generations,
-# wayland-stack generations via winit, proc-macro ecosystem
-# transitions). Skipped by crate name, each with its reason; when an
-# upstream dedupes one of them, drop the line (CI stays green — the skip
-# is then simply unused). Duplicates that exist only on other targets
-# (the Apple objc2 stack, windows-sys, jni-sys, r-efi, redox_syscall)
-# are outside this graph entirely; a skip line must be re-added for them
-# if [graph] targets ever widen.
 multiple-versions = "deny"
 skip = [
-    # Two crypto-stack generations in the tree: the workspace lane uses
-    # the sha2 0.11-era stack (sha2/digest/crypto-common/block-buffer),
-    # while aes-gcm/scrypt consumers still require the 0.8/0.10-era one.
     { crate = "aes", reason = "transitive: crypto-stack generations from different upstreams" },
     { crate = "block-buffer", reason = "transitive: crypto-stack generations from different upstreams" },
     { crate = "cipher", reason = "transitive: crypto-stack generations from different upstreams" },
@@ -77,7 +41,6 @@ skip = [
     { crate = "digest", reason = "transitive: crypto-stack generations from different upstreams" },
     { crate = "inout", reason = "transitive: crypto-stack generations from different upstreams" },
     { crate = "sha2", reason = "workspace uses 0.11; egui/accesskit tree still pulls 0.10" },
-    # Ecosystem-wide library generations.
     { crate = "cpufeatures", reason = "transitive: generations from different upstreams" },
     { crate = "euclid", reason = "transitive: generations from different upstreams" },
     { crate = "foldhash", reason = "transitive: generations from different upstreams" },
@@ -93,21 +56,11 @@ skip = [
     { crate = "syn", reason = "transitive: proc-macro ecosystem 2.x/3.x transition" },
     { crate = "thiserror", reason = "transitive: ecosystem 1.x/2.x transition" },
     { crate = "thiserror-impl", reason = "transitive: ecosystem 1.x/2.x transition" },
-    # Wayland client-stack generations via winit.
     { crate = "calloop", reason = "transitive: winit wayland-stack generations" },
     { crate = "calloop-wayland-source", reason = "transitive: winit wayland-stack generations" },
     { crate = "smithay-client-toolkit", reason = "transitive: winit wayland-stack generations" },
 ]
 
 [sources]
-# AUD-P2-9 (I1): source provenance is enforced now — the section was
-# missing entirely, so `cargo deny check` never evaluated where
-# dependencies come from. The workspace graph resolves 100% from the
-# crates.io registry (no git dependencies, no vendored archives), so
-# anything arriving by an unknown registry or an unlisted git source is
-# a supply-chain surprise and fails CI (`cargo deny check ... sources`).
-# If a git dependency is ever adopted on purpose, list its org below in
-# allow-orgs (or allow-list the exact URL) with a reason, mirroring the
-# bans skip-list discipline above.
 unknown-registry = "deny"
 unknown-git = "deny"

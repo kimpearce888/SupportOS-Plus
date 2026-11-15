@@ -25,8 +25,6 @@ from pathlib import Path
 
 MARKERS = ("simulated", "fake", "demo")
 
-# Each entry: (path relative to repo root, exact stripped line content
-# that is allowed to carry the marker, justification).
 ALLOWLIST: dict[str, dict[str, str]] = {
     "crates/core/src/audit.rs": {
         '"DELETE FROM application_settings WHERE key IN (\'demo_mode\', \'demo_content_purged\')",':

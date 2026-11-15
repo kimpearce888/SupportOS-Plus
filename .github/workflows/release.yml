@@ -13,8 +13,6 @@ on:
 permissions:
   contents: read
 
-# Hygiene (audit §4): serialize release runs for the same ref. Never
-# cancel in progress — a half-published release is worse than a queue.
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
@@ -36,28 +34,15 @@ jobs:
           apt-get install -y --no-install-recommends \
             build-essential curl ca-certificates git file python3 \
             libxkbcommon0 libxkbcommon-x11-0 libxcb-xkb1
-          # `file` is required by appimagetool (runtime arch detection);
-          # ubuntu-latest runners ship it, bare containers do not. The
-          # xkbcommon trio is bundled from the build host into the
-          # AppImage, so it must be present here too. `python3` runs the
-          # no-simulation gate (the minimal container ships no Python).
 
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          # Hygiene (audit §4): the token never needs to sit in
-          # .git/config; the job only reads history and packages.
           persist-credentials: false
 
-      # 1.4.0 R7 (D14): the release build enforces the same no-simulation
-      # gate as CI — a tagged release must not carry fabricated-data markers.
       - name: No-simulation gate
         run: python3 scripts/gate_no_simulation.py
 
       - name: Install pinned Rust toolchain
-        # rust-toolchain.toml is the single source of truth for the exact
-        # toolchain version; `rustup toolchain install` reads it directly.
-        # GITHUB_PATH only affects later steps, so the env file is sourced
-        # in-step as well.
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
             | sh -s -- -y --profile default --default-toolchain none
@@ -72,9 +57,6 @@ jobs:
       - name: Format check
         run: cargo fmt --all --check
 
-      # Every cargo invocation on the release path carries `--locked`
-      # (audit item 165): a release must be built from exactly the
-      # committed Cargo.lock, never from a silently rewritten one.
       - name: Clippy (workspace)
         run: cargo clippy --locked --workspace --all-targets -- -D warnings
 
@@ -87,8 +69,6 @@ jobs:
       - name: Test (sandbox feature)
         run: cargo test --locked -p supportos-plus-core --features sandbox
 
-      # The release build carries the Landlock + seccomp parse sandbox
-      # in both packages, exactly as `xtask package`/`xtask deb` enable it.
       - name: Release build (sandbox feature on)
         run: cargo build --locked --release -p supportos-plus-app-shell --features supportos-plus-core/sandbox
 
@@ -100,9 +80,6 @@ jobs:
 
       - name: Stage dist/ (versioned names + SHA-256 checksums)
         run: |
-          # checkout@v4 registers its safe-directory exception under a
-          # temporary HOME; this shell (different HOME in the container)
-          # needs its own exception before using git in the workspace.
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           VERSION=$(awk -F'"' '/^version =/{print $2; exit}' Cargo.toml)
           mkdir -p dist
@@ -122,7 +99,7 @@ jobs:
           cat SHA256SUMS.txt BUILD-INFO.txt
 
       - name: Upload dist artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: dist
           path: dist/*
@@ -139,7 +116,7 @@ jobs:
         container: [ubuntu:22.04, ubuntu:24.04, debian:12]
     container: ${{ matrix.container }}
     steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: dist
           path: dist
@@ -148,9 +125,6 @@ jobs:
         run: cd dist && sha256sum -c SHA256SUMS.txt
 
       - name: Install via APT (dependency resolution)
-        # Installing the local .deb through APT must resolve and fetch
-        # every declared dependency from the distribution repository —
-        # no manual dependency handling, no terminal-only steps.
         run: |
           apt-get update
           apt-get install -y ./dist/supportos-plus_*_amd64.deb
@@ -171,20 +145,9 @@ jobs:
           desktop-file-validate /usr/share/applications/supportos-plus.desktop
 
       - name: Smoke test (full boot chain, no display needed)
-        # SPP_SMOKE=1 verifies logging, single-instance lock, all boot
-        # migrations, boot services, background workers and the loopback
-        # listener, then exits 0 without opening a window. It also
-        # performs first-run initialization (the SQLite database under
-        # $XDG_DATA_HOME) exactly as a real launch would.
         run: SPP_SMOKE=1 /usr/bin/supportos-plus
 
       - name: Upgrade from 0.2.x migrates the data directory in place
-        # Simulates a real v0.2.0 user: legacy data under
-        # ~/.local/share/supportos-plusplus with the old database file
-        # name, then boots the upgraded binary. The one-time migration
-        # moves the whole directory and renames the database inside it;
-        # a zero-byte file is a valid empty SQLite database, so the boot
-        # chain completes normally on the migrated store.
         run: |
           NEW_DIR="$HOME/.local/share/supportos-plus"
           LEGACY="$HOME/.local/share/supportos-plusplus"
@@ -206,12 +169,6 @@ jobs:
             || { echo "legacy dir not consumed by the whole-dir rename"; exit 1; }
 
       - name: GUI launch under Xvfb (declared dependencies only)
-        # The only test-env additions are the virtual display and the
-        # software GL/Vulkan driver — the "host display/driver" class; every
-        # client library must come from the .deb's own Depends set.
-        # xauth is required by xvfb-run (not pulled with
-        # --no-install-recommends); libglx-mesa0 is the Mesa GLX vendor
-        # (libgl1-mesa-glx does not exist on ubuntu:24.04).
         run: |
           apt-get install -y --no-install-recommends \
             xvfb xauth libgl1-mesa-dri libglx-mesa0 mesa-vulkan-drivers
@@ -220,8 +177,6 @@ jobs:
             /usr/bin/supportos-plus
           rc=$?
           set -e
-          # 124 = the timeout fired with the app still alive: window
-          # created, render loop running, no library missing.
           test "$rc" -eq 124
 
       - name: Reinstall (dpkg file-replacement / upgrade mechanics)
@@ -239,9 +194,6 @@ jobs:
           test ! -e /usr/share/applications/supportos-plus.desktop
           test -f "$DATA_DIR/supportos-plus.db" \
             && echo "user data survived uninstall (and the 0.2.x upgrade migration)"
-          # The package ships no conffiles: after removal dpkg may already
-          # consider it fully gone, in which case there is nothing left to
-          # purge and apt-get purge would fail with 'unable to locate'.
           if dpkg -s supportos-plus >/dev/null 2>&1; then
             apt-get purge -y supportos-plus
           else
@@ -258,7 +210,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: dist
           path: dist
@@ -269,8 +221,6 @@ jobs:
           cd dist && sha256sum -c SHA256SUMS.txt
 
       - name: Smoke test (boot chain inside the AppImage)
-        # APPIMAGE_EXTRACT_AND_RUN self-extracts and executes AppRun —
-        # validating paths, icons and entry without FUSE.
         run: |
           APPIMAGE_EXTRACT_AND_RUN=1 SPP_SMOKE=1 \
             dist/SupportOS-Plus-*-x86_64.AppImage
@@ -296,11 +246,11 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
 
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: dist
           path: dist
@@ -394,10 +344,6 @@ jobs:
             echo "- SHA-256 checksums in \`SHA256SUMS.txt\`; every download link checked live"
           } > body.md
 
-          # Prepend the tagged version's CHANGELOG section (when present)
-          # so the release page also documents what changed, not just how
-          # to install. Missing section ⇒ notes stay as before (no-op).
-          # (Repo cleanup: CHANGELOG.md lives under _archive/ now.)
           awk -v ver="$VERSION" \
             '/^## / { insec = ($0 ~ ("^## \\[" ver "\\]")) ? 1 : 0 }
              insec  { print }' _archive/CHANGELOG.md > changes.md
@@ -414,8 +360,6 @@ jobs:
             gh release upload "$TAG" dist/SupportOS-Plus-*-x86_64.AppImage \
               dist/supportos-plus_*_amd64.deb dist/SHA256SUMS.txt \
               dist/BUILD-INFO.txt --clobber
-            # Re-built artifacts carry fresh tar timestamps; the notes'
-            # checksum table must always match the uploaded bytes.
             gh release edit "$TAG" --notes-file body.md \
               --title "SupportOS+ ${VERSION}"
           else
@@ -433,8 +377,6 @@ jobs:
           gh release view "$TAG" --json tagName,isDraft,targetCommitish,assets
           test "$(gh release view "$TAG" --json isDraft -q .isDraft)" = "false"
           cd dist
-          # Every browser_download_url must answer and match the recorded
-          # checksum (skip stray empty lines in the listing).
           gh release view "$TAG" --json assets -q '.assets[].browser_download_url' \
             | while read -r url; do
                 [ -n "$url" ] || continue

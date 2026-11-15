@@ -513,6 +513,45 @@ session ends by adding what the next session must not have to rediscover.
   descendant glob sees the host's private items AND its private
   use-bindings). End state of the ~2K policy: largest file = ai_center
   2003 (the D-27 keep); the >2K set is empty.
+- **D-29 (session 20, R6.1).** Build-file comment taxonomy (the
+  plan-R6.1 ruling set, mirrors D-13's Rust-comment policy for the
+  non-Rust build machinery):
+  - **Whole-line comments** (TOML `#`, YAML `#`, .gitignore `#`):
+    strip — the direct analog of R1's Rust strip; the rationale
+    lives in this ledger now.
+  - **Trailing comments on `uses:` action pins** (`…@<sha> # v4`):
+    strip the fragment, keep the pin — the pin hash is the
+    functional datum, the version tag was documentation. ONLY
+    these carried trailing comments tree-wide (census-proven).
+  - **Shell comments inside YAML `run: |` block scalars**: strip —
+    they are script no-ops; removal is functional zero-diff for
+    the script. The stripper MUST track block-scalar regions
+    (the header regex must allow the space in `run: |`) so
+    run-block lines are exempt from the YAML trailing-comment
+    scan — a future ` #`-bearing DATA line inside a script
+    (release.yml's changelog awk already carries `^## ` data)
+    would otherwise be corrupted.
+  - **Python (gate script): `#` comments only.** The shebang is
+    interpreter machinery — kept; docstrings are runtime
+    objects (`__doc__` state) — KEPT under the batch's own
+    "functional zero-diff" bar (removing one would be a
+    functional diff, however small; AST equality is the
+    verifier). If the owner ever wants gate docstrings gone
+    too, that is a one-minute follow-up batch — recorded as the
+    standing owner option (same shape as Q-06's prose).
+  - **Out of scope, deliberately:** `_archive/` (the program's
+    own memory — not build machinery) and Cargo.lock (generated,
+    zero comments). `.gitattributes` was censused (zero
+    comments) and left byte-identical.
+  - **Proof discipline for zero-diff claims over non-Rust
+    formats:** per-format semantic parser equality (tomllib /
+    PyYAML with run-block normalization / ast.dump) PLUS a
+    multiset line-conservation audit over git HEAD (every
+    removed line a comment; every added line a rewrite
+    counterpart). difflib opcode alignment is NOT usable for
+    this audit when the tree contains duplicate lines (four
+    identical action-pin lines deranged its alignment — the
+    multiset form is alignment-free and duplicate-safe).
 
 ## Facts (F-xx)
 
@@ -699,6 +738,15 @@ session ends by adding what the next session must not have to rediscover.
   `git reset --hard` + `git clean -fd crates/` + fix + rerun (safe
   because every host's asserts re-derive from the reset tree — the
   same idempotency G-16's reset relied on).
+- **G-20 (session 20).** Local cargo-deny for the G-09 protocol:
+  install the PREBUILT release binary, never `cargo install` (the
+  compile costs ~8 min on this sandbox). Asset naming trap: the
+  release ships `x86_64-unknown-linux-MUSL` only (no `-gnu` asset) —
+  the gnu-suffixed URL 404s. Working recipe:
+  `curl -sL -o cdy.tar.gz https://github.com/EmbarkStudios/cargo-deny/releases/download/0.20.2/cargo-deny-0.20.2-x86_64-unknown-linux-musl.tar.gz`
+  then `tar xzf` and run it straight from the extracted dir (no
+  install step; the advisory DB fetches live at check time — network
+  required).
 
 
 ## Open questions / deferred owner decisions
