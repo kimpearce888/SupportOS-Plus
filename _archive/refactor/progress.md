@@ -9,7 +9,9 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 
 - **PROGRAM CLOSED** (R6.2 terminal — session 20, 2026-11-15). The
   final code head is `168e71a` (R6.1; CI run#358 green, all 4 lanes);
-  the closing docs-only head rides the identical code tree.
+  the closing docs-only head `9522cde` is itself CI-VERIFIED: run#359
+  (id 43696107214) green, all 4 lanes (check / packages x86_64 /
+  packages arm64 / kittest drift gate — 203 goldens byte-identical).
 - No further batches. What remains for the owner only (all recorded
   in `memory.md` §Open questions): Q-01 (R5 guardrails — gate port to
   xtask, unwrap-policy lint, pedantic subset; dropped unexercised at
@@ -20,7 +22,7 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
   handover → progress; re-provision if reset; confirm the last head
   CI-green) still apply; new work should open a NEW plan entry rather
   than extend this one.
-- Session counter: 20 sessions / 20 batches / CI runs #301–#358.
+- Session counter: 20 sessions / 20 batches / CI runs #301–#359.
   Final metrics + closing report: `complete.md`.
 
 ## Task states
@@ -59,7 +61,7 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 | R4.5 file splits (batch b — prod-region splits) | terminal (session 19) | CI run#356 green on `9139e8d` (all 4 lanes incl. kittest drift gate — 203 goldens byte-identical) — see `complete.md`; local battery green at exact baselines (520/528/293+2/56, clippy ×2, gate, fmt, icons, strip 259/259); six hosts split along R4.2 seams into 14 child files, 6,198 lines moved; D-24 multiset 4/4 identical; post-split largest file = ai_center 2003 (the D-27 at-threshold KEEP) — the >2K set is empty |
 | R5.1–R5.3 guardrails | dropped (session 20) | owner-gated option never exercised across the program — Q-01 records the standing option (gate port to xtask / unwrap-policy lint / pedantic subset) with the sub-batch letters; dropped-with-reason at close per the DoD |
 | R6.1 build-file comment strip | terminal (session 20) | CI run#358 green on `168e71a` — see `complete.md`; 279 comment lines / 12 build files; functional zero-diff proven four ways (tomllib, PyYAML normalized, AST, multiset audit); battery at exact baselines + local cargo-deny four-way ok (G-09); D-29 + G-20 |
-| R6.2 final audit — PROGRAM CLOSED | terminal (session 20) | closing docs-only head on the identical code tree (R3.5 precedent; battery = session-20 run + CI run#358); DoD checklist closed in `complete.md`; final metrics vs §6 recorded (259 files / 138,593 LOC / 0 comments tree-wide incl. build files / 0 production unwraps / 56 justified expects / 4 classified panic-family / 30 justified allows / pub −90 / >2K set empty / 203 goldens byte-identical); per-module-cluster verification statements below; standing owner options Q-01..Q-06 |
+| R6.2 final audit — PROGRAM CLOSED | terminal (session 20) | closing docs-only head `9522cde` CI-VERIFIED: run#359 (id 43696107214) green, all 4 lanes (R3.5 docs-only precedent; battery = session-20 run + CI run#358 on the identical code tree); DoD checklist closed in `complete.md`; final metrics vs §6 recorded (259 files / 138,593 LOC / 0 comments tree-wide incl. build files / 0 production unwraps / 56 justified expects / 4 classified panic-family / 30 justified allows / pub −90 / >2K set empty / 203 goldens byte-identical); per-module-cluster verification statements below; standing owner options Q-01..Q-06 |
 
 ## Review verdict tables (R2–R4 passes)
 
@@ -438,11 +440,11 @@ lanes, the no-simulation gate, kittest drift gate).
   final-metrics table + closing report written into complete.md.
   Docs-only closing head on the identical code tree (R3.5 docs-only
   precedent) — the session-20 battery on this exact tree + CI
-  run#358 are the evidence; the closing head's own CI run id gets
-  recorded by the follow-up addendum commit.
+  run#358 are the evidence; CI-VERIFIED same session: run#359
+  (id 43696107214) green on `9522cde`, all 4 lanes.
 - New memory: D-29 (build-file comment taxonomy + the docstring/
   shebang ruling) + G-20 (cargo-deny prebuilt musl asset).
-- PROGRAM CLOSED: 20 sessions / 20 batches / CI runs #301–#358;
+- PROGRAM CLOSED: 20 sessions / 20 batches / CI runs #301–#359;
   standing owner options Q-01..Q-06 in memory.md.
 
 ### Session 19 — 2026-11-16
