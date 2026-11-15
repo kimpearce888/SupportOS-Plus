@@ -10,13 +10,14 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 - **PROGRAM 2 OPEN** (session 21, 2026-11-15) — owner override
   "complete anything ignored and skipped"; operative task list is
   plan §11 (Q-01..Q-06 execution). Program 1 stays closed; every
-  protocol carries over. **CURRENT POINTER: R7.4-a continues** (class-A clusters, 41
-  sites left: security 8, coaching 10, interaction_engine 5,
-  quality 16, ai_evidence 1 — cluster mapping recorded in the
-  session-21 log). Done: R7.1 (f9c568c), R7.2 (e62bf08), R7.3
-  (10c3cde, CI run#361 green all four lanes), R7.4-a sandbox
-  cluster (05f7006, CI run#362 green all four lanes incl. kittest
-  drift gate). Then R7.4-b/c -> R7.5 -> R7.6.
+  protocol carries over. **CURRENT POINTER: R7.4-a continues** (class-A clusters, 33
+  sites left: coaching 10, interaction_engine 5, quality 16,
+  ai_evidence 1 — cluster mapping in the session-21 log; D-33(d)
+  mandates full-site rg re-census per cluster). Done: R7.1
+  (f9c568c), R7.2 (e62bf08), R7.3 (10c3cde, CI run#361), R7.4-a/1
+  sandbox (05f7006, run#362), R7.4-a/2 security cluster (this
+  commit — the full bubble: security.rs + 4 chains + 16 tool fns,
+  D-33). Then R7.4-b/c -> R7.5 -> R7.6.
 - Last program-1 head `6dd8c8b` CI-green (run#360, all four lanes —
   verified this session before Program 2 opened). Session counter
   resets for Program 2: session 1 of Program 2 = session 21 overall.
@@ -439,6 +440,24 @@ lanes, the no-simulation gate, kittest drift gate).
   all four lanes (check incl. deny, packages x86_64, packages
   arm64, kittest drift gate). Session-21 total: 5 batches (R7.1,
   R7.2, R7.3, R7.4-a/1 + this addendum head), CI runs #361-#362.
+
+- R7.4-a/2 executed (security cluster, the full bubble — D-33):
+  security.rs 8 sites via the rx() helper + Result signatures;
+  chains — ai_pipeline chat boundary (LmStudioError::new(msg,
+  false)), redact_for_model -> Result (std::result:: prefix — the
+  alias collision E0107 caught at compile), run_extraction ->
+  Result<Option<...>> (compute caller + the 722 test ride along);
+  execute.rs tool layer — redact/redact_chars -> Result, the CENSUS
+  CORRECTION: fanout was 23 sites / 16 tool fns (the recorded ~10
+  was head-truncated rg; D-33(d) now mandates full re-census),
+  settle() at the dispatcher arms, two-pass restructures for the
+  rusqlite closures, ClusterRow/AttrRow structs where clippy
+  type_complexity rejected tuples. Tests: batch29 +2 expects,
+  attributes +2 expects (D-10 regions). Battery green at exact
+  baselines: gate, fmt, clippy x2 (-D warnings), core 520 (453s),
+  sandbox 528 (465s), app-shell 293+2 (261s), catalog+xtask 56,
+  verify-icons, strip 259/259 (G-05 relief before the sandbox
+  lane). Post-batch census: prod_expect 44.
 
 - R7.4-a first cluster executed (sandbox.rs x4): the already-Result
   apply_seccomp narrows its two rule-construction sites — fd_rule

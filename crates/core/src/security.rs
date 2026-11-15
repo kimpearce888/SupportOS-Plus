@@ -1,5 +1,7 @@
 use regex::Regex;
 use serde_json::{Value, json};
+
+use crate::error::{Error, Result};
 #[derive(Debug, Clone, serde::Serialize)]
 pub(crate) struct SsrfCheckResult {
     pub ok: bool,
@@ -303,6 +305,10 @@ pub(crate) async fn validate_ssrf_full_async(raw_url: &str) -> crate::error::Res
     }
 }
 
+fn rx(pattern: &'static str) -> Result<Regex> {
+    Regex::new(pattern).map_err(|e| Error::Other(Box::new(e)))
+}
+
 pub(crate) struct RedactionPattern {
     pub name: &'static str,
     pub regex: Regex,
@@ -310,54 +316,60 @@ pub(crate) struct RedactionPattern {
     pub prefix: Option<Regex>,
 }
 
-pub(crate) fn redaction_patterns() -> Vec<RedactionPattern> {
-    vec![
+pub(crate) fn redaction_patterns() -> Result<Vec<RedactionPattern>> {
+    Ok(vec![
         RedactionPattern {
             name: "card_number",
-            regex: Regex::new(r"\b(?:\d[ -]*?){13,16}\b").expect("static regex"),
+            regex: rx(r"\b(?:\d[ -]*?){13,16}\b")?,
             replacement: "[REDACTED-CARD]",
             prefix: None,
         },
         RedactionPattern {
             name: "cvv",
-            regex: Regex::new(r"(?i)\b(?:cvv|cvc|security code)[\s:=-]*(\d{3,4})\b").expect("static regex"),
+            regex: rx(r"(?i)\b(?:cvv|cvc|security code)[\s:=-]*(\d{3,4})\b")?,
             replacement: "[REDACTED-CVV]",
-            prefix: Some(Regex::new(r"(?i)^[\s]*(?:cvv|cvc|security code)?[\s:=-]*").expect("static regex")),
+            prefix: Some(rx(r"(?i)^[\s]*(?:cvv|cvc|security code)?[\s:=-]*")?),
         },
         RedactionPattern {
             name: "api_key",
-            regex: Regex::new(r"(?i)\b(?:api[_-]?key|token|secret|password|passwd|pwd)\b[\s:=-]*[A-Za-z0-9_\-.]{8,}").expect("static regex"),
+            regex: rx(
+                r"(?i)\b(?:api[_-]?key|token|secret|password|passwd|pwd)\b[\s:=-]*[A-Za-z0-9_\-.]{8,}",
+            )?,
             replacement: "[REDACTED-SECRET]",
-            prefix: Some(Regex::new(r"(?i)^[\s]*(?:api[_-]?key|token|secret|password|passwd|pwd)?[\s:=-]*").expect("static regex")),
+            prefix: Some(rx(
+                r"(?i)^[\s]*(?:api[_-]?key|token|secret|password|passwd|pwd)?[\s:=-]*",
+            )?),
         },
         RedactionPattern {
             name: "bearer",
-            regex: Regex::new(r"(?i)\bBearer\s+[A-Za-z0-9\-._~+/]+=*").expect("static regex"),
+            regex: rx(r"(?i)\bBearer\s+[A-Za-z0-9\-._~+/]+=*")?,
             replacement: "[REDACTED-TOKEN]",
             prefix: None,
         },
         RedactionPattern {
             name: "aws_key",
-            regex: Regex::new(r"\bAKIA[0-9A-Z]{16}\b").expect("static regex"),
+            regex: rx(r"\bAKIA[0-9A-Z]{16}\b")?,
             replacement: "[REDACTED-AWS-KEY]",
             prefix: None,
         },
         RedactionPattern {
             name: "private_key_block",
-            regex: Regex::new(r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----").expect("static regex"),
+            regex: rx(
+                r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----",
+            )?,
             replacement: "[REDACTED-PRIVATE-KEY]",
             prefix: None,
         },
-    ]
+    ])
 }
 
-pub(crate) fn redact_text(text: &str, enabled: bool) -> (String, Vec<Value>) {
+pub(crate) fn redact_text(text: &str, enabled: bool) -> Result<(String, Vec<Value>)> {
     if !enabled {
-        return (text.to_string(), Vec::new());
+        return Ok((text.to_string(), Vec::new()));
     }
     let mut out = text.to_string();
     let mut redactions: Vec<Value> = Vec::new();
-    for p in redaction_patterns() {
+    for p in redaction_patterns()? {
         let matches: Vec<&str> = p.regex.find_iter(&out).map(|m| m.as_str()).collect();
         if !matches.is_empty() {
             let count = matches.len();
@@ -377,7 +389,7 @@ pub(crate) fn redact_text(text: &str, enabled: bool) -> (String, Vec<Value>) {
             redactions.push(json!({ "pattern": p.name, "count": count }));
         }
     }
-    (out, redactions)
+    Ok((out, redactions))
 }
 
 #[cfg(test)]

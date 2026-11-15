@@ -120,13 +120,13 @@ pub(crate) async fn run_extraction(
     provider: &dyn LocalAiProvider,
     model: &str,
     prompt: &str,
-) -> Option<ExtractionOutput> {
+) -> Result<Option<ExtractionOutput>> {
     if !provider.is_available().await {
-        return None;
+        return Ok(None);
     }
     let redaction_enabled =
         crate::settings::get_bool(conn, "redaction_enabled", true).unwrap_or(true);
-    let (safe_prompt, findings) = crate::security::redact_text(prompt, redaction_enabled);
+    let (safe_prompt, findings) = crate::security::redact_text(prompt, redaction_enabled)?;
     if !findings.is_empty() {
         tracing::info!(
             operation = "attribute_extraction",
@@ -151,12 +151,12 @@ pub(crate) async fn run_extraction(
         )
         .await
     {
-        Ok(response) => Some(ExtractionOutput {
+        Ok(response) => Ok(Some(ExtractionOutput {
             latency_ms: started.elapsed().as_millis() as u64,
             usage: response.usage,
             content: response.content,
-        }),
-        Err(_) => None,
+        })),
+        Err(_) => Ok(None),
     }
 }
 
@@ -273,7 +273,7 @@ pub(crate) async fn compute(
     };
     let fresh = match &prepared.prompt {
         Some(prompt) if prepared.cached.is_none() => {
-            run_extraction(conn, provider, model, prompt).await
+            run_extraction(conn, provider, model, prompt).await?
         }
         _ => None,
     };

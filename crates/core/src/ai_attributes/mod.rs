@@ -732,7 +732,8 @@ mod batch22_audit_tests {
             let provider = RecordingProvider::new();
             let out = rt
                 .block_on(run_extraction(&conn, &provider, "test-model", prompt))
-                .expect("an answer");
+                .expect("an answer")
+                .expect("the provider is available");
             assert_eq!(out.content, "{\"attributes\":[]}");
             let captured = provider.captured_user_content();
             assert!(
@@ -772,7 +773,8 @@ mod batch22_audit_tests {
             crate::settings::set_bool(&conn, "redaction_enabled", false).expect("setting");
             let provider = RecordingProvider::new();
             rt.block_on(run_extraction(&conn, &provider, "test-model", prompt))
-                .expect("an answer");
+                .expect("an answer")
+                .expect("the provider is available");
             let captured = provider.captured_user_content();
             assert_eq!(
                 captured, prompt,

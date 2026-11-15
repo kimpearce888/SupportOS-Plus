@@ -115,7 +115,9 @@ impl AiBackend {
         let safe_user = if redact {
             let enabled =
                 crate::settings::get_bool(conn, "redaction_enabled", true).unwrap_or(true);
-            crate::security::redact_text(user, enabled).0
+            crate::security::redact_text(user, enabled)
+                .map_err(|e| LmStudioError::new(e.to_string(), false))?
+                .0
         } else {
             user.to_string()
         };
@@ -1215,9 +1217,10 @@ pub(crate) fn rewrite_instruction(instruction: &str) -> &'static str {
     }
 }
 
-fn redact_for_model(conn: &Connection, text: &str) -> String {
+fn redact_for_model(conn: &Connection, text: &str) -> std::result::Result<String, LmStudioError> {
     let enabled = crate::settings::get_bool(conn, "redaction_enabled", true).unwrap_or(true);
-    let (safe, findings) = crate::security::redact_text(text, enabled);
+    let (safe, findings) = crate::security::redact_text(text, enabled)
+        .map_err(|e| LmStudioError::new(e.to_string(), false))?;
     if !findings.is_empty() {
         tracing::info!(
             operation = "draft_rewrite",
@@ -1225,7 +1228,7 @@ fn redact_for_model(conn: &Connection, text: &str) -> String {
             "redaction boundary applied to the rewrite prompt"
         );
     }
-    safe
+    Ok(safe)
 }
 
 pub(crate) async fn rewrite_composer_text(
@@ -1246,7 +1249,7 @@ pub(crate) async fn rewrite_composer_text(
         AiBackend::LmStudio { client, model, .. } => (client, model.as_deref()),
         AiBackend::Disabled => return Err(LmStudioError::new(AI_DISABLED_MESSAGE, false)),
     };
-    let safe_text = redact_for_model(conn, text);
+    let safe_text = redact_for_model(conn, text)?;
     let messages = vec![
         ChatMessage {
             role: "system".into(),

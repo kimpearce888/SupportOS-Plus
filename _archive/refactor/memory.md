@@ -611,6 +611,48 @@ session ends by adding what the next session must not have to rediscover.
   Post-batch census: prod_unreachable = 0 tree-wide; panic family =
   the single D-10 arm-level cfg(test) site.
 
+
+- **D-33 (session 21, R7.4-a/2).** Security-cluster conversion shapes
+  (the Q-03 strict letter applied to redaction machinery):
+  (a) security.rs — one named helper `rx(pattern) -> Result<Regex>`
+  (map_err into Error::Other(Box<new(e))) replaces the 8 duplicated
+  "static regex" expect-messages (DRY + honest name);
+  redaction_patterns -> Result<Vec<RedactionPattern>>;
+  redact_text -> Result<(String, Vec<Value>)> with the enabled
+  early-return as Ok.
+  (b) Boundaries per consumer chain, chosen by the chain's own
+  error surface: ai_pipeline chat boundary maps into
+  LmStudioError::new(msg, false) (retryable=false — a compile bug
+  never retries); redact_for_model -> std::result::Result<String,
+  LmStudioError> (the crate Result alias shadows two-generic form —
+  E0107; the file's own precedent is the explicit std::result::
+  prefix); run_extraction -> Result<Option<ExtractionOutput>>
+  (None = provider unavailable stays Option; Err = the NEW error
+  channel for redaction-build failure — semantics kept distinct).
+  (c) The tool layer's error surface is the dispatcher's Value
+  channel: json!({"error": ...}) is the protocol's existing error
+  rendering (invalid args / unknown tool already use it), so the 16
+  Result-returning tool fns settle at the arm via one `settle`
+  helper; redact/redact_chars -> Result<String>; rusqlite
+  query_map closures (rusqlite::Result-typed, cannot `?` a core
+  Error) go two-pass — raw rows collected first, redaction applied
+  in a Result-collecting second pass; plain Value-closures convert
+  to Result-closures + collect::<Result<Vec<_>>>()?; map_cluster_row
+  split into ClusterRow struct + raw_cluster_row collector + render
+  pass (same for ai_attributes' AttrRow — clippy type_complexity
+  rejected the 6-tuple, the struct is the honest shape).
+  (d) CENSUS CORRECTION (the Q-03-mode lesson again): the recorded
+  "consumer bubble: ~10 redact sites" was head-truncated rg output —
+  the real fanout is 23 redact/redact_chars sites across 16 tool
+  fns (search x4 + get_conversation/context/customer_history/
+  similar/ai_attributes/timeline/memory + custom_objects/
+  connector_data/knowledge_gaps/graph_neighbors + issue_clusters
+  via map_cluster_row). Full-site rg re-census is now mandatory
+  before any consumer-fanout edit.
+  Post-batch census: prod_expect 44 (56 - 4 sandbox @R7.4-a/1 -
+  8 security @this batch); test-region +4 (batch29/attributes
+  test expects — D-10).
+
 ## Facts (F-xx)
 
 - **F-01.** Baseline (session 1): 204 .rs files, 141,107 LOC — core
