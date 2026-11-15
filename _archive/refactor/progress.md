@@ -10,14 +10,15 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 - **PROGRAM 2 OPEN** (session 21, 2026-11-15) — owner override
   "complete anything ignored and skipped"; operative task list is
   plan §11 (Q-01..Q-06 execution). Program 1 stays closed; every
-  protocol carries over. **CURRENT POINTER: R7.4-a/3 coaching cluster** (class-A sites
-  left: coaching 10, interaction_engine 5, quality 16, ai_evidence
-  1 — mapping in the session-21 log; D-33(d) mandates full-site rg
-  re-census per cluster). Done: R7.1 (f9c568c), R7.2 (e62bf08),
-  R7.3 (10c3cde, CI run#361), R7.4-a/1 sandbox (05f7006, run#362),
-  R7.4-a/2 security cluster (6c9538a, CI run#364 green all four
-  lanes incl. kittest drift gate; D-33; next-session prep mapping
-  below). Then interaction_engine -> quality -> ai_evidence ->
+  protocol carries over. **CURRENT POINTER: R7.4-a/4 interaction_engine
+  cluster** (class-A sites left: interaction_engine 5, quality 16,
+  ai_evidence 1 — prep mapping for interaction_engine in the
+  session-21 log; D-33(d) mandates full-site rg re-census per
+  cluster). Done: R7.1 (f9c568c), R7.2 (e62bf08), R7.3 (10c3cde,
+  CI run#361), R7.4-a/1 sandbox (05f7006, run#362), R7.4-a/2
+  security cluster (6c9538a, CI run#364), R7.4-a/3 coaching
+  cluster (dd9c3da, CI run#366 green all four lanes incl. kittest
+  drift gate; prod_expect 34). Then quality -> ai_evidence ->
   R7.4-b/c -> R7.5 -> R7.6.
 - Last program-1 head `6dd8c8b` CI-green (run#360, all four lanes —
   verified this session before Program 2 opened). Session counter
@@ -441,6 +442,58 @@ lanes, the no-simulation gate, kittest drift gate).
   all four lanes (check incl. deny, packages x86_64, packages
   arm64, kittest drift gate). Session-21 total: 5 batches (R7.1,
   R7.2, R7.3, R7.4-a/1 + this addendum head), CI runs #361-#362.
+
+- CI verification: run#366 (id 43750059829) GREEN on dd9c3da,
+  all four lanes (check incl. deny, packages x86_64, packages
+  arm64, kittest drift gate). Session-21 tally: 7 commits (5
+  batch + 2 addendum), CI runs #361-#366; prod_expect 34.
+- R7.4-a/3 executed (coaching cluster, 10 sites, the two census
+  shapes): checks.rs local ctors x5 (acknowledgment/detail/
+  wrong_context x2/preference_mismatch) + the accessor-consuming
+  check_timeframe -> five check fns Result<Value> via a private
+  rx() helper (Error::Other(Box::new(e)) — the R7.4-a/2
+  security.rs form), sites '?', all return arms Ok-wrapped; the
+  four regex-free registry fns (unanswered/duplicated/wording/
+  internal_leakage) stay Value-returning — registry order
+  byte-identical, the five converting arms just gain '?',
+  propagating into review_draft's outer crate Result (ai.rs:583
+  already logs 'review_draft: {reason}' — the existing
+  outer-error channel). mod.rs accessors x3 covering 5 sites
+  (ack/frustration/timeframe): OnceLock<Result<., regex::Error>>
+  (regex::Error is Clone — refined from the census's String
+  form; error clone only on the never-taken path);
+  timeframe_patterns builds via array.into_iter()
+  .map(Regex::new).collect() — pattern strings byte-identical
+  (verified in the diff). Full re-census before edits: exactly
+  the 10 recorded sites, zero fanout beyond the registry (no
+  external and no test-region callers of the check fns).
+  Battery green at exact baselines: gate, fmt, clippy workspace
+  --all-targets (2m58s) + core sandbox (29s) with -D warnings,
+  core 520 (478s), sandbox 528 (501s), app-shell 293+2 (281s),
+  catalog+xtask 56, verify-icons, strip 259/259. Post-batch
+  census: prod_expect 44 -> 34. Commit dd9c3da.
+- R7.4-a/4 prep (read-only census, recorded for the next session;
+  D-33(d) discipline): interaction_engine = 5 sites in two
+  shapes — (1) baseline.rs x4 (307/313/314/335) all inside
+  compute_outcome which ALREADY returns Result<Option<..>> —
+  sites become '?' (rx-style helper or inline map_err);
+  callers already Result-aware (baseline.rs:722 discard arm,
+  ai_pipeline/interaction.rs:571 engine pipeline, mod.rs:1144
+  test region stays D-10). (2) mod.rs:23 fp! macro = the full
+  bubble: forbidden_patterns() -> &'static [ForbiddenPattern]
+  (OnceLock<Vec>), sole consumer sanitize_interaction_text
+  (mod.rs:81) -> TextScan{ok,warnings}; assert_interaction_
+  text_safe wraps it; fanout = 5 field-read sites in
+  ai_pipeline/interaction.rs (205/231/240/260/269 — `.ok` is a
+  STRUCT FIELD read inside filter/is_some_and closures, NOT
+  Result::ok()). Conversion ruling for edit time:
+  forbidden_patterns -> crate Result<&'static [..]> (the
+  coaching OnceLock<Result<., regex::Error>> form);
+  sanitize/assert -> Result<TextScan>; the 5 fanout sites go
+  fail-closed — on Err treat the text as not-safe and drop it
+  (the sanitizer gates AI-bound text: cannot-certify must not
+  pass through). Formalize as a memory D-entry when the batch
+  executes.
 
 - CI verification: run#364 (id 43726134629) GREEN on 6c9538a,
   all four lanes (check incl. deny, packages x86_64, packages
