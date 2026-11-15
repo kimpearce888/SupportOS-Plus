@@ -789,12 +789,7 @@ fn direct_complaint_re() -> Result<&'static regex::Regex> {
 
 type Finding = (String, String, Vec<Value>, String);
 
-fn finding(
-    kind: &str,
-    severity: &str,
-    evidence: Vec<Value>,
-    detail: String,
-) -> Finding {
+fn finding(kind: &str, severity: &str, evidence: Vec<Value>, detail: String) -> Finding {
     (kind.to_string(), severity.to_string(), evidence, detail)
 }
 
@@ -882,9 +877,7 @@ pub(crate) fn analyze_friction(conn: &Connection, conversation_id: i64) -> Resul
         .collect())
 }
 
-fn repeated_customer_explanations_findings(
-    customer: &[&ThreadLite],
-) -> Vec<Finding> {
+fn repeated_customer_explanations_findings(customer: &[&ThreadLite]) -> Vec<Finding> {
     let mut out: Vec<Finding> = Vec::new();
     let customer_repeats = repeated_spans(customer, MIN_REPEAT_WORDS);
     if !customer_repeats.is_empty() {
@@ -920,9 +913,7 @@ fn repeated_customer_explanations_findings(
     out
 }
 
-fn repeated_agent_questions_findings(
-    agents: &[&ThreadLite],
-) -> Vec<Finding> {
+fn repeated_agent_questions_findings(agents: &[&ThreadLite]) -> Vec<Finding> {
     let mut out: Vec<Finding> = Vec::new();
     let mut question_groups: Vec<(String, Vec<AgentQuestion>)> = Vec::new();
     let mut group_index: std::collections::HashMap<String, usize> =
@@ -987,9 +978,7 @@ fn repeated_agent_questions_findings(
     out
 }
 
-fn troubleshooting_loop_findings(
-    threads: &[ThreadLite],
-) -> Result<Vec<Finding>> {
+fn troubleshooting_loop_findings(threads: &[ThreadLite]) -> Result<Vec<Finding>> {
     let mut out: Vec<Finding> = Vec::new();
     let mut saw_agent_reply = false;
     let mut loop_restatements: Vec<(i64, String, Option<String>)> = Vec::new();
@@ -1031,10 +1020,7 @@ fn troubleshooting_loop_findings(
     Ok(out)
 }
 
-fn repeated_handoff_findings(
-    conn: &Connection,
-    conversation_id: i64,
-) -> Vec<Finding> {
+fn repeated_handoff_findings(conn: &Connection, conversation_id: i64) -> Vec<Finding> {
     let mut out: Vec<Finding> = Vec::new();
     let handoffs: Vec<(Option<String>, Option<String>)> = crate::db::query_rows(
         conn,
