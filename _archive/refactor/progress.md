@@ -1,6 +1,6 @@
 # Refactor Progress — Live State
 
-Last updated: session 21 (2026-11-15). Update rule: every session updates
+Last updated: session 22 (2026-11-16). Update rule: every session updates
 this file before ending. Statuses: `pending` / `in_progress` / `done` /
 `terminal` (done + closed in `complete.md`) / `dropped` (with reason in
 `memory.md`).
@@ -10,16 +10,15 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 - **PROGRAM 2 OPEN** (session 21, 2026-11-15) — owner override
   "complete anything ignored and skipped"; operative task list is
   plan §11 (Q-01..Q-06 execution). Program 1 stays closed; every
-  protocol carries over. **CURRENT POINTER: R7.4-a/5 quality
-  cluster** (class-A sites left: quality 16, ai_evidence 1 — full
-  prep mapping incl. the cascading owner-fn registry in the
-  session-21 log; D-33(d) mandates full-site rg re-census per
-  cluster). Done: R7.1 (f9c568c), R7.2 (e62bf08), R7.3 (10c3cde,
+  protocol carries over. **CURRENT POINTER: R7.4-a/6 ai_evidence
+  chrono-midnight (the LAST class-A site, 1)**. Done: R7.1
+  (f9c568c), R7.2 (e62bf08), R7.3 (10c3cde,
   CI run#361), R7.4-a/1 sandbox (05f7006, run#362), R7.4-a/2
   security cluster (6c9538a, run#364), R7.4-a/3 coaching cluster
   (dd9c3da, run#366), R7.4-a/4 interaction_engine (c391955,
-  run#368; prod_expect 29). Then ai_evidence -> R7.4-b/c ->
-  R7.5 -> R7.6.
+  run#368), R7.4-a/5 quality cluster (e721e39 + fmt fix
+  8c6dab2, runs #370-fail/#371-green; prod_expect 29 -> 13).
+  Then R7.4-b/c -> R7.5 -> R7.6.
 - Last program-1 head `6dd8c8b` CI-green (run#360, all four lanes —
   verified this session before Program 2 opened). Session counter
   resets for Program 2: session 1 of Program 2 = session 21 overall.
@@ -386,6 +385,82 @@ lanes, the no-simulation gate, kittest drift gate).
 | build files (root + crates manifests, deny.toml, rust-toolchain, .cargo, .gitignore, workflows, gate script) | R6.1 | comment-free (279 lines removed; D-29 taxonomy; shebang/docstrings functional keeps); functional zero-diff four-way proven; deny lane green against the live advisory DB on run#358 |
 
 ## Session log
+
+### Session 22 — 2026-11-16
+- Maintenance pre-flight: sandbox reset again (repo gone);
+  reconnected via github-reconnect.sh; toolchain intact at
+  /tmp/my-project/{rustup,cargo-home} (rustc 1.99.1). Discovered
+  the repo had advanced past the session-21 handover: HEAD 21e1fca
+  with R7.4-a/2 (security, 6c9538a, run#364), a/3 (coaching,
+  dd9c3da, run#366), a/4 (interaction_engine, c391955, run#368)
+  all CI-verified — the R7.4-a/5 quality prep census was already
+  recorded read-only in the session-21 log. Verified pending
+  run#369 (21e1fca, docs-only addendum) GREEN.
+- R7.4-a/5 executed (quality cluster, 16 sites = mod.rs x13 +
+  qa_ai.rs x3, six owner fns + two accessors, the full prep-mapped
+  cascade): (1) is_closing_acknowledgment -> Result<bool> (two
+  inline OnceLocks -> the D-34(a) Result form); fanout x4 '?'
+  (baseline.rs:304, qa_ai.rs:262, mod.rs:980, mod.rs:1300).
+  (2) rebuild_gaps -> Result<(usize,usize)>; workers caller:
+  spawn_blocking closure annotated Result-returning + the double-
+  '?' tail (D-34(f) closure-conversion). (3) loop_problem_re /
+  direct_complaint_re -> D-34(a) accessors; the .filter closure
+  consumer hoisted (complaint_re local, D-34(d)). (4)
+  duplicated_request_findings -> Result<Vec<Finding>> via module
+  rx() helper x8; the six-fold Vec<(String,String,Vec<Value>,
+  String)> duplication folded to `type Finding` — the clippy
+  type_complexity remedy (Result<Vec<tuple>> crossed the
+  threshold; alias is the documented fix; file had
+  AgentQuestion/RelatedConversation precedents). (5)
+  rebuild_friction -> Result<(usize,usize)>. (6) analyze_friction
+  -> Result<Vec<Value>> (let-else Ok(Vec::new()); two finding-fn
+  extends with '?'). (7) compute_qa_deterministic ->
+  Result<Option<Value>>: the conv `?` on Option in a Result fn is
+  a TYPE ERROR — let-else restructure (D-34(g)); get_qa (pub,
+  Option-returning, signature FROZEN) folds Err into its existing
+  None channel via .ok()? (D-34(f) Option-channel fold);
+  rebuild_qa -> Result<usize> (sweep-loop '?;' preserves the
+  None-skip semantics); workers/mod.rs:1133 maintenance (unit-
+  returning) folds via .unwrap_or(0), the adjacent idiom. qa_ai
+  compute_qa_ai_layer gates through its EXISTING QaAiOutcome
+  error channel (match form). (8) qa_ai derive_outcome ->
+  Result<DerivedOutcome>: rx x2 + the escalated .any closure
+  hoist (D-34(d)); segment/eval.rs:1294 eval_support_health
+  (Vec<i64> sampler) consumes via `let Ok(out) = .. else {
+  continue }` — the aggregate-sampler skip ruling (D-34(h)).
+  Test regions (D-10): batch13 x4 + batch18 x5 + batch24 x2
+  (chained expects preserve the original assertion strength;
+  is_some -> matches!(Ok(Some(_)))). Pattern strings
+  byte-identical. Tooling incidents this session: one MultiEdit
+  mis-targeted an adjacent fn tail + a bad edit list — caught by
+  git diff review, full file revert + redo (lesson: review the
+  diff after every MultiEdit group; never trust atomicity);
+  the first analyze_friction tail draft used
+  collect::<Result<Vec>> which does NOT compile (infallible map
+  items — the FromIterator-for-Result fallacy, D-34(i)); the
+  r25-style census scanner did not survive the sandbox resets —
+  rebuilt as a truncation scanner (validated: cfg(test)-at-end
+  convention holds tree-wide) with a one-off vs the r25 series
+  (HEAD 28 vs ledger 29); the SITE-LEVEL delta is exact either
+  way: 16 converted, worktree 12 = HEAD 28 - 16, per-file
+  composition identical for all non-quality files.
+- CI: run#370 (id 43773001510) on e721e39 FAILED on the check
+  lane ONLY: fmt drift — the fmt battery lane had run BEFORE the
+  Finding-alias sed; the alias shortened five signatures under
+  the line-width threshold and rustfmt wanted them collapsed
+  (packages x86_64/arm64 + kittest were green on the same tree —
+  zero semantic issue). Fix: 8c6dab2 (post-alias rustfmt re-run,
+  five single-line signatures, formatting-only). Run#371 (id
+  43773898385) GREEN on 8c6dab2, all four lanes (check incl.
+  deny, packages x86_64, packages arm64, kittest drift gate).
+  Battery green at exact baselines: gate, fmt (pre-sed + post-
+  fix), clippy workspace (47s) + core sandbox (40s) -D
+  warnings, core 520 (459s), core-sandbox 528 (438s), app-shell
+  293+2 (271s), catalog+xtask 56, verify-icons, strip-comments
+  259/259. Post-batch census: prod_expect 29 -> 13 (r25-series
+  site delta; truncation-scanner cross-check 28 -> 12). Memory:
+  D-34 additions (f)-(j) + the fmt-after-post-battery-transform
+  battery-order lesson (G-21).
 
 ### Session 21 — 2026-11-15
 - Maintenance pre-flight (program-1-closed protocol): re-cloned via

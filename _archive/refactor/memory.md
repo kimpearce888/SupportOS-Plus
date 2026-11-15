@@ -689,6 +689,49 @@ session ends by adding what the next session must not have to rediscover.
   registry kept byte-identical order with per-arm '?'.
   Post-batch census: prod_expect 29 (44 - 10 coaching @a/3 -
   5 interaction_engine @a/4).
+- **D-34 additions (session 22, R7.4-a/5 quality cluster).**
+  (f) Option-channel fold: an Option-returning pub fn whose
+  signature is FROZEN (get_qa) absorbs a callee's new Result via
+  `.ok()?` — the Err lands in the existing None channel (the
+  caller-visible semantics "no row available" already covers
+  it). Likewise a unit-returning maintenance sweep folds via
+  `.unwrap_or(0)` (the adjacent-idiom rule). General principle:
+  propagate with '?' where the channel exists; fold ONLY where
+  the consumer's channel is deliberately fixed.
+  (g) `?` on an Option inside a fn converted to Result is a
+  TYPE ERROR — restructure each Option-early-return to
+  let-else `return Ok(None)` / let-else `return Ok(Vec::new())`
+  (compute_qa_deterministic's conv; analyze_friction's
+  let-else already had the right shape). Corollary: `expr?;`
+  where expr: Result<Option<T>> drops the yielded Option as a
+  statement — empirically NO must_use warning (rustc
+  unused_must_use does not fire for discarded Option/Result
+  statement results; verified with a minimal repro).
+  (h) Aggregate-sampler skip: a Vec<i64>-returning metric
+  sampler (eval_support_health) consumes a Result-returning
+  per-item fn via `let Ok(out) = .. else { continue };` — the
+  same shape as the adjacent missing-customer_id let-else;
+  on the never-taken Err the item contributes no sample.
+  Distinct from (c) fail-closed (gates DROP) and from (f)
+  folds (channel absorbs): samplers SKIP.
+  (i) The collect::<Result<Vec<_>>> fallacy: an infallible
+  map (json! produces Value) cannot collect into Result —
+  FromIterator for Result requires Result ITEMS. The honest
+  tail is Ok(iter.map(..).collect()). Empirically E0277.
+  (j) Closure-conversion for spawn_blocking: when the fn
+  already maps JoinError through .map_err(..)? — annotate the
+  closure `move || -> Result<T>` and the tail becomes
+  `.map_err(..)??` (double '?': JoinHandle layer then the
+  inner Result). Also the empirically-verified operator
+  precedence: `!f()?` parses as `!(f()?)` — postfix `?` binds
+  tighter than unary `!` (else-if chains stay one-line).
+  Census tooling note: the r25 scanner did not survive
+  sandbox resets; rebuilt as a truncation scanner (first
+  top-level #[cfg(test)] — the at-end convention verified
+  tree-wide). Series continuity: r25 counted 29 pre-batch;
+  truncation counts 28 (one-off tooling delta); the SITE
+  delta is exact under both (16 converted; truncation 28 ->
+  12). Future sessions should record both numbers.
 
 ## Facts (F-xx)
 
@@ -884,6 +927,15 @@ session ends by adding what the next session must not have to rediscover.
   then `tar xzf` and run it straight from the extracted dir (no
   install step; the advisory DB fetches live at check time — network
   required).
+- **G-21 (session 22).** Battery ordering: the fmt lane must run
+  AFTER the last text transform of the batch (a sed/clippy-remedy
+  alias change shortens signatures and rustfmt wants them
+  re-wrapped — run#370 failed on exactly this: fmt ran before the
+  type-alias sed, CI's --check caught five signatures that now fit
+  one line). Rule: any post-battery edit (alias/sed/manual) re-runs
+  `cargo fmt --all` + `-- --check` before the commit. Same class as
+  the R7.2 line-length fallout rule but generalized to edits that
+  CHANGE SIGNATURE WIDTH, not just add lines.
 
 
 ## Open questions / deferred owner decisions
