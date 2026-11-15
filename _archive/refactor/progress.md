@@ -21,11 +21,18 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 - Pre-flight [session 18]: run#353 (id 43658004337) green on `70ab546`
   (the session-17 addendum head — the standard docs-only preflight
   gate). R4.5-a (cfg(test) mod extraction) executed on that green
-  base; battery green at exact baselines; CI closure rides this push.
+  base and is now itself CI-VERIFIED (same session): run#354 (id
+  43670479211) green on `c503d02`, all four lanes — check
+  (fmt/clippy/test/deny), packages x86_64, packages arm64, and the
+  kittest snapshot drift gate: 203 goldens byte-identical,
+  pixel-neutrality confirmed for the pure file-layout move. R4.5-a
+  closed; see the verdict table. Green base for R4.5-b: this
+  addendum head's own docs-only run (the standard next-session
+  preflight gate).
 - Session counter: 18 completed batches (R1 terminal; R2 TERMINAL; R3
   TERMINAL — runs #332/#335/#337/#339/#341/#342; R4.1 run#344; R4.2-a
   run#346; R4.2-b run#348 — R4.2 TERMINAL; R4.3 run#350; R4.4 run#352;
-  R4.5-a battery-green, CI rides this push).
+  R4.5-a run#354 — CI-verified same session).
 - Environment: session 18 = ANOTHER full reset — repo re-cloned via
   github-reconnect.sh; toolchain SURVIVED again at
   /tmp/my-project/{rustup,cargo-home} (exports re-applied per bash
@@ -68,7 +75,7 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 | R4.2 decomposition (batch b) | done (session 15) | all 11 queued fns split: execute_outbound 390→~86-line dispatcher + 6 send_* arm methods + payload_num/payload_str_or module fns (closures promoted per the batch-a recipe); sync_resource 331→19-arm dispatcher table + 16 sync_* methods (conversations/threads delegations + the `customers` since-seam + the unknown-resource fallback stay inline); incidents ui 527→~180 dispatcher + filter_controls/empty_list_ui/lifecycle_card_ui/linked_column_ui/info_column_ui methods + incident_row/incident_detail_header module fns; ai_center hub_ui 481→35-line dispatcher + 8 methods (endpoints card/row/key-edit/price/add-form/roles/features/ledger); organizations ui 393→~170 dispatcher + org_form_card_ui method + org_row/org_detail_header_ui/members_card_ui module fns; inbox list_ui→search_filter_ui/list_toolbar_ui/conversation_rows_ui methods, copilot_pane_ui→copilot_cards_ui/copilot_lmstudio_ui/assistant_ui methods, composer_pane_ui→enqueue_composer_tool/apply_composer_act/mention_popup_ui methods + composer_tool_row module fn + ToolAction enum hoisted to module scope; settings helpscout_ui→4 card methods; diagnostics ui→event_log_card_ui method + audit_trail/sync_reports/outbound_deliveries_card_ui module fns; design composer→composer_header_row/composer_footer_row module fns; ALL 4 too_many_lines allows deleted (every post-split fn under the 100-line threshold — clippy -D warnings green); battery green at EXACT baselines (520/528/293+2/56, clippy ×2, gate, icons, strip 207/207); pixel-neutrality verified locally by the widget-call multiset comparison (design::/ui. call multisets byte-identical old-vs-new on all 9 files after fixes — D-24); the CI kittest drift gate rides this push; D-23/D-24 |
 | R4.3 visibility | terminal (session 16) | CI run#350 green — see `complete.md` |
 | R4.4 magic values | terminal (session 17) | CI run#352 green — see `complete.md` |
-| R4.5 file splits (batch a — cfg(test) mod extraction) | done (session 18) | census: 12 files >2K re-measured; 11 carried 37 inline test mods (6,843 lines) extracted to module files (string-aware extractor, per-mod conservation asserts); module tree byte-identical; 6 files exit the >2K set; battery green at exact baselines; CI rides this push |
+| R4.5 file splits (batch a — cfg(test) mod extraction) | done (session 18) | CI run#354 green on `c503d02` (all 4 lanes incl. kittest drift gate — 203 goldens byte-identical); census: 12 files >2K re-measured; 11 carried 37 inline test mods (6,843 lines) extracted to module files (string-aware extractor, per-mod conservation asserts); module tree byte-identical; 6 files exit the >2K set |
 | R4.5 file splits (batch b — prod-region splits) | pending | six files still >2K: inbox 3590 / settings 2539 / workers/execute 2455 / helpscout_real 2344 / design 2283 / reports 2160; R4.2 method clusters are the seams (see verdict table) |
 | R5.1–R5.3 guardrails | pending (optional, stage-gated) | |
 | R6.1–R6.2 polish + close | pending | |
@@ -400,9 +407,15 @@ internal error.
   the moved tests compile and run from their new files with identical
   results (520/528/293+2/56); clippy -D warnings green over
   --all-targets (cfg(test) modules compile under test cfg).
-- Commits: code + ledger (D-08). CI closure rides this push; the run id
-  lands in the next session's pre-flight line if the window closes
-  first (standard handoff per §5).
+- Commits: code + ledger (D-08). CI closure (same session): run#354
+  (id 43670479211) completed / success on `c503d02` — all four lanes
+  (check fmt/clippy/test/deny; packages x86_64; packages arm64;
+  kittest snapshot locks drift gate, 203 goldens byte-identical — the
+  pure file-layout move pixel-neutral as designed). R4.5-a closed;
+  this addendum rides the next docs-only run (the standard
+  next-session preflight gate). R4.5-b (prod-region splits, six
+  files with exact post-batch counts + seam map in the verdict table)
+  is the next session's batch.
 
 ### Session 17 — 2026-11-14
 - Pre-flight: run#351 (id 43635267151) green on `8f41c19` (the session-16
