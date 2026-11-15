@@ -16,14 +16,18 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
   answers, R5.1–R5.3 slot before R6.2; otherwise R6 closes the plan.
 - Pre-flight [session 19]: run#355 (id 43672660744) green on `5f69ada`
   (the session-18 addendum head — the standard docs-only preflight
-  gate). R4.5-b (prod-region splits) executed on that green base;
-  battery green at exact baselines locally; CI verification of the
-  split commit rides this session's push (see session log).
+  gate). R4.5-b (prod-region splits) executed on that green base and
+  is CI-VERIFIED same session: run#356 (id 43681170622) green on
+  `9139e8d`, all four lanes — check (fmt/clippy/test/deny), packages
+  x86_64, packages arm64, and the kittest snapshot drift gate: 203
+  goldens byte-identical, the definitive pixel-neutrality proof for
+  the prod-region moves. R4.5 TERMINAL (a+b) — evidence in
+  `complete.md`. Green base for R6.1: this addendum head's own
+  docs-only run (the standard next-session preflight gate).
 - Session counter: 19 completed batches (R1 terminal; R2 TERMINAL; R3
   TERMINAL — runs #332/#335/#337/#339/#341/#342; R4.1 run#344; R4.2-a
   run#346; R4.2-b run#348 — R4.2 TERMINAL; R4.3 run#350; R4.4 run#352;
-  R4.5-a run#354; R4.5-b pushed session 19 — CI id pending in the
-  addendum).
+  R4.5-a run#354; R4.5-b run#356 — R4.5 TERMINAL).
 - Environment: session 19 = full reset again — repo re-cloned via
   github-reconnect.sh; toolchain SURVIVED at
   /tmp/my-project/{rustup,cargo-home} (exports re-applied per bash
@@ -69,7 +73,7 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 | R4.3 visibility | terminal (session 16) | CI run#350 green — see `complete.md` |
 | R4.4 magic values | terminal (session 17) | CI run#352 green — see `complete.md` |
 | R4.5 file splits (batch a — cfg(test) mod extraction) | done (session 18) | CI run#354 green on `c503d02` (all 4 lanes incl. kittest drift gate — 203 goldens byte-identical); census: 12 files >2K re-measured; 11 carried 37 inline test mods (6,843 lines) extracted to module files (string-aware extractor, per-mod conservation asserts); module tree byte-identical; 6 files exit the >2K set |
-| R4.5 file splits (batch b — prod-region splits) | done (session 19) | local battery green at exact baselines (520/528/293+2/56, clippy ×2, gate, fmt, icons, strip 259/259); six hosts split along R4.2 seams into 14 child files, 6,198 lines moved; D-24 multiset 4/4 identical; CI rides the session-19 push (addendum records the run); post-split largest file = ai_center 2003 (the D-27 at-threshold KEEP) — the >2K set is empty |
+| R4.5 file splits (batch b — prod-region splits) | terminal (session 19) | CI run#356 green on `9139e8d` (all 4 lanes incl. kittest drift gate — 203 goldens byte-identical) — see `complete.md`; local battery green at exact baselines (520/528/293+2/56, clippy ×2, gate, fmt, icons, strip 259/259); six hosts split along R4.2 seams into 14 child files, 6,198 lines moved; D-24 multiset 4/4 identical; post-split largest file = ai_center 2003 (the D-27 at-threshold KEEP) — the >2K set is empty |
 | R5.1–R5.3 guardrails | pending (optional, stage-gated) | |
 | R6.1–R6.2 polish + close | pending | |
 
@@ -403,8 +407,14 @@ internal error.
   strip-comments 259/259 ✓; kittest-ui --all-targets compile ✓
   (42.8s). D-24 multiset pre-gate 4/4 byte-identical. G-05 before
   every link-heavy lane.
-- Commits: code + ledger (D-08). CI closure recorded in the addendum
-  commit (same session if time allowed — see CURRENT POINTER).
+- Commits: code + ledger (D-08). CI closure (same session): run#356
+  (id 43681170622) green on `9139e8d`, ALL FOUR LANES — check
+  (fmt/clippy/test/deny), packages x86_64, packages arm64, kittest
+  snapshot locks (reskin drift gate): 203 goldens byte-identical,
+  pixel-neutrality CONFIRMED for the prod-region splits. R4.5
+  TERMINAL (a+b); complete.md terminal entry + final-metrics
+  "Files split" recorded. This addendum commit's own docs-only run
+  is the next session's preflight gate.
 - New memory: D-28 (impl-member move recipe: visibility-only, paths
   free) + G-17/G-18/G-19.
 
