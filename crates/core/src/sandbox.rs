@@ -109,15 +109,15 @@ fn apply_seccomp() -> std::result::Result<(), String> {
     ];
     let mut rules: std::collections::BTreeMap<i64, Vec<SeccompRule>> =
         allowed.iter().map(|nr| (*nr, Vec::new())).collect();
-    let fd_rule = |fd: u64| {
+    let fd_rule = |fd: u64| -> std::result::Result<SeccompRule, String> {
         SeccompRule::new(vec![
             SeccompCondition::new(0, SeccompCmpArgLen::Dword, SeccompCmpOp::Eq, fd)
-                .expect("valid condition"),
+                .map_err(|e| e.to_string())?,
         ])
-        .expect("valid rule")
+        .map_err(|e| e.to_string())
     };
-    rules.insert(libc::SYS_write, vec![fd_rule(1), fd_rule(2)]);
-    rules.insert(libc::SYS_read, vec![fd_rule(0), fd_rule(1), fd_rule(2)]);
+    rules.insert(libc::SYS_write, vec![fd_rule(1)?, fd_rule(2)?]);
+    rules.insert(libc::SYS_read, vec![fd_rule(0)?, fd_rule(1)?, fd_rule(2)?]);
     rules.insert(
         libc::SYS_mmap,
         vec![
@@ -128,9 +128,9 @@ fn apply_seccomp() -> std::result::Result<(), String> {
                     SeccompCmpOp::MaskedEq(libc::MAP_ANONYMOUS as u64),
                     libc::MAP_ANONYMOUS as u64,
                 )
-                .expect("valid condition"),
+                .map_err(|e| e.to_string())?,
             ])
-            .expect("valid rule"),
+            .map_err(|e| e.to_string())?,
         ],
     );
     let arch: TargetArch = std::env::consts::ARCH

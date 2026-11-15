@@ -10,10 +10,12 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 - **PROGRAM 2 OPEN** (session 21, 2026-11-15) — owner override
   "complete anything ignored and skipped"; operative task list is
   plan §11 (Q-01..Q-06 execution). Program 1 stays closed; every
-  protocol carries over. **CURRENT POINTER: R7.4-a** (Q-03 class A: 45 constant-input
-  expects -> Result propagation, first module cluster). Done: R7.1
-  (f9c568c), R7.2 (e62bf08), R7.3 (this commit). Then R7.4-b/c
-  -> R7.5 -> R7.6.
+  protocol carries over. **CURRENT POINTER: R7.4-a continues** (class-A clusters, 41
+  sites left: security 8, coaching 10, interaction_engine 5,
+  quality 16, ai_evidence 1 — cluster mapping recorded in the
+  session-21 log). Done: R7.1 (f9c568c), R7.2 (e62bf08), R7.3
+  (10c3cde, CI run#361 green all four lanes), R7.4-a sandbox
+  cluster (this commit). Then R7.4-b/c -> R7.5 -> R7.6.
 - Last program-1 head `6dd8c8b` CI-green (run#360, all four lanes —
   verified this session before Program 2 opened). Session counter
   resets for Program 2: session 1 of Program 2 = session 21 overall.
@@ -410,6 +412,38 @@ lanes, the no-simulation gate, kittest drift gate).
   line-length fallout. Battery green at exact baselines (app-shell
   293+2 at 265s, core 520 at 472s, sandbox 528 at 490s, rest clean).
   Commit e62bf08.
+- Post-push verification: CI run#361 (id 43713359530) GREEN on
+  10c3cde, all four lanes — the kittest drift gate passed, so the
+  R7.3 dispatch-table restructure is pixel-verified (203 goldens
+  byte-identical). Sandbox reset AGAIN mid-battery (the R7.4-a first
+  cluster had been applied locally, uncommitted — wiped); re-cloned
+  via github-reconnect.sh, toolchain still at /tmp/my-project/
+  {rustup,cargo-home}.
+- R7.4-a census recorded (fresh r25 run on the closed tree; cluster
+  mapping for the remaining work): class A = 45 sites in 8 clusters
+  — sandbox.rs x4 (SeccompRule/Condition const-args), security.rs x8
+  (redaction_patterns struct-literal regexes; consumer bubble spans
+  ai_tools/execute, helpscout_real/credentials, ai_attributes x2,
+  config, migrations — its own sub-batch), coaching/checks.rs x5 +
+  coaching/mod.rs x5 (OnceLock statics / &'static Regex accessor
+  fns), interaction_engine/baseline.rs x4 + interaction_engine/
+  mod.rs x1 (macro + local statics), quality/mod.rs x13 +
+  quality/qa_ai.rs x3 (OnceLock statics in bool-fns + one
+  struct-literal set in duplicated_request_findings), ai_evidence
+  x1 (chrono midnight). Class C = 8 (live_chats 111, embeddings 813,
+  webhook 29, ai_pipeline 1109/1740/1744, support_graph 277,
+  workers/execute/mod 524). Class D = 3 (workers/mod 30, task_bridge
+  41, design/mod 239).
+- R7.4-a first cluster executed (sandbox.rs x4): the already-Result
+  apply_seccomp narrows its two rule-construction sites — fd_rule
+  closure returns Result<SeccompRule,String> with map_err(|e|
+  e.to_string()), the SYS_mmap masked-eq rule propagates ? directly;
+  error-path-only change (the constructors accept const args — the
+  arms were never reachable). Battery green at exact baselines: gate,
+  fmt, clippy workspace+sandbox (-D warnings), core 520 (477s),
+  core-sandbox 528 (453s), app-shell 293+2 (301s), catalog+xtask 56,
+  verify-icons, strip 259/259 (G-05 relief before the app-shell lane).
+
 - R7.3 executed (Q-04 strict restructures; D-32 shapes recorded):
   app/mod.rs page dispatch -> the honest 23-arm table (each arm its
   own host; per-arm bodies byte-identical, exhaustiveness compiler-
