@@ -7,21 +7,21 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 
 ## CURRENT POINTER
 
-- Next task: **R6.2 — final audit** (full battery, CI green, final
-  metrics vs plan §6 baseline, every-line verification statement per
-  module cluster, closing report in `complete.md`). R5 stays optional
-  owner-gated (Q-01) — if the owner answers, R5.1–R5.3 slot before R6.2;
-  otherwise R6.2 closes the plan.
-- Pre-flight [session 20]: run#357 (id 43682661859) green on `bf37d97`
-  (the session-19 addendum head — the standard docs-only preflight
-  gate). R6.1 (build-file comment strip) executed on that green base;
-  CI verification rides this session's push (next session's step 3
-  closes it if the window ends first).
-- Session counter: 20 completed batches (R1 terminal; R2 TERMINAL; R3
-  TERMINAL — runs #332/#335/#337/#339/#341/#342; R4.1 run#344; R4.2-a
-  run#346; R4.2-b run#348 — R4.2 TERMINAL; R4.3 run#350; R4.4 run#352;
-  R4.5-a run#354; R4.5-b run#356 — R4.5 TERMINAL; R6.1 pushed this
-  session, CI pending).
+- **PROGRAM CLOSED** (R6.2 terminal — session 20, 2026-11-15). The
+  final code head is `168e71a` (R6.1; CI run#358 green, all 4 lanes);
+  the closing docs-only head rides the identical code tree.
+- No further batches. What remains for the owner only (all recorded
+  in `memory.md` §Open questions): Q-01 (R5 guardrails — gate port to
+  xtask, unwrap-policy lint, pedantic subset; dropped unexercised at
+  close), Q-02 (version bump + tagged release), Q-03/Q-04 (strict
+  unwrap/panic readings — the work is itemized), Q-05 (catalog
+  CopilotTool deletion), Q-06 (action-label consts). Any future
+  session on this repo = maintenance: handover §7 steps 1–3 (memory →
+  handover → progress; re-provision if reset; confirm the last head
+  CI-green) still apply; new work should open a NEW plan entry rather
+  than extend this one.
+- Session counter: 20 sessions / 20 batches / CI runs #301–#358.
+  Final metrics + closing report: `complete.md`.
 
 ## Task states
 
@@ -57,9 +57,9 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 | R4.4 magic values | terminal (session 17) | CI run#352 green — see `complete.md` |
 | R4.5 file splits (batch a — cfg(test) mod extraction) | done (session 18) | CI run#354 green on `c503d02` (all 4 lanes incl. kittest drift gate — 203 goldens byte-identical); census: 12 files >2K re-measured; 11 carried 37 inline test mods (6,843 lines) extracted to module files (string-aware extractor, per-mod conservation asserts); module tree byte-identical; 6 files exit the >2K set |
 | R4.5 file splits (batch b — prod-region splits) | terminal (session 19) | CI run#356 green on `9139e8d` (all 4 lanes incl. kittest drift gate — 203 goldens byte-identical) — see `complete.md`; local battery green at exact baselines (520/528/293+2/56, clippy ×2, gate, fmt, icons, strip 259/259); six hosts split along R4.2 seams into 14 child files, 6,198 lines moved; D-24 multiset 4/4 identical; post-split largest file = ai_center 2003 (the D-27 at-threshold KEEP) — the >2K set is empty |
-| R5.1–R5.3 guardrails | pending (optional, stage-gated) | |
-| R6.1 build-file comment strip | done (session 20) | 279 comment lines removed across the 12 build files (root + 4 crate Cargo.tomls, deny.toml, rust-toolchain.toml, .cargo/config.toml, .gitignore, ci.yml, release.yml, gate script): 259 whole-line TOML/YAML (incl. 21 shell comments inside YAML run-block scalars) + 20 trailing action-pin `# vN` annotations; functional zero-diff proven four ways (tomllib equality, PyYAML normalized equality, Python AST equality, multiset comment-only diff audit); battery green at exact baselines (520/528/293+2/56, clippy ×2 -D warnings, gate, icons, strip 259/259) + LOCAL cargo-deny four-way ok (G-09 protocol, deny.toml touched); CI rides this push |
-| R6.2 final audit | pending | full battery + CI green + final metrics vs plan §6 + closing report |
+| R5.1–R5.3 guardrails | dropped (session 20) | owner-gated option never exercised across the program — Q-01 records the standing option (gate port to xtask / unwrap-policy lint / pedantic subset) with the sub-batch letters; dropped-with-reason at close per the DoD |
+| R6.1 build-file comment strip | terminal (session 20) | CI run#358 green on `168e71a` — see `complete.md`; 279 comment lines / 12 build files; functional zero-diff proven four ways (tomllib, PyYAML normalized, AST, multiset audit); battery at exact baselines + local cargo-deny four-way ok (G-09); D-29 + G-20 |
+| R6.2 final audit — PROGRAM CLOSED | terminal (session 20) | closing docs-only head on the identical code tree (R3.5 precedent; battery = session-20 run + CI run#358); DoD checklist closed in `complete.md`; final metrics vs §6 recorded (259 files / 138,593 LOC / 0 comments tree-wide incl. build files / 0 production unwraps / 56 justified expects / 4 classified panic-family / 30 justified allows / pub −90 / >2K set empty / 203 goldens byte-identical); per-module-cluster verification statements below; standing owner options Q-01..Q-06 |
 
 ## Review verdict tables (R2–R4 passes)
 
@@ -360,6 +360,29 @@ internal error.
 
 **R4.5-b verdict summary:** six hosts / 6,198 lines / 14 new child files; every split rides the R4.2 method-cluster seams named in the batch-a verdict table (reports had no R4.2 seam — its Tab families are the standing structure, the two >250-line families moved, the small tab views stay, D-23). G-15 ladder end state: impl-member moves need ONLY visibility (method-call syntax is path-free) — 78 private methods widened to exactly pub(super) (parent-dispatcher / cross-sibling / test-mod callers each proven by the consumer census; run_attachment_downloads was already pub(super) and kept its level); mailbox_local_id stayed private (its only caller moved with it); TokenRow + 4 fields widened to pub(super) (G-18 — the http.rs sibling reads them); design/helpscout_real top-level items keep their pub/pub(crate) levels with `pub use` re-exports keeping every existing path byte-stable (the pub consts SECRET_DOCS_API_KEY/SECRET_OAUTH_* included), while the four sibling-used private helpers (token_row/base64_of/urlencode/stored_api_concurrency/TOKEN_EXPIRY) got pub(super) + host `use` bindings so http.rs's `use super::*` glob still resolves them unchanged. Conservation machinery (r45b_split.py): string-aware boundary-depth asserts, per-child marker-count asserts, per-child and per-host whitespace-insensitive char-multiset conservation (old + additions == new — G-16's same-artifact lesson), git-mv rename history for execute.rs → execute/. D-24 multiset pre-gate: 4/4 UI hosts byte-identical widget-call multisets (268/255/240/272 calls). Battery green at EXACT baselines (520/528/293+2/56, clippy ×2 -D warnings, gate, fmt, icons, strip 259/259 = 245+14 new files); kittest-ui --all-targets compile green locally (42.8s); the CI kittest drift gate rides this push as the final pixel-neutrality verifier. Post-split tree: largest file = ai_center 2003 (the D-27 at-threshold KEEP) — the >2K set is EMPTY. New memory: D-28 + G-17/G-18/G-19.
 
+## Closing verification statements (R6.2 — every line checked)
+
+Every module cluster, the passes that swept it, and the end state the
+battery + CI verified on the final head. "R1/R2/R3/R4" refer to the
+verdict tables above; every cluster is additionally covered by the
+whole-tree checks (strip-comments 259/259, clippy -D warnings both
+lanes, the no-simulation gate, kittest drift gate).
+
+| Cluster (files) | Passes applied | Verified end state |
+|---|---|---|
+| core/domain — people/customers/organizations/incidents/inbox/chats/coaching/custom_objects/analytics/automation/activity/digest/issue_impact/interaction_*/intelligence_features/richtext/business_hours/crypto/error | R1 (R1.2/R1.5/R1.6) · R2 (R2.1/R2.2/R2.4/R2.5) · R3.1 errors · R3.2 SQL · R3.3 json_fields · R4.1/R4.2-a/R4.3/R4.4 | comment-free; zero dead code; expects D-14-classed; errors thiserror-derived; row-collect via db::query_rows; naming honest; visibility reachability-proven |
+| core/storage — db/migrations/maintenance/mirror/vectorstore_sqlitevec/oauth_state/backup_service/audit/config/data_reset | R1 (R1.5) · R2 (incl. R2.4 poison recovery) · R3.2 · R4.1/R4.3/R4.4 | same + sqlite-vec FFI the one confined unsafe island (D-13); oauth_state range unreachable! carries its D-15 proof; audit.rs gate-allowlist invariant 7 held all 20 batches |
+| core/sync+workers — sync_engine/workers(+-execute dir)/connectors/loopback/api_queue/jobs/events/event_bus/provider_handle | R1 (R1.3) · R2 · R3.2/R3.3 · R4.1/R4.2-a/R4.2-b/R4.3/R4.5 | execute 1,051-line mega-fn → thin dispatcher + 22 arm fns; execute.rs 2,455 → execute/{mod,ai,ops}; the execute_job early-return rule held; poison recovery; D-14/D-15 keeps written |
+| core/helpscout — helpscout_real({mod,credentials,rate_limiter})/helpscout + it_helpscout | R1 (R1.4) · R2 · R3.3 (docs_request_json) · R4.2-b/R4.5-b | split children; token envelope single-sourced; token refresh arms message-normalized |
+| core/ai_* — ai_pipeline/ai_tools/ai_attributes/ai_center/ai_eval/ai_evidence/ai_hub/ai_lm_studio/ai_local/ai_memory_guard/ai_prompts/ai_provider/copilot/quality/outreach/search/knowledge_store/live_chats/embeddings | R1 (R1.2) · R2 · R3.3 (send_json/authorized/json_fields) · R4.1/R4.2-a/R4.3/R4.4 | comment-free; LM-Studio send tails consolidated; qdrant filter rebind; kittest-ui deterministic clock pin (UXB-T1) — goldens' date-ticks frozen across the whole program |
+| app-shell/design — design/{mod,composer,scaffold,controls}/icons/chart/palette/theme | R1 (R1.7) · R2 · R3.4/R4.4 (hosts/CONTROL_H/ROW_H/MISSING_VALUE/error_note) · R4.2-b/R4.5-b | hosts shared 21/23 pages; scale tokens single-sourced; splits along composer/scaffold seams; icons geometry kept as drawing data (D-26) |
+| app-shell/pages — 23 pages + the R4.5 split children + queries/json_fields/sync_health | R1 (R1.8/R1.9) · R2 · R3.4 sync_now_button · R4.1/R4.2-b/R4.3/R4.4 · R4.5-a/b | every page >2K split (inbox/settings/reports incl.); >2K set EMPTY; goldens byte-identical through runs #311–#358; page dispatch single-sourced (R3.5) |
+| app-shell/infra — app/{mod,chrome}/main/single_instance/task_bridge/workers_host/fatal/toasts/overlays/mention_popup/smoke | R1 (R1.7) · R2 · R4.3 (app module cap) | comment-free; single_instance the shell's one FFI island (D-13); main.rs carries ZERO unwrap/expect (DoD bootstrap line unused); class-D infra keeps written (D-14) |
+| app-shell/tests — 26 kittest suites + style_lint + testsupport + snapshots | R1 (R1.9) · R2.2 (test-region allows, D-10/D-13) | comment-free incl. fixtures; suite/fn names stable (D-06); 203 goldens + 2 style-lint tests = the drift gate that never fired |
+| catalog | R1 (R1.1 — was already clean) · R3.6 (routes) · R4.4 (NO_SUBJECT) | 9 files / 1,028 LOC; closed vocabulary + routes wire consts; no I/O deps (F-02) |
+| xtask — package/deb/icons/strip/lib/bin | R1 (R1.1) · R2.2 (machete false-positive keeps) | comment-free; strip-comments tool (R1.0) with 38 edge tests is itself the tree's comment verifier; 43 dev-machinery occurrences D-10-exempt |
+| build files (root + crates manifests, deny.toml, rust-toolchain, .cargo, .gitignore, workflows, gate script) | R6.1 | comment-free (279 lines removed; D-29 taxonomy; shebang/docstrings functional keeps); functional zero-diff four-way proven; deny lane green against the live advisory DB on run#358 |
+
 ## Session log
 
 ### Session 20 — 2026-11-15
@@ -399,11 +422,28 @@ internal error.
   installed as the PREBUILT musl release binary (G-20) and run
   locally — advisories ok, bans ok, licenses ok, sources ok (the
   advisory DB fetched live; no new advisories against the tree).
-- Commits: code + ledger (D-08). CI closure: rides this session's
-  push; next session's step 3 records the run id (or same-session if
-  the window allows).
+- Commits: code + ledger (D-08). CI closure (same session): run#358
+  (id 43694505499) GREEN on `168e71a`, ALL FOUR LANES — check
+  (fmt/clippy/test/deny — the stripped deny.toml against the LIVE
+  advisory DB), packages x86_64, packages arm64, kittest drift gate
+  (203 goldens byte-identical). R6.1 TERMINAL.
+- R6.2 executed (same session, on the green 168e71a base): final
+  audit per the plan letter — final metrics census re-run on the
+  final tree (r25_triage.py: 0 prod unwraps / 56 expects / 4
+  panic-family; allow census: 30, all D-13; per-crate files+LOC:
+  259 / 138,593); DoD checklist closed in complete.md (R5 dropped —
+  Q-01; expects/panic DoD line satisfied as-amended per D-14/D-15
+  owner-defaults, Q-03/Q-04 hold the strict-letter option);
+  per-module-cluster verification statements recorded above;
+  final-metrics table + closing report written into complete.md.
+  Docs-only closing head on the identical code tree (R3.5 docs-only
+  precedent) — the session-20 battery on this exact tree + CI
+  run#358 are the evidence; the closing head's own CI run id gets
+  recorded by the follow-up addendum commit.
 - New memory: D-29 (build-file comment taxonomy + the docstring/
   shebang ruling) + G-20 (cargo-deny prebuilt musl asset).
+- PROGRAM CLOSED: 20 sessions / 20 batches / CI runs #301–#358;
+  standing owner options Q-01..Q-06 in memory.md.
 
 ### Session 19 — 2026-11-16
 - Pre-flight: run#355 (id 43672660744) green on `5f69ada` (the

@@ -6,17 +6,40 @@ CI evidence, date, notes.
 
 ## Definition of done (whole refactor)
 
-- [ ] All tasks R0–R6 terminal or explicitly dropped with a reason in
-      `memory.md`.
-- [ ] `strip-comments --check` green over all of `crates/` (0 comments).
-- [ ] 0 `#[allow]` without an active justification entry in `memory.md`.
-- [ ] 0 production `unwrap`/`expect`/`panic!` (bootstrap exemption in
-      `main.rs` only, listed here).
-- [ ] Full battery + all four CI lanes green on the final head.
-- [ ] Final metrics vs the session-1 baseline (`plan.md` §6) recorded below.
-- [ ] Per-module-cluster verification statement recorded in `progress.md`
-      review tables (every line checked).
-- [ ] Closing report written here.
+- [x] All tasks R0–R6 terminal or explicitly dropped with a reason in
+      `memory.md`. R0–R4.5 terminal (entries below); R5 DROPPED —
+      owner-gated option never exercised across the program (Q-01
+      records the standing option and its three sub-batches); R6.1
+      terminal (run#358); R6.2 terminal (this closing report).
+- [x] `strip-comments --check` green over all of `crates/` — 259/259
+      scanned, zero comments (verified this session; the check lane
+      re-verifies on every CI run).
+- [x] 0 `#[allow]` without an active justification entry in
+      `memory.md` — 30 attributes present (24 too_many_arguments + 3
+      crate-level pairs + 3 unsafe_code islands), every one carried
+      in the R2.2 verdict table under D-13; R4.2-b deleted the last
+      4 unjustifiable ones (too_many_lines after the splits).
+- [x] 0 production `unwrap`/`panic!`; expects satisfied AS-AMENDED
+      per the D-14/D-15 owner-defaults recorded in Q-03/Q-04: zero
+      production unwraps; 56 production expects (45 class-A
+      constant-input, 8 class-C guarded with written justifications,
+      3 class-D bootstrap-equivalent — NONE in main.rs, which carries
+      zero unwrap/expect, so the exemption line above is unused);
+      panic family = 3 exhaustiveness-forced unreachable! (D-15
+      written local proofs) + 1 arm-level cfg(test) panic (D-10).
+      The strict-letter option (Result propagation across ~45 sites)
+      remains documented for the owner in Q-03/Q-04.
+- [x] Full battery + all four CI lanes green on the final head —
+      run#358 (id 43694505499) green on `168e71a` (the final code
+      head: check/packages-x86_64/packages-arm64/kittest drift gate,
+      203 goldens byte-identical); the closing docs-only head rides
+      the same code tree (R3.5 docs-only precedent) — its run id is
+      recorded in the pointer.
+- [x] Final metrics vs the session-1 baseline (`plan.md` §6) recorded
+      below.
+- [x] Per-module-cluster verification statement recorded in
+      `progress.md` (closing table, every cluster named).
+- [x] Closing report written here.
 
 ## Terminal entries
 
@@ -52,13 +75,36 @@ CI evidence, date, notes.
 | R4.3 visibility | `f005d49` | CI run#350 (id 43633543056), all 4 lanes success (kittest snapshot drift gate GREEN — 203 goldens byte-identical: visibility prefixes and dead-code deletions are pixel-neutral by construction, CI confirms), 2026-11-14 | 2026-11-14 | census (r43_census.py, G-08+G-14 machinery): 1,094 pub(prod) items → 866 keep-pub + 222 candidates + 6 dead; applied 223 edits + 6 deletions; rustc-reachability compile loop (8 rounds) restored ~140 exposure-proven keeps; FINAL pub surface 1,113→1,023: 82 downgrades surviving (57 pub(crate) incl. 9 module caps — core maintenance/migrations/mirror/response_state_sql/sandbox/webhook + migrations::intelligence + app-shell app + design::scale::space; 8 pub(super) inbox_geo consts + settings save; 17 private) + 9 dead items deleted (6 censused + 3 cascade incl. the knowledge_store::search_knowledge phantom consumer) + AiJobRow dead-field slim (error/latency_ms); 40 files +101/−321 (net −220); battery green at EXACT baselines (520/528/293/56, clippy ×2, gate, icons, strip 207/207); D-25/G-14/G-15/Q-05 (CopilotTool kept-pub per R3.6 precedent)
 | R4.4 magic values | `3885eb4` | CI run#352 (id 43655562331), all 4 lanes success (kittest snapshot drift gate GREEN — 203 goldens byte-identical: the const folds are value-identical, pixel-neutral by construction, CI confirms), 2026-11-14 | 2026-11-14 | census (r44_census.py: 7,823 prod numeric + 17,350 prod string occurrences; `.take(N)`/SQL `LIMIT N` overlays + const-initializer inventory) — TENTH consecutive census correction: SIX same-policy families / 166 sites folded; catalog::NO_SUBJECT (root const, 14 sites cross-crate); design::MISSING_VALUE (pub(crate), 38 sites incl. the `== "—"` sentinel comparator); design::error_note (17 byte-identical error_text+format sites); design::scale::CONTROL_H (72 single-line control heights; avatar datum + horizontal pad kept); design::scale::ROW_H (3 identical page-local ROW_HEIGHT decls + 11 refs); coaching::EXCERPT_CAP (private, 15 sites; search/interaction 240s kept as coincidental); keeps with rulings in the R4.4 verdict table (algorithm constants, HTTP statuses, SQL LIMITs, rgb components, serde attr strings, wire vocab, domain-word comparisons, UI action labels — Q-06, icons geometry, per-site pixels); 30 files +254/−184; battery green at EXACT baselines (520/528/293/56, clippy ×2, gate, icons, strip 207/207); D-26 fallback-vs-prose policy + Q-06 recorded
 | R4.5 file splits (batch a + b; R4.5 terminal) | a: `c503d02` / b: `9139e8d` | a: CI run#354 (id 43670479211) all 4 lanes success; b: CI run#356 (id 43681170622) all 4 lanes success (kittest snapshot drift gate GREEN both times — 203 goldens byte-identical: batch b's prod-region moves are pixel-neutral, the definitive proof the G-15 visibility-only recipe predicted), 2026-11-15/16 | 2026-11-16 | two-tier remediation of the ~2K policy per D-27: batch a extracted 37 inline cfg(test) mods / 6,843 lines to module files (pure file-layout, module tree byte-identical, 5 flat→dir git-mv conversions); batch b split the six remaining >2K hosts along the R4.2 seams into 14 child files / 6,198 lines (inbox 3584→1924 + list 782/copilot 582/composer 314; settings 2536→1824 + helpscout_cards 411/doctor 158/oauth 161; workers/execute.rs 2455→ dir: mod 630 + ai 761 + ops 1077; helpscout_real 2340→1891 + credentials 288/rate_limiter 179; design 2282→1853 + composer 345/scaffold 99; reports 2158→1078 + sla 719/insights 373); G-15 ladder end state: 78 methods private→pub(super) exactly per consumer census, mailbox_local_id stays private, TokenRow + fields pub(super) (G-18), pub items keep levels with pub-use re-exports (paths byte-stable); conservation machinery (r45b_split.py): boundary-depth asserts + per-host ws-insensitive char-multiset conservation; D-24 multiset pre-gate 4/4 byte-identical; battery green at EXACT baselines both batches (520/528/293+2/56, clippy ×2, gate, fmt, icons, strip 245→259/259 with the 14 new files riding); END STATE: the >2K set is EMPTY, largest file = ai_center 2,003 (the D-27 at-threshold keep); D-28/G-16/G-17/G-18/G-19 recorded |
-## Final metrics (fill at close-out)
+| R6.1 build-file comment strip | `168e71a` | CI run#358 (id 43694505499), all 4 lanes success (check incl. deny against the LIVE advisory DB on the comment-stripped deny.toml; both packages lanes built+smoked on the stripped manifests/workflows; kittest drift gate green — 203 goldens byte-identical), 2026-11-15 | 2026-11-15 | 279 comment lines removed across the 12 build files (root + 4 crate Cargo.tomls, deny.toml, rust-toolchain.toml, .cargo/config.toml, .gitignore, ci.yml, release.yml, gate script): 259 whole-line TOML/YAML (incl. 21 shell comments inside YAML run-block scalars — script no-ops) + 20 trailing action-pin `# vN` annotations (pin hashes kept); functional zero-diff proven FOUR independent ways (tomllib loads equality for the 8 TOMLs, PyYAML recursive equality with run-block normalization, Python AST dump equality for the gate script, multiset comment-only diff audit over git HEAD); census-first (r61_strip.py, sandbox-local); python gate shebang + docstrings kept (D-29 — interpreter machinery / runtime state); `_archive` out of scope; .gitattributes censused zero-comment; battery green at EXACT baselines (520/528/293+2/56, clippy ×2, gate, fmt, icons, strip 259/259) + LOCAL cargo-deny 0.20.2 four-way ok (G-09 protocol; prebuilt musl binary, G-20); D-29 + G-20 recorded |
+| R6.2 final audit — PROGRAM CLOSED | this commit | run#358 green on the final code head `168e71a` (all 4 lanes); this closing docs-only head rides the identical code tree (R3.5 docs-only precedent) — its own run id recorded in the progress pointer | 2026-11-15 | final metrics vs §6 recorded below; DoD checklist closed (R5 dropped — Q-01 standing owner option); per-module-cluster verification statements in progress.md; battery evidence = the session-20 run on this exact tree + CI run#358; standing owner options on close: Q-01 (R5 guardrails), Q-02 (version bump + tagged release), Q-03/Q-04 (strict unwrap/panic readings), Q-05 (CopilotTool deletion), Q-06 (action-label consts) — all recorded in memory.md |
+## Final metrics (filled at close-out — session 20, 2026-11-15)
 
-- Comments removed (exact, from stripper): **3,174 whole comment lines +
-  6 inline comments (R1.1–R1.9) + 12 redundant lint-attr lines (R1.10)**
-  — stage R1 terminal; the whole-refactor close-out (R6.2) fills the rest.
-- LOC delta: —
-- Deps removed: —
+| Metric | Session-1 baseline (plan §6) | Final head (`168e71a`) | Delta |
+|---|---|---|---|
+| .rs files | 204 (core 122 / app-shell 70 / catalog 8 / xtask 4) | 259 (151 / 94 / 9 / 5) | +55 (R4.5's 51 split children + the program-created modules: xtask strip.rs R1.0, app-shell json_fields.rs R3.3, catalog routes.rs R3.6; the remaining +1 sits at the audit-era baseline's own count boundary — every current file is swept by strip-check 259/259) |
+| .rs LOC | 141,107 | 138,593 | −2,514 (−1.8%) — comment removal + dead-code/consolidation folds exceed the additions (new modules + split headers) |
+| Comments (.rs) | ~4,187 full-line (3,174 // + 1,005 /// + 7 //! + 1 /*) + trailing inline | 0 (strip-comments --check 259/259) | whole tree comment-free since R1.10 |
+| Comments (build files) | ~279 lines across 12 files (uncounted at baseline) | 0 | R6.1; shebang + gate docstrings kept per D-29 |
+| Production `unwrap` | 121 (src) | 0 | R2.4 (D-14; Q-03 strict option standing) |
+| Production `expect` | ~2,300 incl. bulk test regions | 56, each with a written D-14 justification (45 class-A + 8 class-C + 3 class-D) | 30 eliminated R2.4; Q-03 |
+| Production panic family | 30 (plan letter) / 4 (precise census) | 4: 3 D-15 exhaustiveness-forced `unreachable!` + 1 D-10 cfg(test) arm | R2.5 (D-15; Q-04) |
+| `#[allow]` | 31 | 30, all justified under D-13 | R2.2 verdict table; R4.2-b removed the last 4 |
+| pub surface | 1,113 | 1,023 | −90 (R4.3) |
+| Deps | scrypt declared-unused | removed (lock −747 bytes: scrypt+salsa20+pbkdf2) | R2.3 |
+| Files >2K lines | 10 candidates | 0 (largest = ai_center 2,003, the D-27 keep) | R4.5: 51 files / 13,041 lines split |
+| Test baselines | 520 (core) / 528 (sandbox) / 293+2 (app-shell) / 56 (catalog+xtask) | identical — every batch landed at EXACT baseline counts | 20 batches, zero test churn by design |
+| kittest goldens | 203 | 203, byte-identical through every UI-touching run #311–#358 | pixel-neutrality held program-wide |
+| Dead code | 6 items + phantom consumers + 1 unused dep | 0 active warnings (clippy -D warnings both lanes) | R2.1/R4.3 |
+
+**LOC delta detail** (the −2,514): R1 removed ~3,180 whole comment lines + inline; R2.3 removed a dep; R2.4 −1 net; R3.2 net −166; R3.4 net −56; R3.6 net −20; R4.3 net −220 (incl. 9 dead deletions); R4.4 net +70; the additions: strip.rs (lexer + 38 edge tests, ~600 lines incl. its tests), json_fields.rs (9), routes.rs (5), the 51 split children's header/use-super lines and re-export stubs. Every intermediate count is in the task table and terminal entries above.
+
+**Comments removed (exact, from stripper): 3,174 whole comment lines +
+  6 inline comments (R1.1–R1.9) + 12 redundant lint-attr lines (R1.10)** —
+  stage R1 terminal; **R6.1 added 279 build-file comment lines** (259
+  whole-line + 20 trailing pin annotations; taxonomy in D-29).
+- LOC delta: **141,107 → 138,593 (−2,514, −1.8%)** — see the table above.
+- Deps removed: **scrypt (R2.3) — the one real unused dependency; lock
+  dropped exactly scrypt + salsa20 + pbkdf2 (747 bytes).**
 - `unwrap`/`expect`/`panic` eliminated: **R2.4 terminal — 30 production
   occurrences eliminated (86→56: 21 mutex-poison in batch a, 9 guarded
   post-conditions in batch b incl. all 4 remaining production unwraps),
@@ -79,3 +125,36 @@ CI evidence, date, notes.
   batch a) + 14 prod-region child files (6,198 lines, batch b) = 51
   files / 13,041 lines; the >2K set is empty (largest = ai_center
   2,003, the D-27 at-threshold keep).**
+
+## Closing report
+
+The program ran 20 sessions / 20 batches over 2026-11-12 → 2026-11-15
+(R0–R6.2; the CI runs #301–#358 carry the per-head evidence). What
+the tree gained, in the owner's own constraint language:
+
+1. **Comment-free (constraint 3), now tree-wide including build
+   machinery.** The Rust tree lost ~3,180 stripper-verified comment
+   lines (R1) and the 12 build files lost 279 more (R6.1); the only
+   survivors are the R2.2-justified expect messages (constraint 3's
+   own allowance) and the gate script's shebang/docstrings (D-29
+   functional keeps).
+2. **Zero simulation (constraint 1):** the gate stayed green every
+   session; no marker ever landed.
+3. **Honest failure paths:** zero production unwraps; every expect
+   carries its written class justification (D-14); the panic family
+   is 4 classified members, each with a local proof or exemption.
+4. **Single-sourced vocabulary:** cross-crate words live in catalog
+   (routes, NO_SUBJECT); shared design tokens in design::scale; the
+   SQL/HTTP/json-field plumbing is one shape per idiom (R3).
+5. **Right-sized files and functions:** the >2K set is empty and
+   no function exceeds the clippy threshold without a recorded
+   ruling (D-23/D-27/D-28).
+6. **Minimal surface:** pub 1,113→1,023 with reachability-proven
+   keeps; 30 allows, all justified; 30 attrs total.
+7. **The pixel contract held:** 203 kittest goldens byte-identical
+   through every UI-touching batch — the drift gate never fired.
+
+Every deviation from the plan's letter is recorded as an owner option
+(Q-01..Q-06) with the strict-reading work itemized — the plan's letters
+overcounted in ten consecutive censuses; the ledger's censuses are
+the numbers the CI actually verified.

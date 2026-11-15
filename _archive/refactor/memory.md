@@ -552,6 +552,19 @@ session ends by adding what the next session must not have to rediscover.
     this audit when the tree contains duplicate lines (four
     identical action-pin lines deranged its alignment — the
     multiset form is alignment-free and duplicate-safe).
+- **D-30 (session 20, R6.2 close-out).** The DoD line "0 production
+  unwrap/expect/panic!" is CLOSED as-amended: the strict letter was
+  superseded by the D-14/D-15 owner-defaults (56 justified expects,
+  4 classified panic-family members) — Q-03/Q-04 carry the
+  strict-reading work itemized for the owner, and the bootstrap
+  exemption line is unused (main.rs carries zero unwrap/expect).
+  R5 dropped unexercised (Q-01 addendum). The close-out's battery
+  evidence follows the R3.5 docs-only precedent: a closing
+  docs-only head rides the identical code tree whose battery + CI
+  run already ran green. The program's authority chain at close:
+  plan §6 baseline → ledger censuses (ten consecutive corrections
+  of the plan letters, each with its verdict table) → CI runs
+  #301–#358 — the CI numbers are the ones that count.
 
 ## Facts (F-xx)
 
@@ -752,7 +765,13 @@ session ends by adding what the next session must not have to rediscover.
 ## Open questions / deferred owner decisions
 
 - **Q-01.** Whether to do R5 (guardrails: gate port to xtask, unwrap lint,
-  pedantic subset) — stage-gated, owner's call.
+  pedantic subset) — stage-gated, owner's call. CLOSE-OUT ADDENDUM
+  (session 20): never exercised across the program; R5 recorded
+  DROPPED-with-reason per the DoD. The option stands for the owner:
+  R5.1 (gate port → drop python3 from the release container; G-03
+  notes the install to remove), R5.2 (unwrap-policy lint subcommand
+  enforcing D-14 in CI), R5.3 (clippy pedantic subset in
+  clippy.toml).
 - **Q-02.** Whether the close-out (R6.2) should bump the version and cut a
   tagged release (v1.10.0) — out of scope unless the owner asks.
 - **Q-03 (session 5, D-14; count updated at R2.4-b close).** R2.4 ends

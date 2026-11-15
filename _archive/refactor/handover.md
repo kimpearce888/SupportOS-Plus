@@ -3,6 +3,14 @@
 Read this every session before touching anything. Pairs with `memory.md`
 (durable decisions) and `progress.md` (live state).
 
+**PROGRAM STATE: CLOSED** (session 20, 2026-11-15 — R6.2 terminal;
+20 sessions / 20 batches / CI runs #301–#358). No further batches are
+authorized by this plan; the owner options Q-01..Q-06 in `memory.md` are
+the only standing work items. A future session on this repo is
+MAINTENANCE: steps 1–3 below still apply (memory → handover → progress;
+re-provision per §2; confirm the last head CI-green), and new work
+should open a NEW plan entry rather than extend this one.
+
 ## 1. What this project is (and is not)
 
 - The repo: **SupportOS-Plus**, a Rust workspace at `/home/z/SupportOS-Plus`
