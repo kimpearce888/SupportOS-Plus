@@ -496,6 +496,23 @@ session ends by adding what the next session must not have to rediscover.
   keep (the "~" tolerance + R4.2-b already decomposed its fns).
   Sub-2K files with big test mods (custom_objects 1961, sync_engine
   1811) stay unsplit — no trigger, no churn (D-23 discipline).
+- **D-28 (session 19, R4.5-b).** The impl-member move recipe (the
+  Tier-2 companion to D-27): methods moved into a child module's
+  `impl <Type> {}` block need ONLY a visibility change — method-call
+  syntax is path-free (`self.list_ui(...)` resolves from any impl
+  block in the crate at the method's visibility), so the entire
+  caller surface survives untouched and the G-15 ladder reduces to
+  one question: who calls it? parent/sibling/test-mod callers →
+  `pub(super)`; callers that moved together → private stays. No
+  re-export is ever needed for impl members. Top-level items are the
+  opposite: paths must be preserved via host `pub use` re-exports
+  (zero caller churn) and sibling-used private helpers need
+  `pub(super)` + a host `use` binding so descendant globs (`use
+  super::*` in http.rs) keep resolving them unqualified. Both moves
+  ride the R4.5-a-proven child-file header `use super::*;` (the
+  descendant glob sees the host's private items AND its private
+  use-bindings). End state of the ~2K policy: largest file = ai_center
+  2003 (the D-27 keep); the >2K set is empty.
 
 ## Facts (F-xx)
 
@@ -658,6 +675,30 @@ session ends by adding what the next session must not have to rediscover.
   (compare the BODY pre/post dedent, whitespace-insensitively, plus
   an exact dedent-equality pass); the failure cost one clean
   `git reset --hard` + rerun, no damage escaped the assert.
+- **G-17 (session 19).** Audit CURRENT declaration levels before
+  writing a visibility-rewrite table: four names drafted for the
+  pub(super) rewrite were already wider (delete_saved_report
+  pub(crate); record_response/record_error_429 pub(crate);
+  run_attachment_downloads pub(super)) — the rewrite regex would not
+  have matched two of them (0 hits = script assert) but the
+  pre-existing-marker assert tripped first and the audit explained
+  WHY. A pre-existing wider level is the correct level for the move
+  (it already covers every current caller); never downgrade in a
+  file-split batch — visibility levels are R4.3's jurisdiction.
+- **G-18 (session 19).** G-15's sibling corollary, field edition:
+  moving a private struct whose FIELDS are read from a sibling module
+  (TokenRow ← http.rs) requires `pub(super)` on BOTH the struct and
+  the fields — E0616 on each field, then "type TokenRow is private"
+  on the pub(super) fn returning it (a function interface may not
+  expose a type narrower than itself). One compile round fixed all 13
+  errors; the class is now fully enumerable for future splits.
+- **G-19 (session 19).** `git mv x.rs x/mod.rs` FAILS unless the
+  destination directory already exists ("renaming ... failed: No such
+  file or directory") — os.makedirs(dirname) before the mv. The
+  r45b apply died mid-run AFTER two hosts were written; recovery =
+  `git reset --hard` + `git clean -fd crates/` + fix + rerun (safe
+  because every host's asserts re-derive from the reset tree — the
+  same idempotency G-16's reset relied on).
 
 
 ## Open questions / deferred owner decisions

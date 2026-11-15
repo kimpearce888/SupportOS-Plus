@@ -7,41 +7,34 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 
 ## CURRENT POINTER
 
-- Next task: **R4.5-b — prod-region file splits** for the six files
-  still >2K after batch a (inbox 3590 / settings 2539 / workers/execute
-  2455 / helpscout_real 2344 / design 2283 / reports 2160 — exact
-  post-batch-a counts), split along EXISTING seams only (the R4.2
-  method clusters: inbox list/copilot/composer families, settings
-  helpscout-card/oauth/doctor families, execute's 22 tool fns, design's
-  composer/scaffold clusters); mechanical moves; G-15 visibility ladder
-  for moved items; D-24 multiset pre-gate on the four UI files; D-06 +
-  the CI kittest drift gate verify. ai_center 2003 = at-threshold KEEP
-  (verdict table). After R4.5: R5 optional owner-gated (Q-01); R6
-  close-out.
-- Pre-flight [session 18]: run#353 (id 43658004337) green on `70ab546`
-  (the session-17 addendum head — the standard docs-only preflight
-  gate). R4.5-a (cfg(test) mod extraction) executed on that green
-  base and is now itself CI-VERIFIED (same session): run#354 (id
-  43670479211) green on `c503d02`, all four lanes — check
-  (fmt/clippy/test/deny), packages x86_64, packages arm64, and the
-  kittest snapshot drift gate: 203 goldens byte-identical,
-  pixel-neutrality confirmed for the pure file-layout move. R4.5-a
-  closed; see the verdict table. Green base for R4.5-b: this
-  addendum head's own docs-only run (the standard next-session
-  preflight gate).
-- Session counter: 18 completed batches (R1 terminal; R2 TERMINAL; R3
+- Next task: **R6.1 — build-file comment strip** (Cargo.toml, workflows,
+  .gitignore, deny.toml, .cargo, rust-toolchain.toml, gate script):
+  functional zero-diff only; battery + CI after. Then R6.2 final audit
+  (full battery, CI green, final metrics vs plan §6 baseline,
+  every-line verification statement per module cluster, closing report
+  in complete.md). R5 stays optional owner-gated (Q-01) — if the owner
+  answers, R5.1–R5.3 slot before R6.2; otherwise R6 closes the plan.
+- Pre-flight [session 19]: run#355 (id 43672660744) green on `5f69ada`
+  (the session-18 addendum head — the standard docs-only preflight
+  gate). R4.5-b (prod-region splits) executed on that green base;
+  battery green at exact baselines locally; CI verification of the
+  split commit rides this session's push (see session log).
+- Session counter: 19 completed batches (R1 terminal; R2 TERMINAL; R3
   TERMINAL — runs #332/#335/#337/#339/#341/#342; R4.1 run#344; R4.2-a
   run#346; R4.2-b run#348 — R4.2 TERMINAL; R4.3 run#350; R4.4 run#352;
-  R4.5-a run#354 — CI-verified same session).
-- Environment: session 18 = ANOTHER full reset — repo re-cloned via
-  github-reconnect.sh; toolchain SURVIVED again at
+  R4.5-a run#354; R4.5-b pushed session 19 — CI id pending in the
+  addendum).
+- Environment: session 19 = full reset again — repo re-cloned via
+  github-reconnect.sh; toolchain SURVIVED at
   /tmp/my-project/{rustup,cargo-home} (exports re-applied per bash
-  call per §3). New gotchas G-16 (string-literal braces defeat naive
-  brace counting — reports.rs's cfg(test) mods were invisible to the
-  raw-count scanner; the extractor is string-aware with per-mod
-  conservation asserts; the setsid background form re-confirmed G-10's
-  death list — cargo runs foreground per call, killed runs resume from
-  the warm target/ cache).
+  call per §3); cold dep tree needed one killed-window continuation
+  (G-10) on the first `cargo check`. New gotchas G-17 (audit current
+  declaration levels BEFORE writing the visibility-rewrite table —
+  four draft names were already pub(crate)/pub(super)), G-18 (the
+  G-15 sibling corollary: a moved private struct whose fields are read
+  from a sibling needs pub(super) on BOTH struct and fields), G-19
+  (git mv into a NEW nested dir fails unless the dir is pre-created —
+  the apply died mid-run after two hosts; clean reset+clean+rerun).
 
 ## Task states
 
@@ -76,7 +69,7 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 | R4.3 visibility | terminal (session 16) | CI run#350 green — see `complete.md` |
 | R4.4 magic values | terminal (session 17) | CI run#352 green — see `complete.md` |
 | R4.5 file splits (batch a — cfg(test) mod extraction) | done (session 18) | CI run#354 green on `c503d02` (all 4 lanes incl. kittest drift gate — 203 goldens byte-identical); census: 12 files >2K re-measured; 11 carried 37 inline test mods (6,843 lines) extracted to module files (string-aware extractor, per-mod conservation asserts); module tree byte-identical; 6 files exit the >2K set |
-| R4.5 file splits (batch b — prod-region splits) | pending | six files still >2K: inbox 3590 / settings 2539 / workers/execute 2455 / helpscout_real 2344 / design 2283 / reports 2160; R4.2 method clusters are the seams (see verdict table) |
+| R4.5 file splits (batch b — prod-region splits) | done (session 19) | local battery green at exact baselines (520/528/293+2/56, clippy ×2, gate, fmt, icons, strip 259/259); six hosts split along R4.2 seams into 14 child files, 6,198 lines moved; D-24 multiset 4/4 identical; CI rides the session-19 push (addendum records the run); post-split largest file = ai_center 2003 (the D-27 at-threshold KEEP) — the >2K set is empty |
 | R5.1–R5.3 guardrails | pending (optional, stage-gated) | |
 | R6.1–R6.2 polish + close | pending | |
 
@@ -366,7 +359,54 @@ internal error.
 
 **R4.5-a verdict summary:** the ELEVENTH consecutive census correction — the plan's six named candidates met twelve current >2K files, but the honest first split point was the cfg(test) mod boundary: 37 inline test mods / 6,843 lines moved to 37 module files with ZERO semantic change (module paths, visibility, and `use super::*` resolution identical by construction — the move is pure file layout; `git mv` preserves rename history for the five flat→dir conversions: inbox/settings/knowledge/ai_center/reports). Six files exit the >2K set entirely; six remain for batch b. Keeps recorded: ai_center at-threshold; custom_objects 1961 and sync_engine 1811 carry big test mods but sit under 2K — no trigger, no churn (D-23 discipline). Battery green at EXACT baselines (520/528/293+2/56, clippy ×2, gate, icons, strip 245/245 — the 37 new files ride the whole-tree check); kittest-ui feature `--all-targets` compile pre-verified locally (the CI kittest lane compiles the suites with the feature on — their imports are unchanged). Pixel-neutrality: no widget call touched (module layout only); the CI kittest drift gate rides this push as verifier. New memory: D-27 (two-tier split ruling) + G-16 (string-brace span trap); G-10's background-death list re-confirmed.
 
+### R4.5 — batch b (session 19; prod-region splits along the R4.2 seams; counts below are post-batch-a)
+
+| host (pre-b) | child file(s) | lines moved | verdict notes |
+|---|---|---|---|
+| pages/inbox/mod.rs 3584 | composer.rs 314 (ToolAction + composer_tool_row items + thread/composer_pane/enqueue_composer_tool/apply_composer_act/mention_popup_ui methods) / copilot.rs 582 (copilot_pane/cards/lmstudio/assistant + insert_ai_draft/enqueue_composer_ai/poll_pending_ai/poll_assistant) / list.rs 782 (list_ui/search_filter/list_toolbar/conversation_rows/apply_filters/refresh_view_counts/reader/reader_head/action_bar/triage/briefing) | 1,664 | the three R4.2-b families; host 1924 — dispatcher ui + state/reload family + the coaching/state_history/qa impl stay (not R4.2-b seams, D-23) |
+| pages/settings/mod.rs 2536 | helpscout_cards.rs 411 (helpscout_ui + 4 card methods + save_webhook_relay_url/queue_webhook_health_check) / doctor.rs 158 (run_connection_doctor + connection_doctor_ui + poll_doctor_result) / oauth.rs 161 (begin_oauth/at/on + connect_client_credentials + poll_connect_result) | 731 | the helpscout-card/oauth/doctor families; host 1824 — general/lmstudio/vector_index/hours/backups tabs stay with the dispatcher |
+| core/workers/execute.rs 2455 → execute/ dir | ai.rs 761 (run_ai/attributes/memory/clustering/rewrite/translate/coaching/qa_ai/interaction/copilot_chat) / ops.rs 1077 (sync_conversation_ratings/embed_chunks/automation_approval + run_golden..run_attachment_downloads + mailbox_local_id) | 1,695 | the 22 tool fns = the seams; host execute/mod.rs 630 (execute_job dispatcher + lifecycle on_after_initial_sync/on_conversation_changed + run_engine + AiJob) |
+| core/helpscout_real/mod.rs 2340 | credentials.rs 288 (TokenRow/token_row/TOKEN_EXPIRY + HsCredentials + CredentialSource(s) + merge_field/base64_of/stored_api_concurrency/urlencode + the SECRET_* consts) / rate_limiter.rs 179 (RateLimitState + HsRateLimiter + QueueRateLimiter impl) | 465 | the two standing domain families (http.rs precedent); host 1891 — provider struct + impls + the trait impl stay |
+| design/mod.rs 2282 | composer.rs 345 (ComposerMode/ComposerAct/composer/composer_header_row/composer_footer_row/ComposerState/cop_suggest/cop_chat) / scaffold.rs 99 (page_header/centered_column/content_column/host_standard_page/host_inbox_page) | 444 | the composer/scaffold clusters; host 1853; paths preserved via `pub use` re-exports (incl. the mod-composer/fn-composer namespace pair — different namespaces, verified legal) |
+| pages/reports/mod.rs 2158 | sla.rs 719 (sla_ui + pick_sla_cfg/save_sla_cfg + build_config/builder_ui/format_metric_value/save_report_config/load_saved_report/delete_saved_report) / insights.rs 373 (insights_ui + add_graph_node_action/inspect_graph_node/refresh_graph) | 1,092 | the two heavy tab families; host 1078 — ui dispatcher + overview + the ≤160-line tab views + csv helpers stay |
+
+**R4.5-b verdict summary:** six hosts / 6,198 lines / 14 new child files; every split rides the R4.2 method-cluster seams named in the batch-a verdict table (reports had no R4.2 seam — its Tab families are the standing structure, the two >250-line families moved, the small tab views stay, D-23). G-15 ladder end state: impl-member moves need ONLY visibility (method-call syntax is path-free) — 78 private methods widened to exactly pub(super) (parent-dispatcher / cross-sibling / test-mod callers each proven by the consumer census; run_attachment_downloads was already pub(super) and kept its level); mailbox_local_id stayed private (its only caller moved with it); TokenRow + 4 fields widened to pub(super) (G-18 — the http.rs sibling reads them); design/helpscout_real top-level items keep their pub/pub(crate) levels with `pub use` re-exports keeping every existing path byte-stable (the pub consts SECRET_DOCS_API_KEY/SECRET_OAUTH_* included), while the four sibling-used private helpers (token_row/base64_of/urlencode/stored_api_concurrency/TOKEN_EXPIRY) got pub(super) + host `use` bindings so http.rs's `use super::*` glob still resolves them unchanged. Conservation machinery (r45b_split.py): string-aware boundary-depth asserts, per-child marker-count asserts, per-child and per-host whitespace-insensitive char-multiset conservation (old + additions == new — G-16's same-artifact lesson), git-mv rename history for execute.rs → execute/. D-24 multiset pre-gate: 4/4 UI hosts byte-identical widget-call multisets (268/255/240/272 calls). Battery green at EXACT baselines (520/528/293+2/56, clippy ×2 -D warnings, gate, fmt, icons, strip 259/259 = 245+14 new files); kittest-ui --all-targets compile green locally (42.8s); the CI kittest drift gate rides this push as the final pixel-neutrality verifier. Post-split tree: largest file = ai_center 2003 (the D-27 at-threshold KEEP) — the >2K set is EMPTY. New memory: D-28 + G-17/G-18/G-19.
+
 ## Session log
+
+### Session 19 — 2026-11-16
+- Pre-flight: run#355 (id 43672660744) green on `5f69ada` (the
+  session-18 addendum head — the standard docs-only preflight gate).
+- Environment: full reset again — repo re-cloned via
+  github-reconnect.sh; toolchain survived at /tmp/my-project/
+  {rustup,cargo-home}; exports re-applied per bash call per §3; cold
+  dep tree cost one killed-window continuation (G-10) on the first
+  check.
+- R4.5-b executed (prod-region splits): the six >2K hosts split along
+  the R4.2 method-cluster seams into 14 child files / 6,198 lines
+  moved (verdict table above). Census-first: method-level impl census
+  (r45b_impl.py, fixed multiline-signature close detection) + consumer
+  census per moved name (call-site file/line classification against
+  staying/moved/test ranges → the exact G-15 level per item; the
+  audit caught four draft rewrites already pub(crate)/pub(super) —
+  G-17). Extractor r45b_split.py: string-aware boundary asserts +
+  per-host whitespace-insensitive char-multiset conservation (old +
+  additions == new) + git-mv rename for execute.rs → execute/.
+- Compile loop: exactly one G-18 fix — TokenRow struct + 4 fields →
+  pub(super) (http.rs sibling reads them; a pub(super) fn returning a
+  private struct is a hard error). One apply-machinery fix — G-19
+  (git mv needs the destination dir pre-created; clean reset+clean+
+  rerun after two hosts were written; asserts gated everything).
+- Battery: gate clean; fmt --check clean; clippy workspace + sandbox
+  (-D warnings) clean; core lib 520 ✓ (471s), sandbox 528 ✓ (447s),
+  app-shell 293+2 ✓ (270s), catalog+xtask 56 ✓; verify-icons ✓;
+  strip-comments 259/259 ✓; kittest-ui --all-targets compile ✓
+  (42.8s). D-24 multiset pre-gate 4/4 byte-identical. G-05 before
+  every link-heavy lane.
+- Commits: code + ledger (D-08). CI closure recorded in the addendum
+  commit (same session if time allowed — see CURRENT POINTER).
+- New memory: D-28 (impl-member move recipe: visibility-only, paths
+  free) + G-17/G-18/G-19.
 
 ### Session 18 — 2026-11-15
 - Pre-flight: run#353 (id 43658004337) green on `70ab546` (the
