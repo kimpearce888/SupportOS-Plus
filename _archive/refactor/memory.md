@@ -583,6 +583,34 @@ session ends by adding what the next session must not have to rediscover.
   per-item census of its MODULE before whole-file action (the enum was
   the letter; the module was not the dead unit).
 
+
+- **D-32 (session 21, R7.3).** The three Q-04 restructure shapes,
+  chosen for honesty + D-23's dispatch-data discipline:
+  (a) app/mod.rs page dispatch — the honest 23-arm match table, each
+  arm wrapping its own design host (host_inbox_page for Inbox,
+  host_standard_page for the rest); per-arm bodies byte-identical to
+  the old inner arms, so the pixel risk rides the CI kittest gate
+  (the golden-verified-batch requirement of Q-04); exhaustiveness is
+  compiler-checked with no lie arm; per-arm host wrapping IS dispatch
+  data (D-23's "1-line delegations stay" rule), not DRY debt. The
+  exhaustiveness ghost was structural: any re-match of a 23-variant
+  PageKey under a 22-variant guarantee needs either the lie arm, a
+  silent wildcard (D-15-rejected), or a 21-variant newtype (rejected
+  as R3-overkill); only the full table is honest.
+  (b) oauth_state.rs hex_digit — Nibble range-newtype: private
+  struct Nibble(u8) with high(byte)/low(byte) constructors (the masks
+  ARE the proof, constructive arithmetic: b>>4 and b&0x0f are
+  provably 0..=15), hex_digit indexes a [char;16] const — in-bounds
+  by constructor truth, unreachable! deleted.
+  (c) workers/execute/ops.rs (the R4.5-b child of old execute.rs:1833)
+  — outer-arm re-nesting: the inner Result<Option> match's three
+  shapes re-nested as the three real outer arms (Ok(Some) verify
+  path unchanged; Ok(None) and Err(e) each build their msg and share
+  the extracted record_partial_publish tail fn) — no ghost arm, DRY
+  tail, same set_article_draft_publish_state sequence per path.
+  Post-batch census: prod_unreachable = 0 tree-wide; panic family =
+  the single D-10 arm-level cfg(test) site.
+
 ## Facts (F-xx)
 
 - **F-01.** Baseline (session 1): 204 .rs files, 141,107 LOC — core

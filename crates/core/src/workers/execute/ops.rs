@@ -282,6 +282,19 @@ impl WorkerManager {
         Ok(())
     }
 
+    fn record_partial_publish(&self, draft_id: i64, remote_id: &str, msg: &str) -> Result<()> {
+        tracing::warn!(operation = "publish_article_draft", draft_id, %msg);
+        let conn = self.lock();
+        crate::knowledge_store::set_article_draft_publish_state(
+            &conn,
+            draft_id,
+            "published",
+            Some(remote_id.to_owned()),
+            None,
+            Some(msg),
+        )
+    }
+
     pub(super) async fn run_publish_article_draft_job(
         &self,
         job_id: i64,
@@ -437,23 +450,18 @@ impl WorkerManager {
                     None,
                 )?;
             }
-            verify => {
-                let msg = match verify {
-                    Ok(None) => {
-                        "The article published but the verify fetch found no article.".to_string()
-                    }
-                    Err(ref e) => format!("Published, but the verify re-sync failed: {e}"),
-                    _ => unreachable!("Ok(Some) is handled by the outer match arm"),
-                };
-                tracing::warn!(operation = "publish_article_draft", draft_id, %msg);
-                let conn = self.lock();
-                crate::knowledge_store::set_article_draft_publish_state(
-                    &conn,
+            Ok(None) => {
+                self.record_partial_publish(
                     draft_id,
-                    "published",
-                    Some(remote_id.clone()),
-                    None,
-                    Some(&msg),
+                    &remote_id,
+                    "The article published but the verify fetch found no article.",
+                )?;
+            }
+            Err(e) => {
+                self.record_partial_publish(
+                    draft_id,
+                    &remote_id,
+                    &format!("Published, but the verify re-sync failed: {e}"),
                 )?;
             }
         }

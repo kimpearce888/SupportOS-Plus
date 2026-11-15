@@ -843,55 +843,109 @@ impl ShellApp {
 
         let bus = self.bus.clone();
         let sync = self.sync.clone();
-        let mut nav: Option<NavRequest> = None;
-        if self.page == PageKey::Inbox {
-            let _ = design::host_inbox_page(ui, |ui| {
-                self.inbox.ui(ui, &self.db, &bus, sync.as_ref());
-            });
-        } else {
-            nav = design::host_standard_page(ui, |ui| match self.page {
-                PageKey::Dashboard => {
+        let nav = match self.page {
+            PageKey::Inbox => {
+                design::host_inbox_page(ui, |ui| {
+                    self.inbox.ui(ui, &self.db, &bus, sync.as_ref());
+                    None
+                })
+                .inner
+            }
+            PageKey::Dashboard => {
+                design::host_standard_page(ui, |ui| {
                     self.dashboard.ui(ui, &self.db, sync.as_ref());
                     None
-                }
-                PageKey::Customers => self.customers.ui(ui, &self.db, sync.as_ref()),
-                PageKey::Knowledge => self.knowledge.ui(ui, &self.db, sync.as_ref()),
-                PageKey::Reports => self.reports.ui(ui, &self.db, sync.as_ref()),
-                PageKey::LiveChats => self.live_chats.ui(ui, &self.db),
-                PageKey::Operations => self.operations.ui(ui, &self.db, &self.bus),
-                PageKey::AiCenter => self.ai_center.ui(ui, &self.db),
-                PageKey::Automation => self.automation.ui(ui, &self.db),
-                PageKey::Connectors => self.connectors.ui(ui, &self.db, &bus),
-                PageKey::CustomObjects => self.custom_objects.ui(ui, &self.db),
-                PageKey::Incidents => self.incidents.ui(ui, &self.db),
-                PageKey::IssueRadar => self.issue_radar.ui(ui, &self.db),
-                PageKey::Notifications => {
+                })
+                .inner
+            }
+            PageKey::Customers => {
+                design::host_standard_page(ui, |ui| self.customers.ui(ui, &self.db, sync.as_ref()))
+                    .inner
+            }
+            PageKey::Knowledge => {
+                design::host_standard_page(ui, |ui| self.knowledge.ui(ui, &self.db, sync.as_ref()))
+                    .inner
+            }
+            PageKey::Reports => {
+                design::host_standard_page(ui, |ui| self.reports.ui(ui, &self.db, sync.as_ref()))
+                    .inner
+            }
+            PageKey::LiveChats => {
+                design::host_standard_page(ui, |ui| self.live_chats.ui(ui, &self.db)).inner
+            }
+            PageKey::Operations => {
+                design::host_standard_page(ui, |ui| self.operations.ui(ui, &self.db, &self.bus))
+                    .inner
+            }
+            PageKey::AiCenter => {
+                design::host_standard_page(ui, |ui| self.ai_center.ui(ui, &self.db)).inner
+            }
+            PageKey::Automation => {
+                design::host_standard_page(ui, |ui| self.automation.ui(ui, &self.db)).inner
+            }
+            PageKey::Connectors => {
+                design::host_standard_page(ui, |ui| self.connectors.ui(ui, &self.db, &bus)).inner
+            }
+            PageKey::CustomObjects => {
+                design::host_standard_page(ui, |ui| self.custom_objects.ui(ui, &self.db)).inner
+            }
+            PageKey::Incidents => {
+                design::host_standard_page(ui, |ui| self.incidents.ui(ui, &self.db)).inner
+            }
+            PageKey::IssueRadar => {
+                design::host_standard_page(ui, |ui| self.issue_radar.ui(ui, &self.db)).inner
+            }
+            PageKey::Notifications => {
+                design::host_standard_page(ui, |ui| {
                     let nav = self.notifications.ui(ui, &self.db);
                     self.unread_notifications = self.notifications.unread_badge();
                     nav
-                }
-                PageKey::Onboarding => {
+                })
+                .inner
+            }
+            PageKey::Onboarding => {
+                design::host_standard_page(ui, |ui| {
                     self.onboarding.ui(ui, &self.db, sync.as_ref());
                     None
-                }
-                PageKey::Organizations => self.organizations.ui(ui, &self.db, sync.as_ref()),
-                PageKey::Outreach => self.outreach.ui(ui, &self.db),
-                PageKey::Search => self.search.ui(ui, &self.db),
-                PageKey::Settings => self.settings.ui(ui, &self.db),
-                PageKey::SupportGraph => self.support_graph.ui(ui, &self.db),
-                PageKey::Diagnostics => self.diagnostics.ui(ui, &self.db),
-                PageKey::SyncHealth => {
+                })
+                .inner
+            }
+            PageKey::Organizations => {
+                design::host_standard_page(ui, |ui| {
+                    self.organizations.ui(ui, &self.db, sync.as_ref())
+                })
+                .inner
+            }
+            PageKey::Outreach => {
+                design::host_standard_page(ui, |ui| self.outreach.ui(ui, &self.db)).inner
+            }
+            PageKey::Search => {
+                design::host_standard_page(ui, |ui| self.search.ui(ui, &self.db)).inner
+            }
+            PageKey::Settings => {
+                design::host_standard_page(ui, |ui| self.settings.ui(ui, &self.db)).inner
+            }
+            PageKey::SupportGraph => {
+                design::host_standard_page(ui, |ui| self.support_graph.ui(ui, &self.db)).inner
+            }
+            PageKey::Diagnostics => {
+                design::host_standard_page(ui, |ui| self.diagnostics.ui(ui, &self.db)).inner
+            }
+            PageKey::SyncHealth => {
+                design::host_standard_page(ui, |ui| {
                     self.sync_health.ui(ui, &self.db, sync.as_ref());
                     None
-                }
-                PageKey::Shell => {
+                })
+                .inner
+            }
+            PageKey::Shell => {
+                design::host_standard_page(ui, |ui| {
                     self.shell_ui(ui);
                     None
-                }
-                PageKey::Inbox => unreachable!("inbox handled above"),
-            })
-            .inner;
-        }
+                })
+                .inner
+            }
+        };
         if let Some(nav) = nav {
             self.apply_nav(nav);
         }

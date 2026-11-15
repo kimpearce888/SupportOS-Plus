@@ -79,19 +79,30 @@ fn random_state() -> String {
     hex_lower(&bytes)
 }
 
+struct Nibble(u8);
+
+impl Nibble {
+    fn high(byte: u8) -> Self {
+        Self(byte >> 4)
+    }
+
+    fn low(byte: u8) -> Self {
+        Self(byte & 0x0f)
+    }
+}
+
 fn hex_lower(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len() * 2);
     for b in bytes {
-        out.push(hex_digit(b >> 4));
-        out.push(hex_digit(b & 0x0f));
+        out.push(hex_digit(Nibble::high(*b)));
+        out.push(hex_digit(Nibble::low(*b)));
     }
     out
 }
 
-fn hex_digit(n: u8) -> char {
-    match n {
-        0..=9 => (b'0' + n) as char,
-        10..=15 => (b'a' + (n - 10)) as char,
-        _ => unreachable!("hex_digit got {n} (must be 0..15)"),
-    }
+fn hex_digit(n: Nibble) -> char {
+    const HEX: [char; 16] = [
+        '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f',
+    ];
+    HEX[usize::from(n.0)]
 }

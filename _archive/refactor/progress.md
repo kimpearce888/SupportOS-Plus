@@ -10,9 +10,10 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 - **PROGRAM 2 OPEN** (session 21, 2026-11-15) — owner override
   "complete anything ignored and skipped"; operative task list is
   plan §11 (Q-01..Q-06 execution). Program 1 stays closed; every
-  protocol carries over. **CURRENT POINTER: R7.1** (Q-05
-  dead-vocabulary deletion, D-31 extension) — code applied, battery
-  pending; then R7.2 -> R7.3 -> R7.4(a/b/c) -> R7.5 -> R7.6.
+  protocol carries over. **CURRENT POINTER: R7.4-a** (Q-03 class A: 45 constant-input
+  expects -> Result propagation, first module cluster). Done: R7.1
+  (f9c568c), R7.2 (e62bf08), R7.3 (this commit). Then R7.4-b/c
+  -> R7.5 -> R7.6.
 - Last program-1 head `6dd8c8b` CI-green (run#360, all four lanes —
   verified this session before Program 2 opened). Session counter
   resets for Program 2: session 1 of Program 2 = session 21 overall.
@@ -397,6 +398,34 @@ lanes, the no-simulation gate, kittest drift gate).
   (94->58 lines); support_graph LinkInput struct deleted + import
   narrowed; catalog re-export narrowed to GraphNodeKind. Compile check
   green (-p catalog -p core).
+- R7.1 battery green at exact baselines (gate, fmt, clippy x2, core
+  520 at 490s, sandbox 528 at 470s, app-shell 293+2 at 289s,
+  catalog+xtask 56, verify-icons, strip 259/259; one killed-window
+  continuation G-10 on the workspace lane, re-run per-lane). Commit
+  f9c568c.
+- R7.2 executed (Q-06 action-label single-sourcing): 42 prod sites
+  folded to design CANCEL_LABEL/EDIT_LABEL/DELETE_LABEL beside the
+  MISSING_VALUE precedent (D-26 home rule); the 2 test-region literals
+  in overlays.rs tests stay (D-10); cargo fmt --all applied for the
+  line-length fallout. Battery green at exact baselines (app-shell
+  293+2 at 265s, core 520 at 472s, sandbox 528 at 490s, rest clean).
+  Commit e62bf08.
+- R7.3 executed (Q-04 strict restructures; D-32 shapes recorded):
+  app/mod.rs page dispatch -> the honest 23-arm table (each arm its
+  own host; per-arm bodies byte-identical, exhaustiveness compiler-
+  checked without the lie; pixel-drift risk rides the CI kittest gate
+  per the Q-04 requirement); oauth_state.rs hex_digit -> Nibble
+  range-newtype (constructors high/low encode the mask proof; HEX
+  [char;16] indexing is in-bounds by constructor arithmetic);
+  workers/execute/ops.rs (the R4.5-b child holding the old
+  execute.rs:1833 site) -> outer-arm re-nesting into three real
+  Result<Option> arms with the shared warn/published tail extracted
+  as record_partial_publish. Post-edit census: prod_unreachable = 0
+  (the sole remaining prod_panic is the D-10 arm-level cfg(test)
+  site at workers/execute/mod.rs:317). Battery green at exact
+  baselines (core 520 at 472s incl. the crypto hex test over the
+  newtype; app-shell 293+2 at 274s; sandbox 528 at 473s; rest
+  clean).
 
 ### Session 20 — 2026-11-15
 - Pre-flight: run#357 (id 43682661859) green on `bf37d97` (the
