@@ -22,3 +22,6 @@ rusqlite.workspace = true
 reqwest = { workspace = true, features = ["blocking"] }
 sha2 = "0.11"
 supportos-plus-core = { workspace = true }
+
+[lints]
+workspace = true

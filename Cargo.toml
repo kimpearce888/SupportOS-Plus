@@ -48,6 +48,28 @@ url = "2"
 supportos-plus-catalog = { path = "crates/catalog" }
 supportos-plus-core = { path = "crates/core" }
 
+[workspace.lints.clippy]
+borrow_as_ptr = "warn"
+cast_ptr_alignment = "warn"
+comparison_chain = "warn"
+expl_impl_clone_on_copy = "warn"
+filter_map_next = "warn"
+invalid_upcast_comparisons = "warn"
+large_futures = "warn"
+large_types_passed_by_value = "warn"
+linkedlist = "warn"
+maybe_infinite_iter = "warn"
+missing_fields_in_debug = "warn"
+mismatching_type_param_order = "warn"
+option_option = "warn"
+ptr_as_ptr = "warn"
+ptr_offset_by_literal = "warn"
+return_self_not_must_use = "warn"
+string_add_assign = "warn"
+transmute_ptr_to_ptr = "warn"
+unnecessary_box_returns = "warn"
+unsafe_derive_deserialize = "warn"
+
 [profile.release]
 codegen-units = 1
 lto = true

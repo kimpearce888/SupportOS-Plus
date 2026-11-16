@@ -63,6 +63,8 @@ enum Cmd {
         check: bool,
         paths: Vec<String>,
     },
+    Gate,
+    UnwrapPolicy,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -88,6 +90,8 @@ fn main() -> anyhow::Result<()> {
         Cmd::Healthcheck { db } => run_healthcheck(&db),
         Cmd::VectorCount { data_dir, db } => run_vector_count(&data_dir, db.as_deref()),
         Cmd::StripComments { check, paths } => run_strip_comments(check, &paths),
+        Cmd::Gate => run_gate(),
+        Cmd::UnwrapPolicy => run_unwrap_policy(),
     }
 }
 
@@ -369,6 +373,14 @@ fn run_strip_comments(check: bool, paths: &[String]) -> anyhow::Result<()> {
         );
     }
     Ok(())
+}
+
+fn run_gate() -> anyhow::Result<()> {
+    spp_xtask::gate::run(&workspace_root())
+}
+
+fn run_unwrap_policy() -> anyhow::Result<()> {
+    spp_xtask::unwrap_policy::run(&workspace_root())
 }
 
 fn run_healthcheck(db_path: &str) -> anyhow::Result<()> {

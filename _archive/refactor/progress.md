@@ -1,6 +1,6 @@
 # Refactor Progress — Live State
 
-Last updated: session 23 (2026-11-16). Update rule: every session updates
+Last updated: session 24 (2026-11-16). Update rule: every session updates
 this file before ending. Statuses: `pending` / `in_progress` / `done` /
 `terminal` (done + closed in `complete.md`) / `dropped` (with reason in
 `memory.md`).
@@ -10,11 +10,10 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 - **PROGRAM 2 OPEN** (session 21, 2026-11-15) — owner override
   "complete anything ignored and skipped"; operative task list is
   plan §11 (Q-01..Q-06 execution). Program 1 stays closed; every
-  protocol carries over. **CURRENT POINTER: R7.5 (Q-01 guardrails:
-  R5.1 no-simulation gate port to xtask + python3 drop from the
-  release container (G-03); R5.2 unwrap-policy lint subcommand
-  enforcing the post-R7.4 zero state in CI; R5.3 clippy pedantic
-  subset)**. Done: R7.1 (f9c568c), R7.2
+  protocol carries over. **CURRENT POINTER: R7.6 (Q-02: version
+  bump to 1.10.0 + tagged release — the release workflow runs on
+  the tag push; live post-publish verification per the REL-6
+  precedent)**. Done: R7.1 (f9c568c), R7.2
   (e62bf08), R7.3 (10c3cde,
   CI run#361), R7.4-a/1 sandbox (05f7006, run#362), R7.4-a/2
   security cluster (6c9538a, run#364), R7.4-a/3 coaching cluster
@@ -32,7 +31,14 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
   prod_expect r25-series 6 -> 3 / truncation 5 -> 2 — CLASS D
   COMPLETE, the Q-03 strict-letter conversion is tree-wide complete;
   remaining = interaction_signals D-14 keep + 2 cfg(test)-region
-  digest sites + xtask machinery). Then R7.6 (Q-02: 1.10.0 + tagged
+  digest sites + xtask machinery) — R7.5 Q-01 guardrails (session
+  24: R5.1 gate port to xtask Cmd::Gate + release-container python3
+  drop, G-03 resolved, scripts/ deleted; R5.2 unwrap-policy
+  subcommand — string-aware scanner, 5-entry justified ALLOWED
+  table, prod unwrap 0 / panic-family 0 / expect exact-allowlist,
+  CI step added; R5.3 20 zero-fire pedantic lints via
+  [workspace.lints.clippy] + clippy.toml msrv, D-36 correction).
+  Then R7.6 (Q-02: 1.10.0 + tagged
   release) -> program close-out.
 - Last program-1 head `6dd8c8b` CI-green (run#360, all four lanes —
   verified this session before Program 2 opened). Session counter
@@ -400,6 +406,71 @@ lanes, the no-simulation gate, kittest drift gate).
 | build files (root + crates manifests, deny.toml, rust-toolchain, .cargo, .gitignore, workflows, gate script) | R6.1 | comment-free (279 lines removed; D-29 taxonomy; shebang/docstrings functional keeps); functional zero-diff four-way proven; deny lane green against the live advisory DB on run#358 |
 
 ## Session log
+
+### Session 24 — 2026-11-16
+- Maintenance pre-flight: sandbox reset again; re-cloned via
+  github-reconnect.sh; toolchain intact at /tmp/my-project/
+  {rustup,cargo-home} (rustc 1.99.1). The R7.4-c ledger catch-up
+  addendum (d8b770b) landed first (run#378 green on 4fd37af
+  recorded); its own CI run rides this batch's verification.
+- R7.5 executed (Q-01 guardrails, the ONE-batch letter):
+  (1) R5.1 — scripts/gate_no_simulation.py ported line-for-line
+  into crates/xtask/src/gate.rs (Cmd::Gate; the line-based
+  cfg(test) blanker with both documented quirks preserved —
+  brace-less mod decl regions end at the marker line;
+  #[cfg(test)] inside a // comment is not an attribute; the
+  audit.rs allowlist content-keyed with the same justifications;
+  10 unit tests). One semantic necessity discovered: the Rust
+  module SELF-FLAGS (it carries the marker vocabulary) — the
+  python predecessor was structurally outside the scanned set;
+  reproduced explicitly via MACHINERY_EXEMPT (D-35; the
+  self-allowlist alternative is rustfmt-brittle). Both gates
+  verified CLEAN on the tree pre-deletion. ci.yml: gate step
+  moved after toolchain+cache (cargo needed); release.yml:
+  python3 dropped from the container (G-03 RESOLVED — the build
+  is single-language; the .py deleted with scripts/).
+  (2) R5.2 — crates/xtask/src/unwrap_policy.rs (Cmd::UnwrapPolicy
+  + CI step): string-aware scanner (normal/raw string contents
+  blanked; char literals via the k=tick+1 escape-pair consumer —
+  the k=tick+2 form OVERSHOOTS on '\\'' and desyncs every later
+  line, G-22, caught by phantom violations + a stale-entry
+  report for a live site); region walker handles the two r25
+  blind spots (cfg(test) on MULTI-LINE fn signatures — the
+  digest sites — and on MATCH ARMS — the batch-27 __test_panic);
+  brace-less mod decls resolve the 45 external whole-file
+  cfg(test) modules (exact r25 agreement, 45=45 empty diff).
+  ALLOWED = 5 justified entries (interaction_signals D-14 keep;
+  strip.rs expect + package.rs x2 + bin/xtask.rs machinery
+  unwraps). Policy: production unwrap 0 / panic-family 0 in BOTH
+  buckets / every expect on the exact allowlist (stale entries
+  also fail). Clean-run census: production unwrap 0 / expect 1
+  allowed / panic-family 0; machinery 3 unwrap + 1 expect
+  allowed; 2381 test-region occurrences + 45 whole-file modules
+  exempt. 13 unit tests.
+  (3) R5.3 — the plan's "via clippy.toml" corrected (clippy.toml
+  cannot ENABLE lints, D-36): [workspace.lints.clippy] with 20
+  ZERO-FIRE high-value pedantic lints + `[lints] workspace =
+  true` x4 members + clippy.toml (msrv 1.99, the letter's named
+  file). Selection: full -W clippy::pedantic inventory on BOTH
+  clippy surfaces (74 lints fired ~1800x; top:
+  redundant_closure_for_method_calls 361, too_many_lines 173,
+  map_unwrap_or 144, casts ~430 — deliberately NOT enabled;
+  remediation is R8-material, not a guardrail). Four default-
+  lint fixes in the new code (int_plus_one, manual_repeat_n,
+  collapsible_if x2 -> edition-2024 let-chains).
+- Battery green at exact baselines: gate clean (new xtask lane),
+  unwrap-policy clean (new lane), fmt --check (fmt --all run
+  BEFORE the battery, G-21), clippy workspace + core sandbox
+  -D warnings (re-run post-fmt), core 520 (497s), core-sandbox
+  528 (453s; one G-05 incremental wipe mid-battery — disk hit
+  96% on the sandbox feature rebuild, standard rm -rf
+  target/debug/incremental remedy, 4.2G freed), app-shell 293+2
+  (263s), catalog+xtask 79 (56 baseline + 23 new unit tests),
+  verify-icons, strip-comments 261/261 (259 + the 2 new
+  modules). Diff reviewed pre-commit (session-22 lesson).
+  Next: R7.6 (Q-02 version 1.10.0 + tagged release), then
+  program close-out (terminal condition: Q-01..Q-06 closed in
+  complete.md + fresh handover state line).
 
 ### Session 23 — 2026-11-16
 - Maintenance pre-flight: sandbox reset again; re-cloned via

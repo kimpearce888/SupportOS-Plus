@@ -32,15 +32,12 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
-            build-essential curl ca-certificates git file python3 \
+            build-essential curl ca-certificates git file \
             libxkbcommon0 libxkbcommon-x11-0 libxcb-xkb1
 
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-
-      - name: No-simulation gate
-        run: python3 scripts/gate_no_simulation.py
 
       - name: Install pinned Rust toolchain
         run: |
@@ -53,6 +50,9 @@ jobs:
 
       - name: Put cargo on PATH for later steps
         run: echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: No-simulation gate
+        run: cargo run --locked -p supportos-plus-xtask -- gate
 
       - name: Format check
         run: cargo fmt --all --check

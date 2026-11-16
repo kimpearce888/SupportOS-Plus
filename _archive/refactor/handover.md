@@ -18,8 +18,9 @@ carry over verbatim. Steps 1–3 below still apply at every session start.
   different project in this sandbox. `dev.log`, `bun`, and port 3000 belong
   to it, not to us. Ignore them.
 - Build system: cargo + pinned toolchain (1.99.1, from `rust-toolchain.toml`)
-  + two GitHub workflows (CI, Release). No Node, no Python except the
-  no-simulation gate script.
+  + two GitHub workflows (CI, Release). No Node, no Python in the repo
+  (R7.5 ported the no-simulation gate into the xtask `gate`
+  subcommand; the release container carries no python3).
 
 ## 2. Fresh-sandbox re-provisioning (expect this often)
 
@@ -59,7 +60,9 @@ battery, incremental afterwards.
   registry cache ride along; saves the §2 toolchain download). NOTE:
   exports do NOT persist across bash tool calls in this sandbox — export
   in EVERY command that runs cargo.
-- `python3` (3.12) is present — the no-simulation gate runs on it.
+- `python3` (3.12) is present in the sandbox — used only for ad-hoc
+  CI monitoring (§5 JSON parsing); the repo itself needs none of it
+  (the no-simulation gate is the xtask `gate` subcommand).
 - No Vulkan/lavapipe locally → the kittest snapshot suites are **CI-only**;
   never try to run them in the sandbox.
 - `cargo machete` is not installed; install ad hoc for R2.3
@@ -70,7 +73,8 @@ battery, incremental afterwards.
 ```bash
 export PATH="$HOME/.cargo/bin:$PATH"
 cd /home/z/SupportOS-Plus
-python3 scripts/gate_no_simulation.py                 # gate
+cargo run --locked -p supportos-plus-xtask -- gate        # gate
+cargo run --locked -p supportos-plus-xtask -- unwrap-policy   # unwrap policy
 cargo fmt --all --check                                # fmt
 cargo clippy --locked --workspace --all-targets -- -D warnings
 cargo clippy --locked -p supportos-plus-core --all-targets --features sandbox -- -D warnings
@@ -126,7 +130,8 @@ session must not start a batch until the previous head is green.
 - Shell `&&` chains silently stop when `rg` finds nothing (exit 1). Use `;`
   between exploratory commands.
 - Touching `crates/core/src/audit.rs` → gate allowlist sync duty
-  (plan invariant 7).
+  (plan invariant 7; the allowlist lives in
+  `crates/xtask/src/gate.rs`).
 - Kittest suite file names / test fn names must stay stable (golden keys).
 - New code is comment-free (owner constraint 3) — including code written
   for the refactor itself.

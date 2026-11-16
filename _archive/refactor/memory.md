@@ -733,6 +733,59 @@ session ends by adding what the next session must not have to rediscover.
   delta is exact under both (16 converted; truncation 28 ->
   12). Future sessions should record both numbers.
 
+- **D-35 (session 24, R7.5).** The no-simulation gate's Rust
+  port self-flags: the gate module carries the marker
+  vocabulary ("simulated"/"fake"/"demo") as const string
+  literals, and the gate scans raw lines INCLUDING string
+  contents (by design — user-visible strings are the point).
+  The Python predecessor was structurally outside the scanned
+  set (a scripts/*.py file); the port reproduces that boundary
+  EXPLICITLY via MACHINERY_EXEMPT (one file:
+  crates/xtask/src/gate.rs). The alternative (self-allowlist
+  entries) is brittle: rustfmt re-wraps the allowlist consts
+  and the fragment lines shift. The unwrap-policy scanner
+  needs NO self-exemption: its string-aware stripping blanks
+  its own allowlist literals (string contents are invisible
+  to the occurrence patterns). r25-vs-unwrap_policy census
+  corrections (both verified on the live tree): r25 misses
+  cfg(test) attrs on MULTI-LINE fn signatures (digest_row's
+  two expects counted as prod) and attrs on MATCH ARMS (the
+  batch-27 __test_panic panic! counted as prod); the policy
+  scanner handles both (pending-attr consumes to the first
+  `{` regardless of item shape). External cfg(test) mod files
+  agree exactly: 45 = 45, empty diff both directions.
+
+- **D-36 (session 24, R7.5).** clippy.toml CANNOT enable
+  lints (it only carries lint configuration, e.g. msrv) — the
+  plan's "pedantic subset via clippy.toml" is implemented as
+  [workspace.lints.clippy] in the root Cargo.toml + `[lints]
+  workspace = true` in each member crate; clippy.toml exists
+  with `msrv = "1.99"` as the plan-letter's named file (also
+  redundant with Cargo.toml rust-version — belt and
+  suspenders). Selection method (the "tuned" part): full
+  `-W clippy::pedantic` fire inventory on BOTH clippy
+  surfaces — workspace --all-targets (74 lints fired, ~1800
+  fires; top: redundant_closure_for_method_calls 361,
+  too_many_lines 173, map_unwrap_or 144, cast_precision_loss
+  135, cast_possible_wrap 132, cast_possible_truncation 129)
+  and core sandbox (subset, no new kinds) — then the enabled
+  set = 20 ZERO-FIRE high-value lints (pure guardrails, no
+  code churn): borrow_as_ptr, cast_ptr_alignment,
+  comparison_chain, expl_impl_clone_on_copy, filter_map_next,
+  invalid_upcast_comparisons, large_futures,
+  large_types_passed_by_value, linkedlist, maybe_infinite_iter,
+  missing_fields_in_debug, mismatching_type_param_order,
+  option_option, ptr_as_ptr, ptr_offset_by_literal,
+  return_self_not_must_use, string_add_assign,
+  transmute_ptr_to_ptr, unnecessary_box_returns,
+  unsafe_derive_deserialize. The big-fire lints are recorded
+  as deliberately NOT enabled: remediating them is a separate
+  churning program (R8-material), not a guardrail. Zero-fire
+  status re-verified with the [lints] live under `-D
+  warnings` on both lanes. NOTE: [lints] clippy:: entries are
+  silently inert under plain rustc (tool-lint RFC behavior) —
+  cargo test/build lanes are unaffected.
+
 ## Facts (F-xx)
 
 - **F-01.** Baseline (session 1): 204 .rs files, 141,107 LOC — core
@@ -777,7 +830,10 @@ session ends by adding what the next session must not have to rediscover.
   (handover §2 step 2) or commits carry the wrong author.
 - **G-03.** The release workflow installs python3 in its container only
   for the no-simulation gate; if R5.1 ports the gate to xtask, remove that
-  install too.
+  install too. RESOLVED (session 24, R7.5): the gate is now the xtask
+  `gate` subcommand; the python3 package was dropped from the release
+  container's apt-get install list and `scripts/gate_no_simulation.py`
+  was deleted (single-language build achieved).
 - **G-04.** `cargo` is never on PATH in a new shell — export it
   (handover §3).
 - **G-05.** Sandbox disk is TIGHT (9.9G rootfs; target/ grows to 5.6G with
@@ -1099,6 +1155,19 @@ session ends by adding what the next session must not have to rediscover.
   from design two levels above space) need `pub(crate)`. Same-file
   is NOT same-module: inbox_geo's consts sit beside their consumers
   in inbox.rs but in a CHILD module — private broke them.
+- **G-22 (session 24, R7.5).** Rust string/char strippers: the
+  char-literal escape consumer must scan for the closing quote
+  starting AT the escape opener (k = tick+1) and skip escape PAIRS
+  (`\X`, k += 2 at a backslash) — starting at tick+2 ("after the
+  opener") makes `'\\'` land ON the second backslash, skip 2 past
+  the closing quote, and swallow code (with newlines collapsed,
+  shifting EVERY later line number) until the next stray tick.
+  Symptoms in unwrap_policy's first run: phantom violations at
+  shifted line numbers + a "stale allowlist entry" for a site that
+  exists (strip.rs's allowlisted expect). Same family as G-14: any
+  sanitizer that can eat a newline desyncs line numbers; the
+  line-count invariant (analysis lines == raw lines per file) is
+  the assertion to trust.
 - **Q-05 (session 16, R4.3).** catalog::CopilotTool is a dead
   vocabulary type: the 22-variant copilot tool enum (as_str/description
   impls, ~120 lines) has ZERO tree-wide consumers beyond its own root

@@ -1,6 +1,8 @@
+pub mod gate;
 pub mod icons;
 pub mod package;
 pub mod strip;
+pub mod unwrap_policy;
 
 #[cfg(test)]
 mod hygiene {

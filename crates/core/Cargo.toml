@@ -50,3 +50,6 @@ sandbox = ["dep:landlock", "dep:seccompiler", "dep:libc"]
 landlock = { version = "0.4", optional = true }
 seccompiler = { version = "0.5", optional = true }
 libc = { version = "0.2", optional = true }
+
+[lints]
+workspace = true

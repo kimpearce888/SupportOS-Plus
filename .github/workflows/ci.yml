@@ -26,9 +26,6 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: No-simulation gate
-        run: python3 scripts/gate_no_simulation.py
-
       - name: Install pinned Rust toolchain
         run: |
           rustup toolchain install
@@ -37,6 +34,12 @@ jobs:
 
       - name: Cache cargo state
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
+
+      - name: No-simulation gate
+        run: cargo run --locked -p supportos-plus-xtask -- gate
+
+      - name: Unwrap policy
+        run: cargo run --locked -p supportos-plus-xtask -- unwrap-policy
 
       - name: Format check
         run: cargo fmt --all --check
