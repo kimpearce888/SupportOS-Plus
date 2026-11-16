@@ -6,7 +6,8 @@ use crate::pages::PageKey;
 
 pub fn run_shell_smoke(options: ShellOptions) -> Result<usize, String> {
     let ctx = egui::Context::default();
-    let mut app = ShellApp::new_with_context(&ctx, options);
+    let mut app = ShellApp::new_with_context(&ctx, options)
+        .map_err(|e| format!("failed to spawn the task bridge thread: {e}"))?;
     let mut total_shapes = 0usize;
 
     total_shapes += render_pass(&ctx, &mut app, PageKey::Dashboard)?;

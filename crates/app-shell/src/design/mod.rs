@@ -233,11 +233,9 @@ pub fn install(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
     use egui::FontFamily::{Monospace, Proportional};
     use egui::TextStyle::{Body, Button, Heading, Monospace as MonoStyle, Small};
-    fonts
-        .families
-        .get_mut(&Proportional)
-        .expect("proportional family")
-        .push("Hack".into());
+    if let Some(family) = fonts.families.get_mut(&Proportional) {
+        family.push("Hack".into());
+    }
     let mut text_styles = egui::Style::default().text_styles;
     text_styles.insert(Heading, egui::FontId::new(scale::text::TITLE, Proportional));
     text_styles.insert(Body, egui::FontId::new(scale::text::BODY, Proportional));

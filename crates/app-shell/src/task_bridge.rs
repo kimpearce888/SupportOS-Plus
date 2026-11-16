@@ -12,13 +12,15 @@ pub(crate) struct TaskBridge {
 }
 
 impl TaskBridge {
-    #[must_use]
-    pub(crate) fn spawn(bus: &EventBus, ctx: &egui::Context) -> Self {
+    pub(crate) fn spawn(bus: &EventBus, ctx: &egui::Context) -> std::io::Result<Self> {
         let ctx = ctx.clone();
         Self::spawn_with(bus, move || ctx.request_repaint())
     }
 
-    fn spawn_with(bus: &EventBus, repaint: impl Fn() + Send + Sync + 'static) -> Self {
+    fn spawn_with(
+        bus: &EventBus,
+        repaint: impl Fn() + Send + Sync + 'static,
+    ) -> std::io::Result<Self> {
         let mut rx = bus.subscribe();
         let queue: Arc<Mutex<VecDeque<ServerEvent>>> = Arc::new(Mutex::new(VecDeque::new()));
         let worker_queue = Arc::clone(&queue);
@@ -37,12 +39,11 @@ impl TaskBridge {
                         Err(RecvError::Closed) => break,
                     }
                 }
-            })
-            .expect("failed to spawn the task bridge thread");
-        Self {
+            })?;
+        Ok(Self {
             queue,
             _worker: worker,
-        }
+        })
     }
 
     pub(crate) fn drain(&self) -> Vec<ServerEvent> {
@@ -97,7 +98,8 @@ mod tests {
         let counter = Arc::clone(&repaints);
         let bridge = TaskBridge::spawn_with(&bus, move || {
             counter.fetch_add(1, Ordering::SeqCst);
-        });
+        })
+        .expect("task bridge thread");
 
         let first =
             ServerEvent::sync_completed("test", 3, 0, spp_core::events::SyncTrigger::Manual);
@@ -129,7 +131,8 @@ mod tests {
         let counter = Arc::clone(&repaints);
         let bridge = TaskBridge::spawn_with(&bus, move || {
             counter.fetch_add(1, Ordering::SeqCst);
-        });
+        })
+        .expect("task bridge thread");
 
         for i in 0..8u32 {
             bus.emit(&ServerEvent::sync_completed(
@@ -168,7 +171,7 @@ mod tests {
     fn production_spawn_wires_egui_context() {
         let bus = EventBus::new(16);
         let ctx = egui::Context::default();
-        let bridge = TaskBridge::spawn(&bus, &ctx);
+        let bridge = TaskBridge::spawn(&bus, &ctx).expect("task bridge thread");
         bus.emit(&ServerEvent::sync_completed(
             "ctx",
             1,

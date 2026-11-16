@@ -92,17 +92,18 @@ impl ShellApp {
         .unwrap_or(0)
     }
 
-    #[must_use]
-    pub fn new(cc: &eframe::CreationContext<'_>, options: ShellOptions) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>, options: ShellOptions) -> std::io::Result<Self> {
         Self::new_with_context(&cc.egui_ctx, options)
     }
 
-    #[must_use]
-    pub(crate) fn new_with_context(ctx: &egui::Context, options: ShellOptions) -> Self {
+    pub(crate) fn new_with_context(
+        ctx: &egui::Context,
+        options: ShellOptions,
+    ) -> std::io::Result<Self> {
         design::install(ctx);
         let theme = Theme::load(&options.db);
         theme.apply(ctx);
-        let bridge = TaskBridge::spawn(&options.bus, ctx);
+        let bridge = TaskBridge::spawn(&options.bus, ctx)?;
         let (db_path, schema_version) = options.db.with_read(|conn| {
             (
                 spp_core::db::db_file_path(conn),
@@ -178,7 +179,7 @@ impl ShellApp {
         };
         #[cfg(feature = "ui-screenshot")]
         app.apply_screenshot_env(ctx);
-        app
+        Ok(app)
     }
 
     pub(crate) fn select_page(&mut self, page: PageKey) {
@@ -1246,7 +1247,10 @@ mod headless_tests {
             vector_index: None,
         };
         let ctx = egui::Context::default();
-        (ShellApp::new_with_context(&ctx, options), db)
+        (
+            ShellApp::new_with_context(&ctx, options).expect("task bridge thread"),
+            db,
+        )
     }
 
     #[test]

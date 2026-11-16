@@ -23,12 +23,11 @@ type CoachingChatOutput<'a> = std::result::Result<(Option<String>, String, u64),
 type CoachingChatFuture<'a> =
     std::pin::Pin<Box<dyn std::future::Future<Output = CoachingChatOutput<'a>> + 'a>>;
 
-fn block_ai_pipeline<F: std::future::Future>(fut: F) -> F::Output {
-    tokio::runtime::Builder::new_current_thread()
+fn block_ai_pipeline<F: std::future::Future>(fut: F) -> Result<F::Output> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
-        .build()
-        .expect("AI pipeline runtime")
-        .block_on(fut)
+        .build()?;
+    Ok(runtime.block_on(fut))
 }
 
 struct TickGuard<'a> {

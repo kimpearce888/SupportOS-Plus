@@ -139,7 +139,7 @@ impl WorkerManager {
             })
         })
         .await
-        .map_err(|e| Error::Other(e.to_string().into()))?;
+        .map_err(|e| Error::Other(e.to_string().into()))??;
 
         result?;
         if matches!(job, AiJob::Analyze) {
@@ -238,7 +238,7 @@ impl WorkerManager {
             })
         })
         .await
-        .map_err(|e| Error::Other(e.to_string().into()))?;
+        .map_err(|e| Error::Other(e.to_string().into()))??;
         let (snapshotted, remote) = result?;
         if let Some(remote) = remote.filter(|_| snapshotted) {
             self.emit_conversation_updated_for_remote(remote);
@@ -284,7 +284,7 @@ impl WorkerManager {
             })
         })
         .await
-        .map_err(|e| Error::Other(e.to_string().into()))?;
+        .map_err(|e| Error::Other(e.to_string().into()))??;
         tracing::info!(
             operation = "extract_memories",
             conversation_id = conv_id,
@@ -321,7 +321,7 @@ impl WorkerManager {
             })
         })
         .await
-        .map_err(|e| Error::Other(e.to_string().into()))?;
+        .map_err(|e| Error::Other(e.to_string().into()))??;
         let clustered = clustered?;
         tracing::info!(clusters = clustered, "issue clustering finished");
         {
@@ -387,7 +387,7 @@ impl WorkerManager {
             })
         })
         .await
-        .map_err(|e| Error::Other(e.to_string().into()))??;
+        .map_err(|e| Error::Other(e.to_string().into()))???;
         tracing::info!(
             operation = "rewrite_composer",
             chars = rewritten.chars().count(),
@@ -476,7 +476,7 @@ impl WorkerManager {
                     Some("agent_draft"),
                 )
                 .await
-            });
+            })?;
             match result {
                 Ok(value) => {
                     let model_called =
@@ -513,7 +513,7 @@ impl WorkerManager {
                         .unwrap_or_default()
                         .to_string())
                 }
-                Err(e) => Err(e.0),
+                Err(e) => Err(Error::Other(e.0.into())),
             }
         })
         .await
@@ -579,7 +579,7 @@ impl WorkerManager {
             })
         })
         .await
-        .map_err(|e| Error::Other(e.to_string().into()))?;
+        .map_err(|e| Error::Other(e.to_string().into()))??;
         if let Err(reason) = review {
             let conn = self.lock();
             let _ = jobs::log_error(&conn, "workers", &format!("review_draft: {reason}"));
@@ -629,7 +629,7 @@ impl WorkerManager {
             })
         })
         .await
-        .map_err(|e| Error::Other(e.to_string().into()))?;
+        .map_err(|e| Error::Other(e.to_string().into()))??;
         tracing::info!(
             operation = "qa_ai_layer",
             conversation_id = conv_id,
@@ -669,7 +669,7 @@ impl WorkerManager {
             })
         })
         .await
-        .map_err(|e| Error::Other(e.to_string().into()))??;
+        .map_err(|e| Error::Other(e.to_string().into()))???;
         tracing::info!(
             operation = "analyze_interaction",
             conversation_id = conv_id,
@@ -739,7 +739,7 @@ impl WorkerManager {
             })
         })
         .await
-        .map_err(|e| Error::Other(e.to_string().into()));
+        .map_err(|e| Error::Other(e.to_string().into()))?;
         match outcome {
             Ok(Ok(_value)) => {
                 if let Some(conv) = conversation_id

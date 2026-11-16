@@ -163,7 +163,11 @@ pub fn run(options: ShellOptions) -> Result<(), eframe::Error> {
     eframe::run_native(
         "SupportOS-Plus",
         native_options,
-        Box::new(move |cc| Ok(Box::new(ShellApp::new(cc, options)))),
+        Box::new(move |cc| {
+            ShellApp::new(cc, options)
+                .map(|app| Box::new(app) as Box<dyn eframe::App>)
+                .map_err(std::convert::Into::into)
+        }),
     )
 }
 

@@ -161,7 +161,7 @@ impl WorkerManager {
             })
         })
         .await
-        .map_err(|e| Error::Other(e.to_string().into()))?;
+        .map_err(|e| Error::Other(e.to_string().into()))??;
         let summary = outcome?;
         {
             let conn = self.lock();
@@ -263,7 +263,7 @@ impl WorkerManager {
             })
         })
         .await
-        .map_err(|e| Error::Other(e.to_string().into()))?
+        .map_err(|e| Error::Other(e.to_string().into()))??
         .map_err(|e| Error::Other(e.message.into()))?;
         tracing::info!(
             operation = "draft_article",
@@ -510,7 +510,7 @@ impl WorkerManager {
             })
         })
         .await
-        .map_err(|e| Error::Other(e.to_string().into()))?
+        .map_err(|e| Error::Other(e.to_string().into()))??
         .map_err(|e| Error::Other(e.message.into()))?;
         tracing::info!(
             operation = "weekly_digest",
