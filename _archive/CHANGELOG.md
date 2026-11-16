@@ -4,6 +4,70 @@ All notable changes to **SupportOS+** (SupportOS-Plus) are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.10.0] — 2026-11-16
+
+### Changed — the deep-refactor program: two programs, closed
+
+The repository went through a full audit-driven refactor (program 1,
+20 sessions, CI runs #301–#359; then the owner-directed option
+execution, program 2, CI runs #360–#380), every batch battery-verified
+locally and verified green on the 4-lane CI matrix. **Zero behavior
+change is the deliverable** — the same app, the same pixels (the 203
+kittest goldens stayed byte-identical throughout), now built on a tree
+without the debt:
+
+- **Zero comments tree-wide** (all Rust source plus the 12 build
+  files; a `strip-comments` CI gate keeps it that way), zero dead
+  code, zero duplicate error enums, and the repeated plumbing folded
+  into shared helpers — 80 SQL row-collect sites into `db::query_rows`
+  / `rows_ok`, 122 flat JSON key extractions into `json_fields`, 4
+  LM-Studio send tails into `send_json`, the 4-page "Sync now"
+  toolbar fragment into one `sync_now_button`.
+- **Zero production `unwrap()` / `panic!` / `todo!` /
+  `unreachable!`** — the strict conversion program turned every
+  reachable site into honest `Result` propagation: 45
+  constant-input constructors, 8 guarded post-conditions
+  restructured at the type level (table-driven node kinds, bundled
+  decision tuples, `Map` building), and the 3 bootstrap sites moved
+  onto startup error channels that surface through the app's
+  fatal-exit path instead of a panic. The surviving census is ONE
+  production `expect()` (a compile-time-constant regex initializer)
+  plus 4 dev-machinery sites in the build tooling — every one
+  allowlisted with a written justification and enforced by the new
+  unwrap-policy CI gate.
+- **Naming, structure, visibility:** 17 mega-functions split along
+  their dispatch seams (the `>2K`-line file set is empty), 10
+  dishonest names renamed, the `pub` surface cut by 90 items,
+  magic values catalog'd, and the 3 exhaustiveness-forced
+  `unreachable!` arms replaced by honest shapes (a 23-arm match
+  table, a `Nibble` range-newtype, an outer-arm re-nesting).
+- **The guardrail era (new CI gates):** the no-simulation gate is
+  now a first-class `xtask` subcommand — the build is
+  single-language and the release container no longer installs
+  python3; a new `unwrap-policy` gate fails CI on any new
+  production `unwrap`/`expect`/panic without a recorded
+  justification; and 20 high-value clippy pedantic lints
+  (soundness-class casts, iterator misuse, builder-consumption
+  bugs — selected zero-fire) are enforced at `-D warnings`.
+
+### Removed
+
+- The unused `scrypt` dependency (with its transitive salsa20 /
+  pbkdf2); the 22-variant `CopilotTool` catalog enum and the
+  `GraphHumanRelation` cascade (zero tree-wide consumers); the
+  `scripts/` python gate, superseded by the `xtask` `gate`
+  subcommand.
+
+### Verified
+
+- Every batch ran the full local battery (fmt, clippy on both
+  feature lanes, all four test lanes, the icon/strip/gate gates)
+  plus the CI matrix: check (incl. cargo-deny), AppImage + .deb
+  packages with smoke boots on x86_64 and arm64, and the kittest
+  pixel-drift gate. Terminal metrics: 261 Rust files / ~139.9K
+  LOC, 0 comments, 0 production unwraps, 1 justified production
+  expect, 30 justified `#[allow]`s, 203 goldens byte-identical.
+
 ## [1.9.8] — 2026-11-12
 
 ### Fixed — the visual integrity program: the 35-item visual register, closed
@@ -1329,6 +1393,7 @@ verified end-to-end by the tag-triggered release pipeline.
 - CI: fmt + clippy (`-D warnings`) + tests + cargo-deny on every push,
   plus a package job that builds and smoke-boots both formats.
 
+[1.10.0]: https://github.com/kimpearce888/SupportOS-Plus/releases/tag/v1.10.0
 [1.9.8]: https://github.com/kimpearce888/SupportOS-Plus/releases/tag/v1.9.8
 [1.9.7]: https://github.com/kimpearce888/SupportOS-Plus/releases/tag/v1.9.7
 [1.9.6]: https://github.com/kimpearce888/SupportOS-Plus/releases/tag/v1.9.6
