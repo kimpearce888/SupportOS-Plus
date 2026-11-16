@@ -3,12 +3,15 @@
 Read this every session before touching anything. Pairs with `memory.md`
 (durable decisions) and `progress.md` (live state).
 
-**PROGRAM STATE: PROGRAM 2 OPEN** (session 21, 2026-11-15 — the owner
-overrode every Q-01..Q-06 default with "complete anything ignored and
-skipped"; plan §11 is the operative task list; CURRENT POINTER lives in
-`progress.md`'s Program 2 section). Program 1 (20 sessions / 20 batches /
-CI runs #301–#359) stays closed — its rules, battery, and conventions
-carry over verbatim. Steps 1–3 below still apply at every session start.
+**PROGRAM STATE: BOTH PROGRAMS CLOSED — Rule 8 STOP** (session 24,
+2026-11-16). Program 1 (20 sessions / CI runs #301–#359) and Program 2
+(Q-01..Q-06, sessions 21–24 / CI runs #360–#383) are both terminal;
+their closing reports live in `complete.md`. **v1.10.0 is published**
+(tag `v1.10.0`, target `2f8a192`, Release run#38 all-6-jobs green,
+post-publish live-verified: BUILD-INFO version/commit match, both
+binary assets HTTP 200, SHA256SUMS present). The queue is empty — new
+work opens only on an owner directive. Steps 1–3 below still apply at
+every session start.
 
 ## 1. What this project is (and is not)
 

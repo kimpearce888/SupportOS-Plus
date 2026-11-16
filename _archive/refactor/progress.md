@@ -1,20 +1,29 @@
 # Refactor Progress — Live State
 
-Last updated: session 24 (2026-11-16). Update rule: every session updates
-this file before ending. Statuses: `pending` / `in_progress` / `done` /
-`terminal` (done + closed in `complete.md`) / `dropped` (with reason in
-`memory.md`).
+Last updated: session 24 close-out (2026-11-16). Update rule: every
+session updates this file before ending. Statuses: `pending` /
+`in_progress` / `done` / `terminal` (done + closed in `complete.md`) /
+`dropped` (with reason in `memory.md`).
 
 ## CURRENT POINTER
+
+- **PROGRAM 2 CLOSED (session 24, 2026-11-16) — Rule 8 STOP.** All
+  six Q-letters executed and terminal (records in `complete.md`'s
+  Program 2 closing report): R7.1 (f9c568c), R7.2 (e62bf08), R7.3
+  (10c3cde, run#361), R7.4-a/1..6 + R7.4-b + R7.4-c (runs
+  #362–#378), R7.5 (84cc569, run#380), R7.6 (2f8a192, CI run#382 +
+  tag run#383 + Release run#38 — **v1.10.0 PUBLISHED** at tag
+  `v1.10.0`, target `2f8a192`, post-publish live-verified: BUILD-INFO
+  version/commit match, both binary assets HTTP 200 through the
+  public URLs, SHA256SUMS present). The queue is empty — new work
+  opens only on an owner directive.
 
 - **PROGRAM 2 OPEN** (session 21, 2026-11-15) — owner override
   "complete anything ignored and skipped"; operative task list is
   plan §11 (Q-01..Q-06 execution). Program 1 stays closed; every
-  protocol carries over. **CURRENT POINTER: R7.6 (Q-02: version
-  bump to 1.10.0 + tagged release — the release workflow runs on
-  the tag push; live post-publish verification per the REL-6
-  precedent)**. Done: R7.1 (f9c568c), R7.2
-  (e62bf08), R7.3 (10c3cde,
+  protocol carries over. **CLOSED session 24** (see the pointer
+  above; the original letter preserved for the record). Done:
+  R7.1 (f9c568c), R7.2 (e62bf08), R7.3 (10c3cde,
   CI run#361), R7.4-a/1 sandbox (05f7006, run#362), R7.4-a/2
   security cluster (6c9538a, run#364), R7.4-a/3 coaching cluster
   (dd9c3da, run#366), R7.4-a/4 interaction_engine (c391955,
@@ -39,7 +48,8 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
   CI step added; R5.3 20 zero-fire pedantic lints via
   [workspace.lints.clippy] + clippy.toml msrv, D-36 correction).
   Then R7.6 (Q-02: 1.10.0 + tagged
-  release) -> program close-out.
+  release) -> program close-out — all closed; see the CURRENT
+  POINTER above and `complete.md`.
 - Last program-1 head `6dd8c8b` CI-green (run#360, all four lanes —
   verified this session before Program 2 opened). Session counter
   resets for Program 2: session 1 of Program 2 = session 21 overall.
@@ -475,9 +485,43 @@ lanes, the no-simulation gate, kittest drift gate).
   (both first-try success) and the pedantic subset live under
   -D warnings; kittest drift gate green (no app code touched —
   zero golden churn); packages x86_64 + arm64 green. Q-01 CLOSED.
-  Next: R7.6 (Q-02 version 1.10.0 + tagged release), then
-  program close-out (terminal condition: Q-01..Q-06 closed in
-  complete.md + fresh handover state line).
+- R7.6 executed (Q-02 version 1.10.0 + tagged release): sandbox
+  reset AGAIN mid-batch — the uncommitted CHANGELOG draft was lost
+  and rewritten from the session context (the session-21 lesson
+  now doubly reinforced: commit before anything long). Version
+  bump 1.9.8 -> 1.10.0 (workspace.package; Cargo.lock synced via
+  `cargo update --workspace --offline` — exactly the 4 member
+  version fields, no dependency churn). CHANGELOG [1.10.0] section
+  + link ref. Drift safety verified pre-push: the CARGO_PKG_VERSION
+  display lives in sidebar_ui (shell chrome — no kittest suite
+  renders the sidebar; the suites render pages through the host
+  funnel only) and fatal.rs/smoke.rs carry no golden-visible
+  version content -> ZERO golden drift expected and CONFIRMED
+  (kittest lane green on both the bump head and the tag run).
+  Fast gates re-run green on the bumped tree; the full battery
+  rode CI per the R3.5 docs-only precedent (code tree byte-
+  identical to run#380's).
+- Release evidence: CI run#381 GREEN on bdb6949 (R7.5 addendum);
+  run#382 GREEN on 2f8a192 (the bump head, all four lanes); tag
+  v1.10.0 pushed at 2f8a192 -> CI run#383 GREEN + Release run#38
+  (id 43869218887) ALL 6 JOBS GREEN (build+test+package on
+  ubuntu:22.04, verify .deb on 22.04/24.04/debian:12, verify
+  AppImage, publish). Published 2026-11-16T13:17:07Z; live
+  post-publish verification: release not-draft/not-prerelease,
+  target 2f8a192, all 4 assets uploaded; BUILD-INFO.txt fetched
+  live (version 1.10.0, commit 2f8a192c6225...); both binary
+  assets HTTP 200 via the public download URLs; SHA256SUMS
+  fetched live (AppImage 26db0052eaa8…, .deb 9c31bff9e42a…).
+  Q-02 CLOSED.
+- PROGRAM 2 CLOSED (Rule 8 STOP): complete.md carries the
+  Program 2 closing report (R7.1–R7.6 terminal records + final
+  metrics); the DoD checklist amended (R5 reopened-and-closed;
+  Q-03/Q-04 strict-letter executed-and-closed); handover state
+  line -> BOTH PROGRAMS CLOSED. Session-24 total: 4 commits
+  (R7.5 code + addendum + R7.6 release + this close-out) + the
+  v1.10.0 tag; CI runs #379–#383 + Release run#38.
+  Next: nothing — the queue is empty; new work opens only on an
+  owner directive.
 
 ### Session 23 — 2026-11-16
 - Maintenance pre-flight: sandbox reset again; re-cloned via

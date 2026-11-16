@@ -7,10 +7,12 @@ CI evidence, date, notes.
 ## Definition of done (whole refactor)
 
 - [x] All tasks R0–R6 terminal or explicitly dropped with a reason in
-      `memory.md`. R0–R4.5 terminal (entries below); R5 DROPPED —
-      owner-gated option never exercised across the program (Q-01
-      records the standing option and its three sub-batches); R6.1
-      terminal (run#358); R6.2 terminal (this closing report).
+      `memory.md`. R0–R4.5 terminal (entries below); R5 DROPPED at the
+      program-1 close (owner-gated option never exercised) — then
+      REOPENED and CLOSED by Program 2's owner override (R7.5, `84cc569`,
+      run#380: gate port + unwrap-policy lint + the 20-lint pedantic
+      subset; see the Program 2 closing report below); R6.1 terminal
+      (run#358); R6.2 terminal (the program-1 closing report).
 - [x] `strip-comments --check` green over all of `crates/` — 259/259
       scanned, zero comments (verified this session; the check lane
       re-verifies on every CI run).
@@ -28,7 +30,11 @@ CI evidence, date, notes.
       panic family = 3 exhaustiveness-forced unreachable! (D-15
       written local proofs) + 1 arm-level cfg(test) panic (D-10).
       The strict-letter option (Result propagation across ~45 sites)
-      remains documented for the owner in Q-03/Q-04.
+      remained documented for the owner in Q-03/Q-04 — **executed and
+      closed by Program 2's R7.3/R7.4** (unreachable! -> honest
+      shapes; the expect classes converted; terminal census: 0 unwraps,
+      1 justified expect, 0 panic-family, enforced by the R7.5
+      unwrap-policy CI gate).
 - [x] Full battery + all four CI lanes green on the final head —
       run#358 (id 43694505499) green on `168e71a` (the final code
       head: check/packages-x86_64/packages-arm64/kittest drift gate,
@@ -158,3 +164,70 @@ Every deviation from the plan's letter is recorded as an owner option
 (Q-01..Q-06) with the strict-reading work itemized — the plan's letters
 overcounted in ten consecutive censuses; the ledger's censuses are
 the numbers the CI actually verified.
+
+## Program 2 — owner-options execution (Q-01..Q-06), closing report
+
+Opened session 21 (2026-11-15) on the owner's blanket override
+("complete anything ignored and skipped"); ran sessions 21–24 over
+2026-11-15 → 2026-11-16; CI runs #360–#383 + Release run#38 carry the
+per-head evidence. Every batch battery-verified locally, pushed green.
+
+### Terminal records (plan §11 letters)
+
+- **R7.1 (Q-05), `f9c568c`, CI run#363.** Dead vocabulary deleted:
+  the CopilotTool enum+impl+re-export (the module KEPT — its 3 live
+  consts are consumed; the D-31 census corrected the plan's
+  whole-file letter) and the GraphHumanRelation cascade (struct+enum+
+  impl+re-export; zero tree-wide constructors).
+- **R7.2 (Q-06), `e62bf08`, CI run#365.** 42 production action-label
+  sites single-sourced into design::CANCEL/EDIT/DELETE_LABEL beside
+  MISSING_VALUE; the 2 test-region literals stay (D-10).
+- **R7.3 (Q-04), `10c3cde`, CI run#361.** The 3
+  exhaustiveness-forced unreachable! arms replaced with honest
+  shapes: the 23-arm match table (app/mod.rs), the Nibble
+  range-newtype (oauth_state.rs), the outer-arm re-nesting
+  (execute.rs). prod_unreachable = 0.
+- **R7.4 (Q-03), six commits, CI runs #362/#364/#366/#368/#371/#373/
+  #375/#378.** The strict expect-conversion, tree-wide complete:
+  class A (45 constant-input sites) — sandbox 4, security 8,
+  coaching 10, interaction_engine 5, quality 16, ai_evidence 1;
+  class B (8 kept post-conditions -> the D-14-noted restructures at
+  the type level, 6 production sites after the D-33(d) census
+  correction); class D (3 bootstrap sites -> startup error channels
+  surfacing through main's fatal-exit path). Terminal census: ZERO
+  production unwraps, ONE justified production expect
+  (interaction_signals' compile-time-constant regex macro), ZERO
+  panic-family in production.
+- **R7.5 (Q-01), `84cc569`, CI run#380.** The R5 guardrails, one
+  batch: R5.1 the no-simulation gate ported to the xtask `gate`
+  subcommand (single-language build; python3 dropped from the
+  release container — G-03 resolved; scripts/ deleted); R5.2 the
+  `unwrap-policy` subcommand + CI step enforcing the post-R7.4 zero
+  state (string-aware scanner; 5-entry justified ALLOWED table; the
+  r25 blind spots fixed — attrs on multi-line fn signatures and on
+  match arms); R5.3 twenty zero-fire high-value pedantic lints via
+  [workspace.lints.clippy] (the plan's "via clippy.toml" corrected —
+  clippy.toml cannot enable lints, D-36) + clippy.toml msrv.
+- **R7.6 (Q-02), `2f8a192`, CI run#382 + tag run#383 + Release
+  run#38 (all 6 jobs green).** Version 1.10.0 + the tagged release:
+  workspace bump with an exactly-version-fields lock sync; CHANGELOG
+  [1.10.0] section; drift-safety pre-verified (the version display
+  lives in shell chrome, invisible to the page-level kittest funnel —
+  the drift gate stayed green on both the bump head and the tag).
+  Published at tag v1.10.0 (target 2f8a192), 2026-11-16T13:17:07Z,
+  live-verified post-publish: BUILD-INFO version/commit match, both
+  binary assets HTTP 200 through the public download URLs,
+  SHA256SUMS present (AppImage 26db0052…, .deb 9c31bff9…).
+
+### Program-2 final metrics (vs the program-1 close and §6 baseline)
+
+- 261 Rust files / ~139.9K LOC / 0 comments / 0 production unwraps /
+  1 justified production expect / 0 production panic-family /
+  30 justified allows / 203 kittest goldens byte-identical /
+  >2K file set empty.
+- New permanent guardrails: the xtask `gate` (no-simulation),
+  `unwrap-policy` (the D-14 allowlist enforced), `strip-comments`
+  (comment-free), the 20-lint pedantic subset at -D warnings — all
+  CI-enforced on every push; the release container is python-free.
+- Terminal condition met: Q-01..Q-06 all closed above; Program 2
+  ends at a Rule 8 STOP — new work opens only on an owner directive.

@@ -1000,6 +1000,12 @@ session ends by adding what the next session must not have to rediscover.
   skipped" — every Q-01..Q-06 default is overridden; execution is
   Program 2 under plan §11. The option letters below remain the work
   specs; their "Default (standing unless overridden)" lines are dead.
+  PROGRAM-2 CLOSE-OUT (session 24): ALL SIX Q-letters executed and
+  closed — Q-01 via R7.5 (84cc569, run#380), Q-02 via R7.6 (2f8a192,
+  run#382/#383 + Release run#38, v1.10.0 published), Q-03 via R7.4
+  a+b+c (runs #362–#378), Q-04 via R7.3 (10c3cde), Q-05 via R7.1
+  (f9c568c), Q-06 via R7.2 (e62bf08). Terminal records in
+  `complete.md`'s Program 2 closing report; Rule 8 STOP.
 
 - **Q-01.** Whether to do R5 (guardrails: gate port to xtask, unwrap lint,
   pedantic subset) — stage-gated, owner's call. CLOSE-OUT ADDENDUM
