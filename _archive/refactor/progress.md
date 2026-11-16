@@ -468,6 +468,13 @@ lanes, the no-simulation gate, kittest drift gate).
   (263s), catalog+xtask 79 (56 baseline + 23 new unit tests),
   verify-icons, strip-comments 261/261 (259 + the 2 new
   modules). Diff reviewed pre-commit (session-22 lesson).
+- CI verification: run#379 (id 43839357771) GREEN on d8b770b
+  (docs-only R7.4-c catch-up addendum). Run#380 (id 43852870658)
+  GREEN on 84cc569, all four lanes — the check lane exercised the
+  NEW no-simulation gate and unwrap-policy steps on a real runner
+  (both first-try success) and the pedantic subset live under
+  -D warnings; kittest drift gate green (no app code touched —
+  zero golden churn); packages x86_64 + arm64 green. Q-01 CLOSED.
   Next: R7.6 (Q-02 version 1.10.0 + tagged release), then
   program close-out (terminal condition: Q-01..Q-06 closed in
   complete.md + fresh handover state line).
