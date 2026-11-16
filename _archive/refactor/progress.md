@@ -519,7 +519,10 @@ lanes, the no-simulation gate, kittest drift gate).
   Q-03/Q-04 strict-letter executed-and-closed); handover state
   line -> BOTH PROGRAMS CLOSED. Session-24 total: 4 commits
   (R7.5 code + addendum + R7.6 release + this close-out) + the
-  v1.10.0 tag; CI runs #379–#383 + Release run#38.
+  v1.10.0 tag; CI runs #379–#384 + Release run#38 (run#384 =
+  43875255895, GREEN on the close-out head a0fe69d itself, all
+  four lanes — the evidence chain closes with the terminal head
+  verified, matching the program-1 session-20 pattern).
   Next: nothing — the queue is empty; new work opens only on an
   owner directive.
 

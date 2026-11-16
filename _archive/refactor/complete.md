@@ -231,3 +231,6 @@ per-head evidence. Every batch battery-verified locally, pushed green.
   CI-enforced on every push; the release container is python-free.
 - Terminal condition met: Q-01..Q-06 all closed above; Program 2
   ends at a Rule 8 STOP — new work opens only on an owner directive.
+- The closing docs-only head `a0fe69d` is CI-VERIFIED: run#384
+  (id 43875255895) green, all four lanes (the R3.5 docs-only
+  precedent — code tree byte-identical to run#382's).
