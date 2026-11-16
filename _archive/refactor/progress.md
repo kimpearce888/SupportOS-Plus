@@ -10,15 +10,21 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 - **PROGRAM 2 OPEN** (session 21, 2026-11-15) — owner override
   "complete anything ignored and skipped"; operative task list is
   plan §11 (Q-01..Q-06 execution). Program 1 stays closed; every
-  protocol carries over. **CURRENT POINTER: R7.4-a/6 ai_evidence
-  chrono-midnight (the LAST class-A site, 1)**. Done: R7.1
-  (f9c568c), R7.2 (e62bf08), R7.3 (10c3cde,
+  protocol carries over. **CURRENT POINTER: R7.4-b (8 class-C
+  post-condition sites: live_chats 111, embeddings 813,
+  webhook 29, ai_pipeline 1109/1740/1744, support_graph 277,
+  workers/execute 524 — RE-CENSUS ai_pipeline at edit time: the
+  truncation scanner sees only 1 of its 3 census lines in the
+  prod region)**. Done: R7.1 (f9c568c), R7.2 (e62bf08),
+  R7.3 (10c3cde,
   CI run#361), R7.4-a/1 sandbox (05f7006, run#362), R7.4-a/2
   security cluster (6c9538a, run#364), R7.4-a/3 coaching cluster
   (dd9c3da, run#366), R7.4-a/4 interaction_engine (c391955,
   run#368), R7.4-a/5 quality cluster (e721e39 + fmt fix
-  8c6dab2, runs #370-fail/#371-green; prod_expect 29 -> 13).
-  Then R7.4-b/c -> R7.5 -> R7.6.
+  8c6dab2, runs #370-fail/#371-green), R7.4-a/6 ai_evidence
+  midnight (c540871, run#373) — **CLASS A COMPLETE: zero
+  class-A sites tree-wide; prod_expect 13 -> 12 (r25 series;
+  truncation scanner 11)**. Then R7.4-c -> R7.5 -> R7.6.
 - Last program-1 head `6dd8c8b` CI-green (run#360, all four lanes —
   verified this session before Program 2 opened). Session counter
   resets for Program 2: session 1 of Program 2 = session 21 overall.
@@ -461,6 +467,35 @@ lanes, the no-simulation gate, kittest drift gate).
   site delta; truncation-scanner cross-check 28 -> 12). Memory:
   D-34 additions (f)-(j) + the fmt-after-post-battery-transform
   battery-order lesson (G-21).
+- R7.4-a/6 executed (ai_evidence.rs:770, the LAST class-A
+  site): the chrono midnight post-condition converted via the
+  let-chain fold — `&& let Some(midnight) = d.and_hms_opt(0,
+  0, 0)` joined to the existing let-chain condition, return
+  bound to midnight; on the never-taken None the format loop
+  falls through to parse_epoch_millis's existing lenient 0
+  channel (byte-identical observables; unreachable panic arm
+  becomes the documented fallback). RULING: census lettered it
+  class A, but the FORM is a constant-input post-condition in
+  a deliberately-fixed lenient channel (parse_epoch_millis is
+  the 0-on-unparseable parser; both consumers are non-Result
+  closures/expressions — :500 map closure + :741 arithmetic)
+  — the R2.4-b class-C elimination precedent (inert 644
+  let-else) + D-34(f) fold rule select the restructure over
+  signature churn. Callers untouched (rg re-census exact:
+  :500, :741, fn def; zero test-region callers). Battery green
+  at exact baselines: gate, fmt --check (AFTER the edit, G-21),
+  clippy workspace (54s) + core sandbox (33s), core 520 (477s),
+  core-sandbox 528 (454s), app-shell 293+2 (263s), catalog+
+  xtask 56, verify-icons, strip-comments 259/259. Census:
+  prod_expect 13 -> 12 (r25 series; truncation 12 -> 11).
+  CLASS A COMPLETE.
+- CI verification: run#372 (id 43775745350) GREEN on cab642d
+  (docs-only addendum head). Run#373 (id 43778917792) GREEN on
+  c540871, all four lanes (check incl. deny, packages x86_64,
+  packages arm64, kittest drift gate). Session-22 total: 4
+  commits (2 batch + 1 fmt fix + 1 addendum) + this addendum;
+  CI runs #369-#373 (one mid-batch fmt failure #370 — root
+  cause + G-21 recorded). Next: R7.4-b.
 
 ### Session 21 — 2026-11-15
 - Maintenance pre-flight (program-1-closed protocol): re-cloned via
