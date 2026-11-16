@@ -213,21 +213,12 @@ mod tests {
         )
     }
 
-    fn db() -> crate::db::DbHandle {
-        let dir = std::env::temp_dir().join(format!(
-            "spp-doctor-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or_default()
-        ));
-        std::fs::create_dir_all(&dir).expect("temp dir");
+    fn db() -> (crate::db::DbHandle, crate::testkit::TempDir) {
+        let dir = crate::testkit::TempDir::new("spp-doctor");
         let mut conn = crate::db::open(&dir.join("doctor.db")).expect("open db");
         crate::bootstrap::apply_all(&mut conn).expect("migrations");
-        crate::db::DbHandle::new(conn)
+        (crate::db::DbHandle::new(conn), dir)
     }
-
     fn runtime() -> tokio::runtime::Runtime {
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -237,7 +228,7 @@ mod tests {
 
     #[test]
     fn unreachable_api_stops_the_doctor_at_step_one() {
-        let db = db();
+        let (db, _scratch) = db();
         let provider = provider_for(&db, "http://127.0.0.1:1".to_string());
         let steps = runtime().block_on(run_doctor(&provider));
         assert_eq!(steps.len(), 1, "the doctor stops after a hard failure");
@@ -250,7 +241,7 @@ mod tests {
 
     #[test]
     fn full_chain_passes_against_a_mock_api() {
-        let db = db();
+        let (db, _scratch) = db();
         let me = serde_json::json!({
             "id": 7,
             "firstName": "Doctor",
@@ -303,7 +294,7 @@ mod tests {
 
     #[test]
     fn bad_credentials_fail_at_the_token_step_with_a_remedy() {
-        let db = db();
+        let (db, _scratch) = db();
         let server = MockServer::start(std::sync::Arc::new(|req: &MockRequest| {
             if req.path.contains("/oauth2/token") {
                 MockResponse::json(

@@ -56,13 +56,9 @@ pub fn acquire(data_dir: &Path) -> Result<InstanceLock, AcquireError> {
 mod tests {
     use super::*;
 
-    fn temp_dir(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("spp-shell-lock-{}-{tag}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("create temp dir");
-        dir
+    fn temp_dir(tag: &str) -> crate::testsupport::TempDir {
+        crate::testsupport::TempDir::new(&format!("spp-shell-lock-{tag}"))
     }
-
     fn cleanup(dir: &Path) {
         let _ = std::fs::remove_dir_all(dir);
     }

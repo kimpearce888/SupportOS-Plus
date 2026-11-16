@@ -1604,21 +1604,12 @@ mod tests {
     use super::*;
     use crate::db::DbHandle;
 
-    fn temp_db() -> DbHandle {
-        let dir = std::env::temp_dir().join(format!(
-            "spp-sync-engine-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or_default()
-        ));
-        std::fs::create_dir_all(&dir).expect("temp dir");
+    fn temp_db() -> (DbHandle, crate::testkit::TempDir) {
+        let dir = crate::testkit::TempDir::new("spp-sync-engine");
         let mut conn = crate::db::open(&dir.join("engine.db")).expect("open db");
         crate::bootstrap::apply_all(&mut conn).expect("migrations");
-        DbHandle::new(conn)
+        (DbHandle::new(conn), dir)
     }
-
     fn empty_engine(db: &DbHandle) -> SyncEngine {
         SyncEngine::new(
             db.clone(),
@@ -1635,7 +1626,7 @@ mod tests {
 
     #[test]
     fn orphaned_run_rows_are_cancelled_after_an_unclean_shutdown() {
-        let db = temp_db();
+        let (db, _scratch) = temp_db();
         db.with_write(|conn| {
             let a = start_run(conn, "initial").expect("run a");
             let _b = start_run(conn, "incremental").expect("run b");
@@ -1686,7 +1677,7 @@ mod tests {
 
     #[test]
     fn r2_engine_refuses_every_sync_against_the_empty_provider() {
-        let db = temp_db();
+        let (db, _scratch) = temp_db();
         db.with_write(|conn| {
             set_state(conn, "LIVE");
         });
@@ -1734,7 +1725,7 @@ mod tests {
 
     #[test]
     fn r2_transition_policy_resets_a_poisoned_empty_session() {
-        let db = temp_db();
+        let (db, _scratch) = temp_db();
         db.with_write(|conn| {
             set_state(conn, "LIVE");
         });
@@ -1745,7 +1736,7 @@ mod tests {
 
     #[test]
     fn r2_transition_policy_keeps_a_healthy_real_session() {
-        let db = temp_db();
+        let (db, _scratch) = temp_db();
         db.with_write(|conn| {
             set_state(conn, "LIVE");
         });
@@ -1762,24 +1753,15 @@ mod tests {
 mod r8_freshness_tests {
     use super::*;
 
-    fn temp_conn() -> Connection {
-        let dir = std::env::temp_dir().join(format!(
-            "spp-freshness-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or_default()
-        ));
-        std::fs::create_dir_all(&dir).expect("temp dir");
+    fn temp_conn() -> (Connection, crate::testkit::TempDir) {
+        let dir = crate::testkit::TempDir::new("spp-freshness");
         let mut conn = crate::db::open(&dir.join("freshness.db")).expect("open db");
         crate::bootstrap::apply_all(&mut conn).expect("migrations");
-        conn
+        (conn, dir)
     }
-
     #[test]
     fn last_sync_age_reflects_the_newest_ok_checkpoint() {
-        let conn = temp_conn();
+        let (conn, _scratch) = temp_conn();
         assert_eq!(
             last_sync_age_seconds(&conn),
             None,

@@ -1189,16 +1189,11 @@ mod tests {
         conn
     }
 
-    fn import_dir(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "spp-import-test-{tag}-{}-{}",
-            std::process::id(),
-            chrono::Utc::now().timestamp_millis()
-        ));
+    fn import_dir(tag: &str) -> crate::testkit::TempDir {
+        let dir = crate::testkit::TempDir::new(&format!("spp-import-test-{tag}"));
         std::fs::create_dir_all(dir.join(IMPORT_DIR_NAME)).expect("import root");
         dir
     }
-
     #[test]
     fn import_rejects_oversized_files_before_reading() {
         let conn = fresh_conn();

@@ -3,7 +3,10 @@
 Read this every session before touching anything. Pairs with `memory.md`
 (durable decisions) and `progress.md` (live state).
 
-**PROGRAM STATE: ALL THREE PROGRAMS CLOSED — Rule 8 STOP**
+**PROGRAM STATE: PROGRAM 4 OPEN — audit-fix closure (R9.1–R9.3)**
+(session 26, 2026-11-16; owner directive "fix everything" after the
+independent post-v1.10.1 audit). Programs 1–3 stay closed; v1.10.1
+remains the published release until R9.3 tags 1.10.2
 (session 25, 2026-11-16). Program 1 (20 sessions / CI runs
 #301–#359), Program 2 (Q-01..Q-06, sessions 21–24 / CI runs
 #360–#383), and Program 3 (R8.1–R8.5, session 25 / CI runs

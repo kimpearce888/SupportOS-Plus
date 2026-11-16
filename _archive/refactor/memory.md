@@ -1298,4 +1298,28 @@ session ends by adding what the next session must not have to rediscover.
   owner wants the standard action labels single-sourced (e.g. design
   consts CANCEL/EDIT/DELETE_LABEL), the fold is mechanical and
   pixel-neutral; recorded here as the standing owner option.
-
+- **D-40 (session 26, R9.1): test scratch dirs become Drop-guarded.**
+  `core::testkit::TempDir` (cfg(test) module #46) + the app-shell
+  `testsupport` twin own test scratch dirs: Deref<Target=Path> +
+  AsRef<Path> + From<&TempDir> for PathBuf keep call sites compiling
+  unchanged; Drop removes the tree (idempotent; manual cleanups stay
+  harmless). The workers family's `temp_db()` returns
+  `(DbHandle, TempDir)` — callers bind `_scratch` — because the dir
+  must outlive the handle. Guards bind at TEST-fn scope anywhere a
+  helper hands the path onward (workers_host lesson). File-based
+  keeps: db temp_db_path (wal/shm cleanup fn exists), settings /
+  credentials key files (removed inline), sandbox m13 probe
+  (deterministic name, no accumulation).
+- **D-41 (session 26, R9.1): the inbox display-cap twin is `ellipsize`
+  now.** D-17 kept the no-trim max-width display cap as a domain
+  variant; the audit flagged the CROSS-CRATE name collision (two
+  different `truncate_chars` fns, trim-vs-notrim, ±1 semantics). Rename
+  in place (`inbox::ellipsize`, industry vocabulary for
+  cut-at-max-plus-ellipsis), policy unchanged, `cap_chars` still the
+  mechanism. `textutil::truncate_chars` remains the trim-first twin.
+- **Session-26 directive note:** owner directive "fix everything"
+  opened Program 4 (R9.1–R9.3) on the independent audit's findings;
+  audit terminal rulings recorded in plan §13 (R8.1 stat typo —
+  immutable history; too_many_arguments migration — not owed;
+  excerpt_of ASCII dots — domain keep; sandbox disk pressure —
+  environmental, no repo action).

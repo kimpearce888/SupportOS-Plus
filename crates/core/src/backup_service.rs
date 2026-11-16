@@ -450,17 +450,9 @@ fn try_export_csv(conn: &Connection, backups_dir: &Path) -> Result<Value> {
 mod tests {
     use super::*;
 
-    fn temp_dir(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "spp-backup-test-{tag}-{}-{}",
-            std::process::id(),
-            chrono::Utc::now().timestamp_millis()
-        ));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).expect("temp dir");
-        dir
+    fn temp_dir(tag: &str) -> crate::testkit::TempDir {
+        crate::testkit::TempDir::new(&format!("spp-backup-test-{tag}"))
     }
-
     fn conn_with_settings() -> Connection {
         let conn = Connection::open_in_memory().expect("in-memory connection");
         conn.execute_batch(
@@ -706,17 +698,9 @@ mod tests {
 mod batch29_audit106_tests {
     use super::*;
 
-    fn csv_temp_dir(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "spp-csv-guard-{tag}-{}-{}",
-            std::process::id(),
-            chrono::Utc::now().timestamp_millis()
-        ));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).expect("temp dir");
-        dir
+    fn csv_temp_dir(tag: &str) -> crate::testkit::TempDir {
+        crate::testkit::TempDir::new(&format!("spp-csv-guard-{tag}"))
     }
-
     #[test]
     fn audit106_csv_export_neutralizes_formula_cells() {
         let dir = csv_temp_dir("csv-guard");

@@ -1,18 +1,10 @@
 use super::*;
 
-fn temp_db() -> crate::db::DbHandle {
-    let dir = std::env::temp_dir().join(format!(
-        "spp-workers-b28-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or_default()
-    ));
-    std::fs::create_dir_all(&dir).expect("temp dir");
+fn temp_db() -> (crate::db::DbHandle, crate::testkit::TempDir) {
+    let dir = crate::testkit::TempDir::new("spp-workers-b28");
     let mut conn = crate::db::open(&dir.join("workers.db")).expect("open db");
     crate::bootstrap::apply_all(&mut conn).expect("migrations");
-    crate::db::DbHandle::new(conn)
+    (crate::db::DbHandle::new(conn), dir)
 }
 
 fn manager(db: &crate::db::DbHandle) -> Arc<WorkerManager> {
@@ -85,7 +77,7 @@ fn jobs_of_kind(db: &crate::db::DbHandle, kind: &str) -> i64 {
 
 #[test]
 fn audit87_rating_upsert_relinks_conversation_customer_on_conflict() {
-    let db = temp_db();
+    let (db, _scratch) = temp_db();
     db.with_write(|conn| {
         let inserted = upsert_rating_row(conn, &rating(501), None, None, None).expect("insert");
         assert!(inserted, "the first upsert is a fresh insert");
@@ -152,7 +144,7 @@ fn audit87_rating_upsert_relinks_conversation_customer_on_conflict() {
 
 #[test]
 fn audit90_post_sync_ai_backfill_covers_every_conversation() {
-    let db = temp_db();
+    let (db, _scratch) = temp_db();
     db.with_write(|conn| {
         crate::settings::set_string(conn, "lmstudio_base_url", "http://127.0.0.1:1234/v1")
             .expect("backend");
@@ -175,7 +167,7 @@ fn audit90_post_sync_ai_backfill_covers_every_conversation() {
 
 #[test]
 fn audit90_post_sync_ai_backfill_skips_deleted_conversations() {
-    let db = temp_db();
+    let (db, _scratch) = temp_db();
     db.with_write(|conn| {
         crate::settings::set_string(conn, "lmstudio_base_url", "http://127.0.0.1:1234/v1")
             .expect("backend");

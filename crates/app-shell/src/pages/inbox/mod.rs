@@ -1383,7 +1383,7 @@ impl InboxPage {
                                     );
                                 });
                                 if !detail.is_empty() {
-                                    design::hint_text(ui, &truncate_chars(detail, 220));
+                                    design::hint_text(ui, &ellipsize(detail, 220));
                                 }
                                 ui.add_space(2.0);
                             }
@@ -1572,7 +1572,7 @@ impl Default for InboxPage {
     }
 }
 
-fn truncate_chars(s: &str, max: usize) -> String {
+fn ellipsize(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
         s.to_string()
     } else {

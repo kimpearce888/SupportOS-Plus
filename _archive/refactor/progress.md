@@ -2297,3 +2297,24 @@ lanes, the no-simulation gate, kittest drift gate).
 - CI: run#301 (id 43227385165) — completed / success on all four lanes
   (check, packages x86_64, packages arm64, kittest snapshot locks).
   R0 terminal; evidence in `complete.md`.
+- PROGRAM 4 OPEN (session 26, R9.1 in flight): audit-fix closure under
+  the owner directive "fix everything".
+
+## session 26 — Program 4 (audit-fix closure)
+
+- R9.1 executed: core::testkit::TempDir Drop-guard (+ app-shell
+  testsupport twin) and the full test-region conversion sweep (28 files:
+  7 workers files + sync_engine + connection_doctor + provider_handle
+  + embeddings + vectorstore + knowledge_store + backup_service +
+  config + bench + data_reset + connectors + search + ai_evidence +
+  core lib.rs, and app-shell: testsupport + single_instance +
+  workers_host + knowledge/settings tests + inbox rename); the inbox
+  `truncate_chars` -> `ellipsize` rename (4 call sites); bench's local
+  TempDirGuard folds into testkit. Net -175 lines. Battery at the exact
+  terminal baselines: gate; unwrap-policy (0/1/0 production, machinery
+  3+1, test-region 2356 exempt, 46 whole-file modules); fmt; clippy x2
+  -D warnings; core 520; core-sandbox 528; app-shell 293; catalog+xtask
+  79; verify-icons; strip-comments 262/262 (testkit counted). The leak
+  check is the new evidence line: ZERO spp-* dirs in /tmp after the
+  full battery (previously ~24+ leaked per run). CI verification on the
+  pushed head to follow.

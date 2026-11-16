@@ -138,7 +138,7 @@ impl InboxPage {
                     ui.label(
                         egui::RichText::new(format!(
                             "resolved with: {}",
-                            truncate_chars(&s.resolution, 160)
+                            ellipsize(&s.resolution, 160)
                         ))
                         .small()
                         .color(design::tokens(ui).muted_foreground),
@@ -163,7 +163,7 @@ impl InboxPage {
                         egui::RichText::new(format!(
                             "• {} — {}",
                             art.name,
-                            truncate_chars(&art.snippet, 120)
+                            ellipsize(&art.snippet, 120)
                         ))
                         .small()
                         .color(design::tokens(ui).muted_foreground),
@@ -377,7 +377,7 @@ impl InboxPage {
             if !starters.is_empty() {
                 ui.horizontal_wrapped(|ui| {
                     for (question, hint) in starters.iter().take(4) {
-                        if design::chip(ui, false, &truncate_chars(question, 34))
+                        if design::chip(ui, false, &ellipsize(question, 34))
                             .on_hover_text(hint)
                             .clicked()
                             && self.assistant_pending.is_none()

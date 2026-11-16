@@ -451,3 +451,51 @@ Terminal condition: every deferred/future-batch note in the ledger
 resolved or terminally ruled; R8.5 published and live-verified;
 Program 3 closing report in complete.md; fresh handover state line.
 CI must be green at every pushed head (invariant 1).
+
+## 13. Program 4 — audit-fix closure (R9.1–R9.3)
+
+Opened session 26 (2026-11-16) on the owner directive "fix everything"
+following the independent post-v1.10.1 audit; the scope is the audit's
+fixable findings. Programs 1–3 stay closed; all constraints, invariants
+(§4), battery (handover §4), and session protocol (§8) carry over
+unchanged.
+
+Batches (one battery-green commit each, D-08):
+
+- **R9.1 (test scratch hygiene + the truncate_chars name collision).**
+  (a) A `TempDir` Drop-guard in `core::testkit` (cfg(test), the 46th
+  whole-file test module) + a twin in app-shell `testsupport`; every
+  test-region scratch-dir creation converts to it (the workers family
+  — which leaked unconditionally, ~24 dirs per battery run — the
+  panic-leakers elsewhere, bench's local guard fold). Verified: zero
+  `spp-*` dirs in /tmp after a full battery. Scope rulings: file-based
+  deterministic-name keeps (db temp_db_path/settings keys/sandbox m13
+  probe) stay manual — bytes, no accumulation; it_helpscout's
+  pass-through temp root stays (production WorkerManager semantics).
+  (b) The inbox display-cap twin renames `truncate_chars` ->
+  `ellipsize` (D-41), killing the cross-crate same-name collision with
+  `textutil::truncate_chars` while preserving D-17's no-trim domain
+  policy; 4 call sites.
+- **R9.2 (root repo presentation).** README.md + LICENSE + CHANGELOG.md
+  surface at the repo root (git mv from _archive; GitHub license
+  detection + landing page); release.yml's changes.md extractor follows
+  the move; the README's stale Verification paragraph refreshes to the
+  current CI truth (xtask gate subcommand; no python scripts); the
+  dangling `!.env.example` gitignore negation (no such file, nothing
+  loads .env) drops.
+- **R9.3 (release).** Version 1.10.2 + CHANGELOG [1.10.2] + tagged
+  release (the audit-fix patch; same drift-safety analysis as R7.6 —
+  the version display lives in shell chrome, kittest-invisible).
+
+Terminal rulings recorded with this program (audit follow-ups, ruled
+not owed): the R8.1 commit-message +435-vs-+447 stat discrepancy is
+unfixable without rewriting pushed history (destructive for a stat
+typo); the 24 `clippy::too_many_arguments` test-arity allows stay
+(struct-param migration churns 24 signatures for zero behavior);
+`excerpt_of`'s ASCII-dots policy and the env-disk risk are documented
+keeps (no repo action).
+
+Terminal condition: every audit finding either fixed (R9.1, R9.2) or
+terminally ruled in the ledger; R9.3 published and live-verified;
+Program 4 closing report in complete.md; fresh handover state line.
+CI must be green at every pushed head (invariant 1).

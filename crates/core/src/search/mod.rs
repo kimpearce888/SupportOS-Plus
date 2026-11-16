@@ -840,7 +840,7 @@ mod batch13_a4_search_tests {
     #[test]
     fn fused_search_with_disabled_index_stays_fts_only() {
         let conn = db_with_conversation();
-        let dir = std::env::temp_dir().join(format!("spp-search-test-{}", std::process::id()));
+        let dir = crate::testkit::TempDir::new("spp-search-test");
         let index = crate::vectorstore_sqlitevec::VectorIndex::new(&dir, false);
         let response = search_with_semantics(
             &conn,

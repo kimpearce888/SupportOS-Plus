@@ -349,10 +349,7 @@ mod tests {
     #[test]
     fn reset_cleans_the_vector_store_when_a_data_dir_is_given() {
         let mut conn = migrated_conn();
-        let dir = std::env::temp_dir().join(format!("spp-purge-vec-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("temp dir");
-
+        let dir = crate::testkit::TempDir::new("spp-purge-vec");
         {
             let store = crate::vectorstore_sqlitevec::SqliteVecStore::open(
                 &crate::vectorstore_sqlitevec::store_dir(&dir).join("vectors.db"),
@@ -386,12 +383,7 @@ mod tests {
     #[test]
     fn audit49_reset_removes_downloaded_attachment_files() {
         let mut conn = migrated_conn();
-        let dir = std::env::temp_dir().join(format!(
-            "spp-purge-att-{}-{}",
-            std::process::id(),
-            chrono::Utc::now().timestamp_millis()
-        ));
-        let _ = std::fs::remove_dir_all(&dir);
+        let dir = crate::testkit::TempDir::new("spp-purge-att");
         let attachments = dir.join("attachments");
         std::fs::create_dir_all(&attachments).expect("attachments dir");
         let file_a = attachments.join("12-34-invoice.pdf");

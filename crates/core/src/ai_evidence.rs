@@ -865,7 +865,7 @@ mod batch13_a4_evidence_tests {
     #[test]
     fn semantic_hits_empty_without_routed_embed_role() {
         let (conn, conv) = db_with_conversation();
-        let dir = std::env::temp_dir().join(format!("spp-evidence-test-{}", std::process::id()));
+        let dir = crate::testkit::TempDir::new("spp-evidence-test");
         let index = crate::vectorstore_sqlitevec::VectorIndex::new(&dir, true);
         let hits = semantic_hits(&conn, &index, conv, 5);
         assert!(hits.is_empty(), "no embedding model means no semantic lane");
@@ -883,7 +883,7 @@ mod batch13_a4_evidence_tests {
     fn semantic_hits_respect_the_feature_gate() {
         let (conn, conv) = db_with_conversation();
         crate::settings::set_bool(&conn, "ai_feature_retrieval_enabled", false).expect("gate");
-        let dir = std::env::temp_dir().join(format!("spp-evidence-gate-{}", std::process::id()));
+        let dir = crate::testkit::TempDir::new("spp-evidence-gate");
         let index = crate::vectorstore_sqlitevec::VectorIndex::new(&dir, true);
         let hits = semantic_hits(&conn, &index, conv, 5);
         assert!(hits.is_empty(), "the kill switch dominates the lane");

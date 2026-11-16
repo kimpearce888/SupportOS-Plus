@@ -8,19 +8,11 @@ fn secrets_guard() -> std::sync::MutexGuard<'static, ()> {
         .unwrap_or_else(|p| p.into_inner())
 }
 
-fn temp_db() -> crate::db::DbHandle {
-    let dir = std::env::temp_dir().join(format!(
-        "spp-workers-b27-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or_default()
-    ));
-    std::fs::create_dir_all(&dir).expect("temp dir");
+fn temp_db() -> (crate::db::DbHandle, crate::testkit::TempDir) {
+    let dir = crate::testkit::TempDir::new("spp-workers-b27");
     let mut conn = crate::db::open(&dir.join("workers.db")).expect("open db");
     crate::bootstrap::apply_all(&mut conn).expect("migrations");
-    crate::db::DbHandle::new(conn)
+    (crate::db::DbHandle::new(conn), dir)
 }
 
 fn manager_with(
@@ -58,7 +50,7 @@ fn run_one_tick(manager: &Arc<WorkerManager>) {
 
 #[test]
 fn draft_article_missing_candidate_fails_the_real_job_row() {
-    let db = temp_db();
+    let (db, _scratch) = temp_db();
     let manager = manager_with(
         &db,
         Arc::new(crate::helpscout::EmptyHelpScoutProvider::new()),
@@ -79,7 +71,7 @@ fn draft_article_missing_candidate_fails_the_real_job_row() {
 
 #[test]
 fn fetch_hs_report_unknown_key_fails_the_real_job_row() {
-    let db = temp_db();
+    let (db, _scratch) = temp_db();
     let manager = manager_with(
         &db,
         Arc::new(crate::helpscout::EmptyHelpScoutProvider::new()),
@@ -109,7 +101,7 @@ fn fetch_hs_report_unknown_key_fails_the_real_job_row() {
 fn rating_fetch_failure_requeues_the_job_instead_of_swallowing() {
     let _secrets = secrets_guard();
     crate::settings::set_master_key_for_tests([27u8; 32]);
-    let db = temp_db();
+    let (db, _scratch) = temp_db();
     let mock = crate::mockserver::MockServer::start(std::sync::Arc::new(
         |req: &MockRequest| -> MockResponse {
             if req.method == "GET" && req.path == "/v2/ratings/501" {
@@ -165,7 +157,7 @@ fn rating_fetch_failure_requeues_the_job_instead_of_swallowing() {
 
 #[test]
 fn panicking_job_fails_terminally_instead_of_requeueing() {
-    let db = temp_db();
+    let (db, _scratch) = temp_db();
     let manager = manager_with(
         &db,
         Arc::new(crate::helpscout::EmptyHelpScoutProvider::new()),

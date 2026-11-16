@@ -1,23 +1,15 @@
 use super::*;
 
-fn temp_db() -> crate::db::DbHandle {
-    let dir = std::env::temp_dir().join(format!(
-        "spp-workers-autosync-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or_default()
-    ));
-    std::fs::create_dir_all(&dir).expect("temp dir");
+fn temp_db() -> (crate::db::DbHandle, crate::testkit::TempDir) {
+    let dir = crate::testkit::TempDir::new("spp-workers-auto");
     let mut conn = crate::db::open(&dir.join("workers.db")).expect("open db");
     crate::bootstrap::apply_all(&mut conn).expect("migrations");
-    crate::db::DbHandle::new(conn)
+    (crate::db::DbHandle::new(conn), dir)
 }
 
 #[test]
 fn auto_sync_skips_the_empty_provider_and_stamps_nothing() {
-    let db = temp_db();
+    let (db, _scratch) = temp_db();
     db.with_write(|conn| crate::sync_engine::set_state(conn, "LIVE"));
     let engine = Arc::new(crate::sync_engine::SyncEngine::new(
         db.clone(),

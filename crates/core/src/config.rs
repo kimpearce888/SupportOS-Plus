@@ -213,22 +213,10 @@ pub fn load_env_config() -> EnvConfig {
 #[cfg(test)]
 mod migrate_tests {
     use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
 
-    fn temp_root(tag: &str) -> PathBuf {
-        let unique = format!(
-            "spp-migrate-{tag}-{}-{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("clock")
-                .as_nanos()
-        );
-        let dir = std::env::temp_dir().join(unique);
-        std::fs::create_dir_all(&dir).expect("temp root");
-        dir
+    fn temp_root(tag: &str) -> crate::testkit::TempDir {
+        crate::testkit::TempDir::new(&format!("spp-migrate-{tag}"))
     }
-
     fn seed_legacy(root: &Path) -> PathBuf {
         let legacy = root.join(LEGACY_DATA_DIR_NAME);
         let vectors = legacy.join("vectors");

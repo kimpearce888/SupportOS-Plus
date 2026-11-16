@@ -414,16 +414,11 @@ fn audp2_reindex_resets_exhausted_chunks_and_requeues_embedding() {
     );
 }
 
-fn temp_data_dir(label: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "spp-knowledge-import-{label}-{}",
-        std::process::id()
-    ));
-    let _ = std::fs::remove_dir_all(&dir);
+fn temp_data_dir(label: &str) -> crate::testsupport::TempDir {
+    let dir = crate::testsupport::TempDir::new(&format!("spp-knowledge-import-{label}"));
     std::fs::create_dir_all(dir.join("knowledge-import")).expect("temp data dir");
     dir
 }
-
 fn write_import_file(dir: &Path, name: &str, body: &str) {
     std::fs::write(dir.join("knowledge-import").join(name), body).expect("seed file");
 }
@@ -515,7 +510,7 @@ fn import_panel_lists_only_importable_files() {
     std::fs::write(dir.join("knowledge-import").join("virus.exe"), b"x").expect("seed");
 
     let mut page = KnowledgePage::new();
-    page.set_data_dir(dir.clone());
+    page.set_data_dir(dir.path().to_path_buf());
     page.reload_importable();
 
     let files = page.import.files.clone().expect("files loaded");
@@ -535,7 +530,7 @@ fn import_file_action_updates_page_state() {
     write_import_file(&dir, "note.md", "hello");
 
     let mut page = KnowledgePage::new();
-    page.set_data_dir(dir);
+    page.set_data_dir(dir.path().to_path_buf());
     page.reload_all(&db);
     assert!(page.documents.is_empty());
 

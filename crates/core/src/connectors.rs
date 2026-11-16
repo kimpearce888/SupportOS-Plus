@@ -1059,13 +1059,7 @@ mod audp12_tests {
     #[test]
     fn audp12_refresh_emits_the_completion_event() {
         let handle = db();
-        let dir = std::env::temp_dir().join(format!(
-            "spp-audp12-refresh-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(0)
-        ));
+        let dir = crate::testkit::TempDir::new("spp-audp12-refresh");
         std::fs::create_dir_all(dir.join("connectors")).expect("dir");
         std::fs::write(
             dir.join("connectors/ledger.csv"),

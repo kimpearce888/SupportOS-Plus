@@ -1,18 +1,10 @@
 use super::*;
 
-fn temp_db() -> crate::db::DbHandle {
-    let dir = std::env::temp_dir().join(format!(
-        "spp-workers-b20-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or_default()
-    ));
-    std::fs::create_dir_all(&dir).expect("temp dir");
+fn temp_db() -> (crate::db::DbHandle, crate::testkit::TempDir) {
+    let dir = crate::testkit::TempDir::new("spp-workers-b20");
     let mut conn = crate::db::open(&dir.join("workers.db")).expect("open db");
     crate::bootstrap::apply_all(&mut conn).expect("migrations");
-    crate::db::DbHandle::new(conn)
+    (crate::db::DbHandle::new(conn), dir)
 }
 
 fn manager(db: &crate::db::DbHandle) -> Arc<WorkerManager> {
@@ -48,7 +40,7 @@ fn ai_job_count(db: &crate::db::DbHandle) -> i64 {
 
 #[test]
 fn audp17_no_backend_configured_means_no_ai_jobs() {
-    let db = temp_db();
+    let (db, _scratch) = temp_db();
     db.with_write(|conn| {
         conn.execute(
             "INSERT INTO conversations (remote_id, number, subject, preview, status)
@@ -84,7 +76,7 @@ fn audp17_no_backend_configured_means_no_ai_jobs() {
 
 #[test]
 fn audp17_a_configured_backend_restores_the_fan_out() {
-    let db = temp_db();
+    let (db, _scratch) = temp_db();
     db.with_write(|conn| {
         conn.execute(
             "INSERT INTO conversations (remote_id, number, subject, preview, status)
@@ -107,7 +99,7 @@ fn audp17_a_configured_backend_restores_the_fan_out() {
 
 #[test]
 fn audit22_rebuild_activity_is_enqueued_after_initial_sync() {
-    let db = temp_db();
+    let (db, _scratch) = temp_db();
     let manager = manager(&db);
     manager.on_after_initial_sync();
     assert_eq!(
@@ -119,7 +111,7 @@ fn audit22_rebuild_activity_is_enqueued_after_initial_sync() {
 
 #[test]
 fn audit22_repair_runs_once_and_only_for_existing_mirrors() {
-    let db = temp_db();
+    let (db, _scratch) = temp_db();
 
     db.with_write(|conn| enqueue_activity_rebuild_repair_once(conn));
     assert_eq!(rebuild_activity_jobs(&db), 0, "nothing to rebuild yet");

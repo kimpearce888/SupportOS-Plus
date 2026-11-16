@@ -1,18 +1,10 @@
 use super::*;
 
-fn temp_db() -> crate::db::DbHandle {
-    let dir = std::env::temp_dir().join(format!(
-        "spp-workers-audp2rec-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or_default()
-    ));
-    std::fs::create_dir_all(&dir).expect("temp dir");
+fn temp_db() -> (crate::db::DbHandle, crate::testkit::TempDir) {
+    let dir = crate::testkit::TempDir::new("spp-workers-audp2r");
     let mut conn = crate::db::open(&dir.join("workers.db")).expect("open db");
     crate::bootstrap::apply_all(&mut conn).expect("migrations");
-    crate::db::DbHandle::new(conn)
+    (crate::db::DbHandle::new(conn), dir)
 }
 
 fn runtime() -> tokio::runtime::Runtime {
@@ -24,7 +16,7 @@ fn runtime() -> tokio::runtime::Runtime {
 
 #[test]
 fn audp25_scheduled_reconcile_skips_the_empty_provider_quietly() {
-    let db = temp_db();
+    let (db, _scratch) = temp_db();
     let engine = Arc::new(crate::sync_engine::SyncEngine::new(
         db.clone(),
         Arc::new(crate::helpscout::EmptyHelpScoutProvider::new()),
@@ -50,7 +42,7 @@ fn audp25_scheduled_reconcile_skips_the_empty_provider_quietly() {
 
 #[test]
 fn audp25_scheduled_reconcile_defers_while_a_sync_is_running() {
-    let db = temp_db();
+    let (db, _scratch) = temp_db();
     let engine = Arc::new(crate::sync_engine::SyncEngine::new(
         db.clone(),
         Arc::new(crate::helpscout::EmptyHelpScoutProvider::new()),
@@ -82,7 +74,7 @@ fn audp25_scheduled_reconcile_defers_while_a_sync_is_running() {
 
 #[test]
 fn audp25_reconcile_interval_setting_clamps_and_disables() {
-    let db = temp_db();
+    let (db, _scratch) = temp_db();
     let read = |key: &str, default: i64| {
         db.with_read(|conn| {
             crate::settings::get_i64(conn, key, default)

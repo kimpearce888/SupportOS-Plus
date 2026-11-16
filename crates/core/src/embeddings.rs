@@ -906,19 +906,9 @@ mod batch20_audit21_tests {
     use super::*;
     use rusqlite::Connection;
 
-    fn temp_data_dir(tag: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "spp-embed-audit21-{tag}-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("clock")
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&dir).expect("create temp dir");
-        dir
+    fn temp_data_dir(tag: &str) -> crate::testkit::TempDir {
+        crate::testkit::TempDir::new(&format!("spp-embed-audit21-{tag}"))
     }
-
     fn pre_v2_db() -> Connection {
         let mut conn = Connection::open_in_memory().expect("db");
         crate::bootstrap::apply_all(&mut conn).expect("migrations");
@@ -1282,19 +1272,9 @@ mod batch24_audit46_tests {
     use super::*;
     use rusqlite::Connection;
 
-    fn temp_data_dir(tag: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "spp-embed-audit46-{tag}-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("clock")
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&dir).expect("create temp dir");
-        dir
+    fn temp_data_dir(tag: &str) -> crate::testkit::TempDir {
+        crate::testkit::TempDir::new(&format!("spp-embed-audit46-{tag}"))
     }
-
     fn db_with_two_pending_chunks() -> Connection {
         let mut conn = Connection::open_in_memory().expect("db");
         crate::bootstrap::apply_all(&mut conn).expect("migrations");
@@ -1540,19 +1520,9 @@ mod audp18_tests {
         conn
     }
 
-    fn temp_data_dir(tag: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "spp-embed-audp18-{tag}-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or_default()
-        ));
-        std::fs::create_dir_all(&dir).expect("temp dir");
-        dir
+    fn temp_data_dir(tag: &str) -> crate::testkit::TempDir {
+        crate::testkit::TempDir::new(&format!("spp-embed-audp18-{tag}"))
     }
-
     fn healthy_handler() -> std::sync::Arc<
         dyn Fn(&crate::mockserver::MockRequest) -> crate::mockserver::MockResponse + Send + Sync,
     > {

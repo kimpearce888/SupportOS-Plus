@@ -142,21 +142,17 @@ impl Drop for WorkersHost {
 mod tests {
     use super::*;
 
-    fn temp_data_dir(label: &str) -> PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("spp-workers-host-{label}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("temp data dir");
-        dir
+    fn temp_data_dir(label: &str) -> crate::testsupport::TempDir {
+        crate::testsupport::TempDir::new(&format!("spp-workers-host-{label}"))
     }
 
-    fn start_host(db: DbHandle) -> WorkersHost {
+    fn start_host(db: DbHandle, dir: &crate::testsupport::TempDir) -> WorkersHost {
         WorkersHost::start(
             db,
             None,
             Arc::new(spp_core::helpscout::EmptyHelpScoutProvider::new()),
             EventBus::default(),
-            temp_data_dir("boot"),
+            dir.path().to_path_buf(),
             None,
         )
         .expect("worker host starts")
@@ -165,7 +161,8 @@ mod tests {
     #[test]
     fn host_starts_the_manager_and_drops_stop_it() {
         let db = crate::testsupport::empty_db();
-        let host = start_host(db);
+        let scratch = temp_data_dir("boot");
+        let host = start_host(db, &scratch);
         assert!(
             host.manager().is_running(),
             "the manager must report running right after host start"
@@ -181,7 +178,8 @@ mod tests {
     #[test]
     fn restart_rearms_the_timers() {
         let db = crate::testsupport::empty_db();
-        let host = start_host(db);
+        let scratch = temp_data_dir("boot");
+        let host = start_host(db, &scratch);
         host.restart();
         assert!(
             host.manager().is_running(),

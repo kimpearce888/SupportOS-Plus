@@ -112,6 +112,8 @@ mod it_loopback;
 mod it_sync;
 #[cfg(test)]
 mod mockserver;
+#[cfg(test)]
+mod testkit;
 
 pub use error::{Error, Result};
 

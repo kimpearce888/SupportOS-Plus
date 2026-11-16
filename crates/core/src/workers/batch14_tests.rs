@@ -8,19 +8,11 @@ fn secrets_guard() -> std::sync::MutexGuard<'static, ()> {
         .unwrap_or_else(|p| p.into_inner())
 }
 
-fn temp_db() -> crate::db::DbHandle {
-    let dir = std::env::temp_dir().join(format!(
-        "spp-workers-b14-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or_default()
-    ));
-    std::fs::create_dir_all(&dir).expect("temp dir");
+fn temp_db() -> (crate::db::DbHandle, crate::testkit::TempDir) {
+    let dir = crate::testkit::TempDir::new("spp-workers-b14");
     let mut conn = crate::db::open(&dir.join("workers.db")).expect("open db");
     crate::bootstrap::apply_all(&mut conn).expect("migrations");
-    crate::db::DbHandle::new(conn)
+    (crate::db::DbHandle::new(conn), dir)
 }
 
 fn creds_for(
@@ -122,7 +114,7 @@ fn seed_approved_draft(db: &crate::db::DbHandle) -> (i64, i64) {
 fn publish_job_runs_the_full_chain_and_verifies() {
     let _secrets = secrets_guard();
     crate::settings::set_master_key_for_tests([11u8; 32]);
-    let db = temp_db();
+    let (db, _scratch) = temp_db();
     let mock = crate::mockserver::MockServer::start(docs_router()).expect("mock");
     let provider = crate::helpscout_real::RealHelpScoutProvider::new(
         db.clone(),
@@ -227,7 +219,7 @@ fn publish_job_runs_the_full_chain_and_verifies() {
 fn publish_job_refuses_an_unapproved_draft() {
     let _secrets = secrets_guard();
     crate::settings::set_master_key_for_tests([12u8; 32]);
-    let db = temp_db();
+    let (db, _scratch) = temp_db();
     let mock = crate::mockserver::MockServer::start(docs_router()).expect("mock");
     let provider = crate::helpscout_real::RealHelpScoutProvider::new(
         db.clone(),
@@ -285,7 +277,7 @@ fn publish_job_refuses_an_unapproved_draft() {
 fn fetch_hs_report_job_classifies_capability() {
     let _secrets = secrets_guard();
     crate::settings::set_master_key_for_tests([13u8; 32]);
-    let db = temp_db();
+    let (db, _scratch) = temp_db();
     let mock = crate::mockserver::MockServer::start(std::sync::Arc::new(
         |req: &MockRequest| -> MockResponse {
             match req.path.as_str() {
@@ -361,7 +353,7 @@ fn fetch_hs_report_job_classifies_capability() {
 
 #[test]
 fn fetch_hs_report_job_records_not_connected() {
-    let db = temp_db();
+    let (db, _scratch) = temp_db();
     let manager = manager_with(
         &db,
         Arc::new(crate::helpscout::EmptyHelpScoutProvider::new()),
@@ -387,7 +379,7 @@ fn fetch_hs_report_job_records_not_connected() {
 
 #[test]
 fn draft_article_job_skips_without_a_routed_backend() {
-    let db = temp_db();
+    let (db, _scratch) = temp_db();
     let manager = manager_with(
         &db,
         Arc::new(crate::helpscout::EmptyHelpScoutProvider::new()),
@@ -412,7 +404,7 @@ fn draft_article_job_skips_without_a_routed_backend() {
 fn weekly_digest_job_writes_the_narrative_end_to_end() {
     let _secrets = secrets_guard();
     crate::settings::set_master_key_for_tests([15u8; 32]);
-    let db = temp_db();
+    let (db, _scratch) = temp_db();
     let mock = crate::mockserver::MockServer::start(std::sync::Arc::new(
         |req: &MockRequest| -> MockResponse {
             if req.method == "POST" && req.path == "/v1/chat/completions" {
@@ -485,7 +477,7 @@ fn weekly_digest_job_writes_the_narrative_end_to_end() {
 fn satisfaction_ratings_job_fetches_and_stores_the_rating() {
     let _secrets = secrets_guard();
     crate::settings::set_master_key_for_tests([14u8; 32]);
-    let db = temp_db();
+    let (db, _scratch) = temp_db();
     let mock = crate::mockserver::MockServer::start(std::sync::Arc::new(
         |req: &MockRequest| -> MockResponse {
             if req.method == "GET" && req.path == "/v2/ratings/501" {

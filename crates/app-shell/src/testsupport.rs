@@ -1,3 +1,44 @@
+pub(crate) struct TempDir {
+    path: std::path::PathBuf,
+}
+
+impl TempDir {
+    #[must_use = "the scratch dir is removed when the guard drops"]
+    pub(crate) fn new(prefix: &str) -> Self {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or_default();
+        let path = std::env::temp_dir().join(format!("{prefix}-{}-{nanos}", std::process::id()));
+        std::fs::create_dir_all(&path).expect("temp dir");
+        Self { path }
+    }
+
+    pub(crate) fn path(&self) -> &std::path::Path {
+        &self.path
+    }
+}
+
+impl std::ops::Deref for TempDir {
+    type Target = std::path::Path;
+
+    fn deref(&self) -> &std::path::Path {
+        &self.path
+    }
+}
+
+impl AsRef<std::path::Path> for TempDir {
+    fn as_ref(&self) -> &std::path::Path {
+        &self.path
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
+}
+
 use spp_core::db::DbHandle;
 
 pub(crate) fn empty_db() -> DbHandle {

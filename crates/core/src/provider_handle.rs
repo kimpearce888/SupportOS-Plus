@@ -441,21 +441,12 @@ impl HelpScoutProvider for ProviderHandle {
 mod tests {
     use super::*;
 
-    fn temp_db() -> crate::db::DbHandle {
-        let dir = std::env::temp_dir().join(format!(
-            "spp-provider-handle-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or_default()
-        ));
-        std::fs::create_dir_all(&dir).expect("temp dir");
+    fn temp_db() -> (crate::db::DbHandle, crate::testkit::TempDir) {
+        let dir = crate::testkit::TempDir::new("spp-provider-handle");
         let mut conn = crate::db::open(&dir.join("handle.db")).expect("open db");
         crate::bootstrap::apply_all(&mut conn).expect("migrations");
-        crate::db::DbHandle::new(conn)
+        (crate::db::DbHandle::new(conn), dir)
     }
-
     fn real_provider(
         db: &crate::db::DbHandle,
     ) -> Arc<crate::helpscout_real::RealHelpScoutProvider> {
@@ -484,7 +475,7 @@ mod tests {
 
     #[test]
     fn activate_real_swaps_every_view_in_place() {
-        let db = temp_db();
+        let (db, _scratch) = temp_db();
         let handle = Arc::new(ProviderHandle::new_empty());
         let provider_view: Arc<dyn HelpScoutProvider> = Arc::clone(&handle) as _;
         assert_eq!(HelpScoutProvider::kind(provider_view.as_ref()), "empty");
@@ -500,7 +491,7 @@ mod tests {
 
     #[test]
     fn deactivate_swaps_back_and_reports_the_previous_kind() {
-        let db = temp_db();
+        let (db, _scratch) = temp_db();
         let handle = ProviderHandle::new_real(real_provider(&db));
         assert_eq!(handle.kind(), ProviderKind::Real);
         let previous = handle.deactivate();
@@ -511,7 +502,7 @@ mod tests {
 
     #[test]
     fn real_handle_delegates_docs_configured_false_without_key() {
-        let db = temp_db();
+        let (db, _scratch) = temp_db();
         let handle = ProviderHandle::new_real(real_provider(&db));
         assert!(
             !handle.docs_configured(),

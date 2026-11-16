@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -17,24 +16,8 @@ const VECTOR_DIM: usize = 384;
 const N_VECTOR_POINTS: usize = 3_000;
 const PAGE_SIZE: usize = 50;
 
-fn temp_bench_dir(label: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "spp-bench-{label}-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0)
-    ));
-    std::fs::create_dir_all(&dir).expect("bench dir");
-    dir
-}
-
-struct TempDirGuard(PathBuf);
-impl Drop for TempDirGuard {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
+fn temp_bench_dir(label: &str) -> crate::testkit::TempDir {
+    crate::testkit::TempDir::new(&format!("spp-bench-{label}"))
 }
 
 fn pseudo_vec(seed: u64, dim: usize) -> Vec<f32> {
@@ -370,7 +353,6 @@ fn timeit<T>(label: &str, f: impl FnOnce() -> T) -> (std::time::Duration, T) {
 #[ignore = "diagnostic; run with --ignored --nocapture"]
 fn bench_diagnose_write_path() {
     let dir = temp_bench_dir("diag");
-    let _guard = TempDirGuard(dir.clone());
     let db_path = dir.join("diag.db");
     let mut conn = crate::db::open(&db_path).expect("open");
     crate::bootstrap::apply_all(&mut conn).expect("migrations");
@@ -504,7 +486,6 @@ fn seeded_bench_db(dir: &std::path::Path) -> DbHandle {
 #[ignore = "performance measurement; run with --ignored --nocapture"]
 fn bench_db_operations_on_large_dataset() {
     let dir = temp_bench_dir("db");
-    let _guard = TempDirGuard(dir.clone());
     let db = seeded_bench_db(&dir);
 
     let threads: i64 = db
@@ -713,7 +694,6 @@ fn bench_db_operations_on_large_dataset() {
 #[ignore = "performance measurement; run with --ignored --nocapture"]
 fn bench_boot_migrations_on_fresh_db() {
     let dir = temp_bench_dir("migrate");
-    let _guard = TempDirGuard(dir.clone());
     let db_path = dir.join("fresh.db");
     let (t, _) = timeit("db::open + apply_all (fresh file DB)", || {
         let mut conn = crate::db::open(&db_path).expect("open");

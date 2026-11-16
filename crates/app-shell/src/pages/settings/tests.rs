@@ -444,15 +444,7 @@ fn r3_saving_credentials_activates_the_provider_in_session() {
 
 #[test]
 fn restore_backup_lands_a_verified_file_and_refuses_junk() {
-    let tmp = std::env::temp_dir().join(format!(
-        "spp-restore-page-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis())
-            .unwrap_or(0)
-    ));
-    std::fs::create_dir_all(&tmp).expect("tmp dir");
+    let tmp = crate::testsupport::TempDir::new("spp-restore-page");
     let db_path = tmp.join("live.db");
     let mut file_conn = rusqlite::Connection::open(&db_path).expect("file db");
     spp_core::bootstrap::apply_all(&mut file_conn).expect("migrations");

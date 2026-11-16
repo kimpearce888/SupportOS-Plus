@@ -635,19 +635,9 @@ mod tests {
     use super::*;
     use crate::vectorstore::Filter;
 
-    fn temp_data_dir(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "spp-sqlitevec-test-{tag}-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("clock")
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&dir).expect("create temp dir");
-        dir
+    fn temp_data_dir(tag: &str) -> crate::testkit::TempDir {
+        crate::testkit::TempDir::new(&format!("spp-sqlitevec-test-{tag}"))
     }
-
     fn point(id: i64, vector: Vec<f32>, entity_type: &str, entity_id: i64) -> Point {
         Point {
             id: id.to_string(),
@@ -661,13 +651,13 @@ mod tests {
         }
     }
 
-    fn seeded_store(tag: &str, dim: usize) -> (PathBuf, SqliteVecStore) {
+    fn seeded_store(tag: &str, dim: usize) -> (PathBuf, crate::testkit::TempDir, SqliteVecStore) {
         let dir = temp_data_dir(tag);
         let store = SqliteVecStore::open_default(&dir).expect("open store");
         store
             .create_collection(VECTOR_COLLECTION, Some(dim))
             .expect("create collection");
-        (dir, store)
+        (dir.path().to_path_buf(), dir, store)
     }
 
     fn count_payload_rows(dir: &std::path::Path, entity_type: &str) -> usize {
@@ -704,7 +694,7 @@ mod tests {
 
     #[test]
     fn dimension_mismatch_is_an_error_and_rebuild_is_explicit() {
-        let (_dir, store) = seeded_store("dims", 2);
+        let (_dir, _scratch, store) = seeded_store("dims", 2);
         let err = store
             .upsert(VECTOR_COLLECTION, point(1, vec![1.0, 2.0, 3.0], "x", 1))
             .expect_err("3-dim vector into 2-dim collection must fail");
@@ -721,7 +711,7 @@ mod tests {
 
     #[test]
     fn knn_search_orders_by_cosine_similarity() {
-        let (_dir, store) = seeded_store("knn", 2);
+        let (_dir, _scratch, store) = seeded_store("knn", 2);
         store
             .upsert(VECTOR_COLLECTION, point(1, vec![1.0, 0.0], "a", 1))
             .expect("upsert");
@@ -744,7 +734,7 @@ mod tests {
 
     #[test]
     fn search_filter_post_filters_on_payload() {
-        let (_dir, store) = seeded_store("filter", 2);
+        let (_dir, _scratch, store) = seeded_store("filter", 2);
         store
             .upsert(
                 VECTOR_COLLECTION,
@@ -827,7 +817,7 @@ mod tests {
 
     #[test]
     fn audit60_prune_family_except_removes_only_orphans_of_that_family() {
-        let (dir, store) = seeded_store("prune60", 2);
+        let (dir, _scratch, store) = seeded_store("prune60", 2);
         for (point_id, entity_id) in [(1, 100), (2, 100), (3, 101)] {
             store
                 .upsert(
@@ -929,7 +919,7 @@ mod tests {
 
     #[test]
     fn audit21_namespaced_point_ids_keep_chunk_families_apart() {
-        let (dir, store) = seeded_store("audit21-ns", 2);
+        let (dir, _scratch, store) = seeded_store("audit21-ns", 2);
         let knowledge_id = namespaced_chunk_point_id("knowledge_chunk", 7).expect("namespaced id");
         let conversation_id =
             namespaced_chunk_point_id("conversation_chunk", 7).expect("namespaced id");
@@ -975,7 +965,7 @@ mod tests {
 
     #[test]
     fn audit21_cross_family_point_id_overwrite_is_refused() {
-        let (_dir, store) = seeded_store("audit21-guard", 2);
+        let (_dir, _scratch, store) = seeded_store("audit21-guard", 2);
         store
             .upsert(
                 VECTOR_COLLECTION,
