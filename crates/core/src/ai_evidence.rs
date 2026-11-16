@@ -764,12 +764,9 @@ fn parse_epoch_millis(s: &str) -> i64 {
         }
         if f == "%Y-%m-%d"
             && let Ok(d) = chrono::NaiveDate::parse_from_str(s, f)
+            && let Some(midnight) = d.and_hms_opt(0, 0, 0)
         {
-            return d
-                .and_hms_opt(0, 0, 0)
-                .expect("midnight is always a valid time")
-                .and_utc()
-                .timestamp_millis();
+            return midnight.and_utc().timestamp_millis();
         }
     }
     0
