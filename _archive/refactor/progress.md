@@ -10,21 +10,22 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 - **PROGRAM 2 OPEN** (session 21, 2026-11-15) — owner override
   "complete anything ignored and skipped"; operative task list is
   plan §11 (Q-01..Q-06 execution). Program 1 stays closed; every
-  protocol carries over. **CURRENT POINTER: R7.4-b (8 class-C
-  post-condition sites: live_chats 111, embeddings 813,
-  webhook 29, ai_pipeline 1109/1740/1744, support_graph 277,
-  workers/execute 524 — RE-CENSUS ai_pipeline at edit time: the
-  truncation scanner sees only 1 of its 3 census lines in the
-  prod region)**. Done: R7.1 (f9c568c), R7.2 (e62bf08),
-  R7.3 (10c3cde,
+  protocol carries over. **CURRENT POINTER: R7.4-c (3 class-D
+  bootstrap sites: workers/mod.rs:30 tokio runtime, task_bridge.rs:41
+  thread spawn, design/mod.rs:239 font family — startup error
+  handling per the plan letter)**. Done: R7.1 (f9c568c), R7.2
+  (e62bf08), R7.3 (10c3cde,
   CI run#361), R7.4-a/1 sandbox (05f7006, run#362), R7.4-a/2
   security cluster (6c9538a, run#364), R7.4-a/3 coaching cluster
   (dd9c3da, run#366), R7.4-a/4 interaction_engine (c391955,
   run#368), R7.4-a/5 quality cluster (e721e39 + fmt fix
   8c6dab2, runs #370-fail/#371-green), R7.4-a/6 ai_evidence
-  midnight (c540871, run#373) — **CLASS A COMPLETE: zero
-  class-A sites tree-wide; prod_expect 13 -> 12 (r25 series;
-  truncation scanner 11)**. Then R7.4-c -> R7.5 -> R7.6.
+  midnight (c540871, run#373) — CLASS A COMPLETE — R7.4-b
+  class-C post-conditions (4d91080, run#375; prod_expect 12 -> 6
+  r25-series / 5 truncation: the census's 8 included 2
+  cfg(test)-region digest sites — 6 production sites converted;
+  remaining 5 truncation = class D 3 + D-14 keeps 2).
+  Then R7.5 -> R7.6.
 - Last program-1 head `6dd8c8b` CI-green (run#360, all four lanes —
   verified this session before Program 2 opened). Session counter
   resets for Program 2: session 1 of Program 2 = session 21 overall.
@@ -496,6 +497,41 @@ lanes, the no-simulation gate, kittest drift gate).
   commits (2 batch + 1 fmt fix + 1 addendum) + this addendum;
   CI runs #369-#373 (one mid-batch fmt failure #370 — root
   cause + G-21 recorded). Next: R7.4-b.
+- R7.4-b executed (class-C post-conditions; FRESH census
+  found the ledger's 8 = 6 PRODUCTION + 2 cfg(test)-region
+  sites — ai_pipeline 1743/1747 sit inside #[cfg(test)] fn
+  digest_row, D-10, not production; the truncation scanner's
+  per-file 1 was right): (1) webhook.rs:29 HMAC fold into
+  the signature-invalid channel (.map_err(|_| Error::
+  WebhookSignature)?); (2) support_graph node_specs type-level
+  correspondence — [(GraphNodeKind, &str); 12] with variant
+  values, parse().expect deleted; (3) workers/execute 524 the
+  R3.4-noted TYPE-SHAPE FIX: customer_thread_trigger_decision
+  -> Option<(&'static str, i64)> bundling the thread id into
+  the decision; caller destructures; expect deleted; 5
+  batch25 test arms assert tuples (D-10); (4) embeddings 813
+  the quality-629 Map recipe (Map::new + 8 inserts +
+  conditional 9th + Value::Object wrap); (5) ai_pipeline
+  1111 .ok_or_else(|| LmStudioError::new("draft row missing
+  after insert", false)) — never-taken None carries an honest
+  non-retryable message; (6) live_chats 111 let-else +
+  spinner fallback (the fn's own later let-else precedent),
+  counter hoisted, the header closure captures &counter only
+  — pixel-neutral on the reachable path, KITTEST-VERIFIED in
+  CI (run#375 drift gate green). Battery green at exact
+  baselines: gate, clippy workspace (48s) + sandbox (35s),
+  core 520 (450s), core-sandbox 528 (457s), app-shell 293+2
+  (276s), catalog+xtask 56, verify-icons, strip 259/259,
+  fmt --check green (G-21 applied: fmt --all after the edits;
+  the hand-formatted inserts were rewrapped). Census:
+  prod_expect 12 -> 6 (r25 series) / 11 -> 5 (truncation).
+- CI verification: run#374 (id 43780751768) GREEN on 311e52a
+  (docs-only addendum). Run#375 (id 43785468832) GREEN on
+  4d91080, all four lanes (check incl. deny, packages x86_64,
+  packages arm64, kittest drift gate — the live_chats
+  restructure is pixel-verified). Session-22 total: 7 commits
+  (3 batch + 1 fmt fix + 3 addenda incl. this one); CI runs
+  #369-#375. Next: R7.4-c (3 class-D bootstrap sites).
 
 ### Session 21 — 2026-11-15
 - Maintenance pre-flight (program-1-closed protocol): re-cloned via
