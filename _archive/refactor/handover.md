@@ -3,15 +3,17 @@
 Read this every session before touching anything. Pairs with `memory.md`
 (durable decisions) and `progress.md` (live state).
 
-**PROGRAM STATE: BOTH PROGRAMS CLOSED — Rule 8 STOP** (session 24,
-2026-11-16). Program 1 (20 sessions / CI runs #301–#359) and Program 2
-(Q-01..Q-06, sessions 21–24 / CI runs #360–#383) are both terminal;
-their closing reports live in `complete.md`. **v1.10.0 is published**
-(tag `v1.10.0`, target `2f8a192`, Release run#38 all-6-jobs green,
-post-publish live-verified: BUILD-INFO version/commit match, both
-binary assets HTTP 200, SHA256SUMS present). The queue is empty — new
-work opens only on an owner directive. Steps 1–3 below still apply at
-every session start.
+**PROGRAM STATE: PROGRAM 3 OPEN — residue closure (plan §12)**
+(session 25, 2026-11-16, owner directive "finish everything, take
+the most logical decision to complete everything"). Programs 1
+(20 sessions / CI runs #301–#359) and 2 (Q-01..Q-06, sessions
+21–24 / CI runs #360–#383) stay closed; their closing reports
+live in `complete.md`. v1.10.0 is published (tag `v1.10.0`, target
+`2f8a192`, live-verified). Program 3 executes the residue audit's
+findings: R8.1 truncation fold, R8.2 dt_cell fold, R8.3 title
+ruling, R8.4 mooted-option annotation, R8.5 version 1.10.1 +
+tagged release. Steps 1–3 below still apply at every session
+start.
 
 ## 1. What this project is (and is not)
 

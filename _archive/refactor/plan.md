@@ -411,3 +411,43 @@ Batches (one battery-green commit each, D-08):
 Terminal condition: Q-01..Q-06 all closed in complete.md; new
 final metrics recorded against the §6 baseline; fresh handover
 state line. CI must be green at every pushed head (invariant 1).
+
+## 12. Program 3 — residue closure (R8.1–R8.5)
+
+Opened: session 25 (2026-11-16) by owner directive ("finish
+everything, take the most logical decision to complete
+everything") — the residue audit's findings are the scope. Programs
+1 and 2 stay closed; all constraints, invariants (§4), battery
+(handover §4), and session protocol (§8) carry over unchanged.
+
+Batches (one battery-green commit each, D-08):
+
+- **R8.1 (D-18's deferred truncation-idiom note, resolved).**
+  Census-first (line-level AND text-level — the multiline chains
+  are invisible to a line scanner): fold the char-safe truncation
+  MECHANISM into `textutil` (the existing text-mechanism home):
+  `pub fn cap_chars` + the two census-discovered twin folds
+  (`truncate_chars` = notifications/sweep pair, `excerpt` =
+  interaction_signals/extraction pair). Domain variants stay
+  (D-17); test-region and xtask-machinery sites stay (D-10/D-14).
+- **R8.2 (R4.1's deferred dt_cell note, resolved).** The three
+  byte-identical private copies (customers/incidents/organizations)
+  fold to one `pub(crate) fn dt_cell` in `design` beside
+  `data_table`; call sites qualify `design::dt_cell`; the CI
+  kittest drift gate is the verifier (pixel-neutral by
+  construction).
+- **R8.3 (D-19(a), terminally ruled).** The page-title label()
+  consolidation is REJECTED under the directive's most-logical
+  test: threading PageKey through 20+ ui() signatures for
+  byte-identical output is indirection without abstraction
+  (D-23); the proven intentional divergences stand.
+- **R8.4 (ledger hygiene).** The gate-docstring owner option is
+  recorded MOOTED by R7.5 (scripts/ deleted; the option's object
+  no longer exists).
+- **R8.5 (release).** Version 1.10.1 + CHANGELOG + tagged release
+  (the residue-closure patch; same drift-safety analysis as R7.6).
+
+Terminal condition: every deferred/future-batch note in the ledger
+resolved or terminally ruled; R8.5 published and live-verified;
+Program 3 closing report in complete.md; fresh handover state line.
+CI must be green at every pushed head (invariant 1).

@@ -82,7 +82,7 @@ pub mod sla;
 pub mod support_graph;
 pub mod sync_engine;
 pub(crate) mod sync_schema;
-pub(crate) mod textutil;
+pub mod textutil;
 pub mod ticket_ops;
 pub mod ticket_states;
 pub mod translation;

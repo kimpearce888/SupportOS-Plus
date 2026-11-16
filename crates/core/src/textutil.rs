@@ -86,6 +86,33 @@ pub(crate) fn html_to_text(html: &str) -> String {
     out
 }
 
+#[must_use]
+pub fn cap_chars(s: &str, cap: usize) -> String {
+    s.chars().take(cap).collect()
+}
+
+#[must_use]
+pub(crate) fn truncate_chars(s: &str, max: usize) -> String {
+    let t = s.trim();
+    if t.chars().count() > max {
+        let cut = cap_chars(t, max.saturating_sub(1));
+        format!("{cut}…")
+    } else {
+        t.to_string()
+    }
+}
+
+#[must_use]
+pub(crate) fn excerpt(text: &str, max_len: usize) -> String {
+    let clean: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if clean.chars().count() <= max_len {
+        clean
+    } else {
+        let head = cap_chars(&clean, max_len - 3);
+        format!("{head}…")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

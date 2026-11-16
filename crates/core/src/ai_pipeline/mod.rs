@@ -20,6 +20,7 @@ use crate::business_hours::now_iso;
 use crate::crypto::hex;
 use crate::error::Result;
 use crate::search::apply_fts_migration;
+use crate::textutil::cap_chars;
 
 mod interaction;
 pub(crate) use interaction::{analyze_interaction, build_interaction_strategy_block};
@@ -395,7 +396,7 @@ pub(crate) fn complete_run_with_usage(
 }
 
 pub(crate) fn fail_run(conn: &Connection, id: i64, error: &str) -> Result<()> {
-    let capped: String = error.chars().take(2000).collect();
+    let capped: String = cap_chars(error, 2000);
     conn.execute(
         "UPDATE ai_runs SET status='failed', error=?2, completed_at=datetime('now') WHERE id=?1",
         params![id, capped],
@@ -1342,11 +1343,10 @@ pub(crate) async fn extract_memories(
             let body_html: Option<String> = r.get(2)?;
             let body: Option<String> = r.get(3)?;
             let author = from_name.or(kind).unwrap_or_else(|| "unknown".into());
-            let text: String =
-                crate::textutil::html_to_text(&body_html.or(body).unwrap_or_default())
-                    .chars()
-                    .take(1200)
-                    .collect();
+            let text: String = cap_chars(
+                &crate::textutil::html_to_text(&body_html.or(body).unwrap_or_default()),
+                1200,
+            );
             Ok((author, text))
         },
     ) {
@@ -1464,12 +1464,7 @@ pub(crate) async fn cluster_issues(
                 ClusterConversation {
                     number: r.get(1)?,
                     subject: r.get::<_, Option<String>>(2)?.unwrap_or_default(),
-                    preview: r
-                        .get::<_, Option<String>>(3)?
-                        .unwrap_or_default()
-                        .chars()
-                        .take(200)
-                        .collect(),
+                    preview: cap_chars(&r.get::<_, Option<String>>(3)?.unwrap_or_default(), 200),
                     tags: r
                         .get::<_, Option<String>>(4)?
                         .unwrap_or_default()

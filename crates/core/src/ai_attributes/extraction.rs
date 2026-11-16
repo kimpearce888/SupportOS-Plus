@@ -1,4 +1,5 @@
 use super::*;
+use crate::textutil::{cap_chars, excerpt};
 
 pub(crate) const ATTRIBUTE_EXTRACTION_PROMPT_VERSION: &str = "attribute_extraction_v1";
 
@@ -42,7 +43,7 @@ pub(crate) fn customer_messages(
         })?
         .filter_map(|row| row.ok())
         .map(|m| {
-            let text: String = m.text.chars().take(1200).collect();
+            let text: String = cap_chars(&m.text, 1200);
             CustomerMessage {
                 thread_local_id: m.thread_local_id,
                 text,
@@ -242,7 +243,7 @@ fn merge_extraction(records: &mut Vec<AttributeRecord>, attrs: &[Value], ai_run_
         }
         let evidence = match excerpt {
             Some(e) => vec![json!({
-                "excerpt": e.chars().take(500).collect::<String>(),
+                "excerpt": cap_chars(e, 500),
                 "thread_local_id": obj
                     .get("evidence_thread_local_id")
                     .and_then(Value::as_i64),
@@ -310,7 +311,7 @@ fn normalize_ai_value(key: AiAttributeKey, value: &str) -> Option<String> {
     if key.value_type() == AttributeValueType::Enum && !key.values().contains(&v) {
         return None;
     }
-    Some(v.chars().take(300).collect())
+    Some(cap_chars(v, 300))
 }
 
 fn build_extraction_user(
@@ -325,7 +326,7 @@ fn build_extraction_user(
             |r| r.get(0),
         )
         .unwrap_or_default();
-    let subject: String = subject.chars().take(300).collect();
+    let subject: String = cap_chars(&subject, 300);
     let mut parts = vec![
         format!("SUBJECT: {subject}"),
         "CUSTOMER MESSAGES (oldest first):".into(),
@@ -500,16 +501,6 @@ fn find_evidence(messages: &[CustomerMessage], hit: impl Fn(&str) -> bool) -> Op
         }
     }
     None
-}
-
-fn excerpt(text: &str, max_len: usize) -> String {
-    let clean: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    if clean.chars().count() <= max_len {
-        clean
-    } else {
-        let head: String = clean.chars().take(max_len - 3).collect();
-        format!("{head}\u{2026}")
-    }
 }
 
 fn is_word_byte(b: u8) -> bool {
@@ -850,7 +841,7 @@ pub(crate) fn deterministic_records(
     if let Some(name) = cluster {
         out.push(AttributeRecord {
             key: AiAttributeKey::IssueCluster,
-            value: name.chars().take(300).collect(),
+            value: cap_chars(&name, 300),
             confidence: "medium",
             source: "deterministic",
             evidence: Vec::new(),

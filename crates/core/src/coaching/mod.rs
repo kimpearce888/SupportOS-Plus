@@ -6,6 +6,7 @@ use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::error::{Error, Result};
+use crate::textutil::cap_chars;
 
 pub(crate) const COACHING_NOTE: &str = "Advisory only - coaching never blocks or modifies the send. Every finding cites its evidence; heuristics are labeled as heuristics.";
 const PROMPT_VERSION: &str = "agent_coaching_v1";
@@ -433,8 +434,8 @@ fn coerce_ai_layer(content: &str) -> Option<Value> {
         match claims {
             Some(c) if c.is_object() => json!({
                 "verdict": verdict_of(&c["verdict"], &["none", "possible", "likely"]).unwrap_or_else(|| "possible".into()),
-                "reasoning": c.get("reasoning").and_then(|v| v.as_str()).unwrap_or("").chars().take(500).collect::<String>(),
-                "excerpt": c.get("excerpt").and_then(|v| v.as_str()).unwrap_or("").chars().take(EXCERPT_CAP).collect::<String>(),
+                "reasoning": cap_chars(c.get("reasoning").and_then(|v| v.as_str()).unwrap_or(""), 500),
+                "excerpt": cap_chars(c.get("excerpt").and_then(|v| v.as_str()).unwrap_or(""), EXCERPT_CAP),
             }),
             _ => Value::Null,
         },
@@ -444,8 +445,8 @@ fn coerce_ai_layer(content: &str) -> Option<Value> {
         match context {
             Some(c) if c.is_object() => json!({
                 "verdict": verdict_of(&c["verdict"], &["no", "possible", "yes"]).unwrap_or_else(|| "possible".into()),
-                "reasoning": c.get("reasoning").and_then(|v| v.as_str()).unwrap_or("").chars().take(500).collect::<String>(),
-                "excerpt": c.get("excerpt").and_then(|v| v.as_str()).unwrap_or("").chars().take(EXCERPT_CAP).collect::<String>(),
+                "reasoning": cap_chars(c.get("reasoning").and_then(|v| v.as_str()).unwrap_or(""), 500),
+                "excerpt": cap_chars(c.get("excerpt").and_then(|v| v.as_str()).unwrap_or(""), EXCERPT_CAP),
             }),
             _ => Value::Null,
         },
@@ -535,7 +536,7 @@ async fn compute_ai_layer(
         .take(8)
         .rev()
         .map(|t| {
-            let text: String = t.text.chars().take(700).collect();
+            let text: String = cap_chars(&t.text, 700);
             let who = if t.kind == "customer" {
                 "CUSTOMER"
             } else if t.kind == "reply" {
@@ -564,7 +565,7 @@ async fn compute_ai_layer(
         "RECENT MESSAGES:".to_string(),
         recent.join("\n"),
         "DRAFT TO REVIEW:".to_string(),
-        draft.chars().take(6000).collect::<String>(),
+        cap_chars(draft, 6000),
         "Respond with the JSON object only.".to_string(),
     ]
     .join("\n");
@@ -789,7 +790,7 @@ pub(crate) async fn review_draft(
         params![
             conversation_id,
             draft_sha256,
-            trimmed.chars().take(300).collect::<String>(),
+            cap_chars(trimmed, 300),
             serde_json::to_string(&deterministic_only).unwrap_or_else(|_| "[]".into()),
             ai_stored,
             ai_run_id,

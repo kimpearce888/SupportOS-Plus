@@ -5,6 +5,7 @@ use rusqlite::Connection;
 use serde_json::Value;
 use spp_core::db::DbHandle;
 use spp_core::sync_engine::SyncEngine;
+use spp_core::textutil::cap_chars;
 
 use super::{ConfirmRequest, NavRequest, i64_field, str_field};
 use crate::design::{self, BadgeTone, ButtonVariant};
@@ -1100,7 +1101,7 @@ impl KnowledgePage {
                         self.gaps
                             .iter()
                             .find(|(gid, _)| *gid == id)
-                            .map(|(_, q)| q.chars().take(60).collect::<String>())
+                            .map(|(_, q)| cap_chars(q, 60))
                     })
                     .unwrap_or_else(|| "Select a gap…".into());
                 egui::ComboBox::from_id_salt("k2-gap-pick")
@@ -1108,7 +1109,7 @@ impl KnowledgePage {
                     .width(ui.available_width() - 140.0)
                     .show_ui(ui, |ui| {
                         for (id, question) in &self.gaps {
-                            let label: String = question.chars().take(80).collect();
+                            let label: String = cap_chars(question, 80);
                             ui.selectable_value(&mut self.gap_pick, Some(*id), label);
                         }
                     })
@@ -1264,11 +1265,9 @@ impl KnowledgePage {
                                     .strong(),
                                 );
                                 ui.label(
-                                    egui::RichText::new(
-                                        excerpt.chars().take(220).collect::<String>(),
-                                    )
-                                    .small()
-                                    .color(ui.visuals().weak_text_color()),
+                                    egui::RichText::new(cap_chars(excerpt, 220))
+                                        .small()
+                                        .color(ui.visuals().weak_text_color()),
                                 );
                                 ui.add_space(4.0);
                             }

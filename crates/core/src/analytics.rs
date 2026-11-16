@@ -1,6 +1,7 @@
 use serde_json::{Value, json};
 
 use crate::json_fields::json_string;
+use crate::textutil::cap_chars;
 
 pub fn why_contacting_impl(conn: &rusqlite::Connection, days: i64) -> Vec<Value> {
     let rows: Vec<(String, i64)> = crate::db::query_rows(
@@ -578,7 +579,7 @@ fn radar_extensions(conn: &rusqlite::Connection, clusters: &[RadarCluster]) -> V
                         "{} of {} conversations started within one 7-day window starting {}. Temporal clustering suggests something changed - possibly a release - but this is an association, not a causal claim.{} {}",
                         best_count,
                         jds.len(),
-                        truncate_chars(start_date, 10),
+                        cap_chars(start_date, 10),
                         release_note,
                         c.summary
                     ),
@@ -670,10 +671,6 @@ fn radar_extensions(conn: &rusqlite::Connection, clusters: &[RadarCluster]) -> V
     }
 
     alerts
-}
-
-fn truncate_chars(s: &str, n: usize) -> String {
-    s.chars().take(n).collect()
 }
 
 #[cfg(test)]

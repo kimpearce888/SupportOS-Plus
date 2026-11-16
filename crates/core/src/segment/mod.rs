@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::search::escape_like;
+use crate::textutil::cap_chars;
 use rusqlite::{Connection, params};
 use serde_json::{Value, json};
 
@@ -715,7 +716,7 @@ impl<'a> SegmentEngine<'a> {
             Err(e) => {
                 tracing::warn!(
                     error = %e,
-                    sql = sql.chars().take(300).collect::<String>(),
+                    sql = cap_chars(sql, 300),
                     "SegmentEngine::ids: prepare failed — returning empty result"
                 );
                 return Vec::new();
@@ -728,7 +729,7 @@ impl<'a> SegmentEngine<'a> {
             .unwrap_or_else(|e| {
                 tracing::warn!(
                     error = %e,
-                    sql = sql.chars().take(300).collect::<String>(),
+                    sql = cap_chars(sql, 300),
                     "SegmentEngine::ids: query_map failed — returning empty result"
                 );
                 Vec::new()

@@ -6,6 +6,7 @@ use crate::ai_provider::{ChatMessage, LocalAiProvider};
 use crate::catalog::{AI_ATTRIBUTE_SCHEMA_VERSION, AiAttributeKey, AttributeValueType};
 use crate::error::{Error, Result};
 use crate::sync_schema::table_exists;
+use crate::textutil::cap_chars;
 
 pub(crate) const M033_SQL: &str = r#"
     CREATE TABLE IF NOT EXISTS ai_attributes (
@@ -245,7 +246,7 @@ fn insert_record(
     let evidence = {
         let s = serde_json::to_string(&r.evidence)
             .map_err(|e| Error::Config(format!("evidence serialization failed: {e}")))?;
-        s.chars().take(4000).collect::<String>()
+        cap_chars(&s, 4000)
     };
     tx.execute(
         "INSERT INTO ai_attributes

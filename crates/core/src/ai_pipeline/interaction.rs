@@ -1,4 +1,5 @@
 use super::*;
+use crate::textutil::cap_chars;
 pub(crate) fn build_interaction_strategy_block(
     conn: &Connection,
     conversation_local_id: i64,
@@ -441,11 +442,7 @@ pub(crate) async fn analyze_interaction(
                 .as_deref()
                 .map(crate::textutil::html_to_text)
                 .unwrap_or_default();
-            (
-                h.number,
-                h.subject.as_deref(),
-                excerpt.chars().take(240).collect(),
-            )
+            (h.number, h.subject.as_deref(), cap_chars(&excerpt, 240))
         })
         .collect();
     let recent_history: Vec<(i64, Option<&str>, &str)> = recent_history

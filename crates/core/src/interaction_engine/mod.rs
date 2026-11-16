@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::{Error, Result};
 use crate::interaction_signals::{CurrentInteraction, InteractionSignal, MessageStats};
 use crate::quality::is_closing_acknowledgment;
+use crate::textutil::cap_chars;
 
 mod baseline;
 pub use baseline::build_profile;
@@ -1079,7 +1080,7 @@ pub(crate) fn record_observations_for(
         .ok();
     let observed_at = conv_date
         .filter(|d| !d.is_empty())
-        .map(|d| d.replace('T', " ").chars().take(19).collect::<String>())
+        .map(|d| cap_chars(&d.replace('T', " "), 19))
         .unwrap_or_else(|| chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string());
     let rows: Vec<ObservationRow> = current
         .signals

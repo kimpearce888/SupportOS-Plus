@@ -1,4 +1,5 @@
 use super::*;
+use spp_core::textutil::cap_chars;
 
 #[derive(Clone, Copy)]
 enum ToolAction {
@@ -75,7 +76,7 @@ impl InboxPage {
         }
         let mut last_day: Option<String> = None;
         for entry in &detail.thread {
-            let day: String = entry.created_at.chars().take(10).collect();
+            let day: String = cap_chars(&entry.created_at, 10);
             if last_day.as_deref() != Some(day.as_str()) {
                 ui.add_space(design::scale::space::SP2);
                 design::day_divider(ui, &day);
@@ -217,7 +218,7 @@ impl InboxPage {
                 );
             }
             Some(ToolAction::Translate) => {
-                let text: String = self.composer_body.chars().take(8000).collect();
+                let text: String = cap_chars(&self.composer_body, 8000);
                 self.enqueue_composer_ai(
                     db,
                     "translate_composer",

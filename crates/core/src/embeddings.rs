@@ -1,6 +1,7 @@
 use rusqlite::{Connection, params};
 
 use crate::error::{Error, Result};
+use crate::textutil::cap_chars;
 
 pub(crate) fn apply_m008(conn: &Connection) -> Result<()> {
     conn.execute_batch(
@@ -463,7 +464,7 @@ pub(crate) async fn embed_texts(
     if !res.status().is_success() {
         let status = res.status();
         let text = res.text().await.unwrap_or_default();
-        let truncated: String = text.chars().take(300).collect();
+        let truncated: String = cap_chars(&text, 300);
         return Err(Error::Config(format!(
             "LM Studio embedding request failed (HTTP {status}): {truncated}"
         )));

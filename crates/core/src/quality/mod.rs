@@ -4,6 +4,7 @@ use serde_json::{Value, json};
 use crate::business_hours::now_iso;
 use crate::error::{Error, Result};
 use crate::migrations::add_column_if_missing;
+use crate::textutil::cap_chars;
 
 mod qa_ai;
 pub(crate) use qa_ai::compute_qa_ai_layer;
@@ -104,7 +105,7 @@ fn excerpt_of(text: &str, max: usize) -> String {
     if t.chars().count() <= max {
         t
     } else {
-        let cut: String = t.chars().take(max).collect();
+        let cut: String = cap_chars(&t, max);
         format!("{cut}...")
     }
 }
@@ -349,14 +350,14 @@ fn insert_gap_candidate(
     document_ids: &[i64],
     detail: Value,
 ) -> bool {
-    let normalized: String = question
-        .to_lowercase()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .chars()
-        .take(300)
-        .collect();
+    let normalized: String = cap_chars(
+        &question
+            .to_lowercase()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" "),
+        300,
+    );
     let dedup_key = format!("{kind}:{normalized}");
     let evidence: Vec<i64> = conversation_ids.iter().take(50).copied().collect();
     let docs: Vec<i64> = document_ids.iter().take(20).copied().collect();
@@ -442,7 +443,7 @@ pub(crate) fn rebuild_gaps(conn: &Connection, days: i64) -> Result<(usize, usize
                 &[],
                 json!({
                     "explanation": format!("\"{}\" was asked in {} conversations and produced zero knowledge-base hits.",
-                        q.question.chars().take(120).collect::<String>(), q.count),
+                        cap_chars(&q.question, 120), q.count),
                     "method": "Repeated primary questions (latest ticket_analysis runs) matched against the local FTS knowledge index; 0 hits.",
                     "first_seen": first_seen,
                     "last_seen": last_seen
@@ -464,7 +465,7 @@ pub(crate) fn rebuild_gaps(conn: &Connection, days: i64) -> Result<(usize, usize
                 &[],
                 json!({
                     "explanation": format!("\"{}\" has {} knowledge hit(s), yet {} of {} asking conversations still showed clarification or follow-up friction - the existing answer did not resolve it.",
-                        q.question.chars().take(120).collect::<String>(), hits, friction_count, q.count),
+                        cap_chars(&q.question, 120), hits, friction_count, q.count),
                     "method": "Cross of repeated questions with the interaction engine clarification/follow-up counts over the same conversations; association, not causation.",
                     "first_seen": first_seen,
                     "last_seen": last_seen
@@ -537,7 +538,7 @@ pub(crate) fn rebuild_gaps(conn: &Connection, days: i64) -> Result<(usize, usize
                 &[doc_id],
                 json!({
                     "explanation": format!("\"{}\" is troubleshooting-shaped, and the closest document (\"{}\") contains no step structure (no numbered steps, no step markers).",
-                        q.question.chars().take(120).collect::<String>(), title),
+                        cap_chars(&q.question, 120), title),
                     "closest_document_title": title,
                     "method": "Troubleshooting-shaped question detection + step-structure regex over the closest FTS-matching document. A heuristic; the document may simply use prose.",
                     "first_seen": first_seen,
@@ -585,7 +586,7 @@ pub(crate) fn rebuild_gaps(conn: &Connection, days: i64) -> Result<(usize, usize
                 &[],
                 json!({
                     "explanation": format!("Issue \"{}\" groups {} conversations and has no covering documentation.",
-                        title.chars().take(120).collect::<String>(), count),
+                        cap_chars(&title, 120), count),
                     "issue_label": title,
                     "method": "Issue clusters (>= 3 conversations) matched against the local FTS knowledge index; 0 hits.",
                     "first_seen": first_seen,
@@ -1335,7 +1336,7 @@ pub(crate) fn compute_qa_deterministic(
                 if joined_k.contains(&span) {
                     repeated.push(json!({
                         "thread_id": tid,
-                        "excerpt": span.chars().take(120).collect::<String>()
+                        "excerpt": cap_chars(&span, 120)
                     }));
                     break;
                 }

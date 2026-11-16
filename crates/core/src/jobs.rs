@@ -1,6 +1,7 @@
 use rusqlite::{Connection, params};
 
 use crate::error::{Error, Result};
+use crate::textutil::cap_chars;
 
 pub(crate) fn ensure_jobs_table(conn: &Connection) -> Result<()> {
     conn.execute_batch(
@@ -180,7 +181,7 @@ pub fn fail(conn: &Connection, id: i64, error: &str, retryable: bool) -> Result<
         ));
     };
 
-    let error: String = error.chars().take(1000).collect();
+    let error: String = cap_chars(error, 1000);
     let can_retry = retryable && attempt < max_attempts;
     if !can_retry {
         conn.execute(
@@ -333,8 +334,8 @@ pub(crate) fn record_outbound_attempt(
     response_body: Option<&str>,
     latency_ms: Option<i64>,
 ) -> Result<()> {
-    let summary: String = summary.chars().take(500).collect();
-    let body: Option<String> = response_body.map(|b| b.chars().take(2000).collect());
+    let summary: String = cap_chars(summary, 500);
+    let body: Option<String> = response_body.map(|b| cap_chars(b, 2000));
     conn.execute(
         "INSERT INTO outbound_attempts (outbound_job_id, attempt, request_summary,
              status_code, response_body, latency_ms)

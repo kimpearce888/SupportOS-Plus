@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::catalog::NotificationType;
 use crate::error::Result;
+use crate::textutil::truncate_chars;
 
 pub(crate) fn apply_m005(conn: &Connection) -> Result<()> {
     conn.execute_batch(
@@ -401,16 +402,6 @@ fn row_to_notification(r: &rusqlite::Row<'_>) -> rusqlite::Result<NotificationRe
         read_at: r.get(15)?,
         payload: r.get(16)?,
     })
-}
-
-fn truncate_chars(s: &str, max: usize) -> String {
-    let t = s.trim();
-    if t.chars().count() > max {
-        let cut: String = t.chars().take(max.saturating_sub(1)).collect();
-        format!("{cut}…")
-    } else {
-        t.to_string()
-    }
 }
 
 #[cfg(test)]

@@ -1,4 +1,5 @@
 use super::*;
+use crate::textutil::cap_chars;
 
 fn clamp_limit(args: &serde_json::Map<String, Value>) -> i64 {
     let n = arg_i64(args, "limit").unwrap_or(5);
@@ -23,7 +24,7 @@ fn redact(conn: &Connection, text: &str) -> Result<String> {
 }
 
 fn redact_chars(conn: &Connection, text: &str, n: usize) -> Result<String> {
-    let taken: String = text.chars().take(n).collect();
+    let taken: String = cap_chars(text, n);
     redact(conn, &taken)
 }
 
@@ -94,13 +95,12 @@ fn tool_search_conversations(
     args: &serde_json::Map<String, Value>,
     limit: i64,
 ) -> Result<Value> {
-    let q: String = args
-        .get("query")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .chars()
-        .take(200)
-        .collect();
+    let q: String = cap_chars(
+        args.get("query")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+        200,
+    );
     let hits = crate::search::search_conversations(
         conn,
         &q,
@@ -134,13 +134,12 @@ fn tool_search_knowledge(
     args: &serde_json::Map<String, Value>,
     limit: i64,
 ) -> Result<Value> {
-    let q: String = args
-        .get("query")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .chars()
-        .take(200)
-        .collect();
+    let q: String = cap_chars(
+        args.get("query")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+        200,
+    );
     let hits = crate::search::search_knowledge(conn, &q, None, limit).unwrap_or_default();
     let results: Vec<Value> = hits
         .iter()
@@ -160,13 +159,12 @@ fn tool_search_known_issues(
     args: &serde_json::Map<String, Value>,
     limit: i64,
 ) -> Result<Value> {
-    let q: String = args
-        .get("query")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .chars()
-        .take(200)
-        .collect();
+    let q: String = cap_chars(
+        args.get("query")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+        200,
+    );
     let hits = crate::search::search_known_issues(conn, &q, limit).unwrap_or_default();
     let results: Vec<Value> = hits
         .iter()
@@ -187,13 +185,12 @@ fn tool_search_saved_replies(
     args: &serde_json::Map<String, Value>,
     limit: i64,
 ) -> Result<Value> {
-    let q: String = args
-        .get("query")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .chars()
-        .take(200)
-        .collect();
+    let q: String = cap_chars(
+        args.get("query")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+        200,
+    );
     let hits = crate::search::search_saved_replies(conn, &q, limit).unwrap_or_default();
     let results: Vec<Value> = hits
         .iter()
@@ -359,10 +356,7 @@ fn tool_get_conversation_context(
     let msgs: Vec<Value> = messages
         .iter()
         .map(|(author, kind, date, body)| {
-            let text: String = crate::textutil::html_to_text(body)
-                .chars()
-                .take(700)
-                .collect();
+            let text: String = cap_chars(&crate::textutil::html_to_text(body), 700);
             let text = redact(conn, &text)?;
             Ok(json!({
                 "author": author,
@@ -502,13 +496,12 @@ fn tool_get_issue_clusters(
     args: &serde_json::Map<String, Value>,
     limit: i64,
 ) -> Result<Value> {
-    let q: String = args
-        .get("query")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .chars()
-        .take(200)
-        .collect();
+    let q: String = cap_chars(
+        args.get("query")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+        200,
+    );
     let like = format!(
         "%{}%",
         q.replace('\\', "\\\\")
@@ -754,14 +747,13 @@ fn tool_search_incidents(
     args: &serde_json::Map<String, Value>,
     limit: i64,
 ) -> Value {
-    let q: String = args
-        .get("query")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .chars()
-        .take(200)
-        .collect::<String>()
-        .to_lowercase();
+    let q: String = cap_chars(
+        args.get("query")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+        200,
+    )
+    .to_lowercase();
     let rows: Vec<Value> = conn
         .prepare(
             "SELECT i.id, i.code, i.title, i.status, i.severity, i.product, i.feature,
@@ -820,17 +812,16 @@ fn tool_search_custom_objects(
     args: &serde_json::Map<String, Value>,
     limit: i64,
 ) -> Result<Value> {
-    let q: String = args
-        .get("query")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .chars()
-        .take(200)
-        .collect();
+    let q: String = cap_chars(
+        args.get("query")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+        200,
+    );
     let type_slug = args
         .get("type")
         .and_then(Value::as_str)
-        .map(|s| s.chars().take(60).collect::<String>());
+        .map(|s| cap_chars(s, 60));
     let type_id: Option<i64> = type_slug.as_deref().and_then(|slug| {
         conn.query_row(
             "SELECT id FROM custom_object_types WHERE slug = ?1 AND deleted_at IS NULL",
@@ -954,24 +945,22 @@ fn tool_search_connector_data(
     args: &serde_json::Map<String, Value>,
     limit: i64,
 ) -> Result<Value> {
-    let connector_name: String = args
-        .get("connector")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .chars()
-        .take(80)
-        .collect();
+    let connector_name: String = cap_chars(
+        args.get("connector")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+        80,
+    );
     if connector_name.is_empty() {
         return Ok(json!({ "error": "Invalid connector name" }));
     }
-    let q: String = args
-        .get("query")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .chars()
-        .take(200)
-        .collect::<String>()
-        .to_lowercase();
+    let q: String = cap_chars(
+        args.get("query")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+        200,
+    )
+    .to_lowercase();
     let row = conn
         .query_row(
             "SELECT id, name, allowed_ai, enabled FROM connectors WHERE name = ?1",
@@ -1043,7 +1032,7 @@ fn tool_get_knowledge_gaps(
     let kind_filter = args
         .get("kind")
         .and_then(Value::as_str)
-        .map(|s| s.chars().take(60).collect::<String>());
+        .map(|s| cap_chars(s, 60));
     let rows: Vec<GapRow> = conn
         .prepare(
             "SELECT id, kind, query_text, occurrence_count, status, detail

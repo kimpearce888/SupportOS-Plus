@@ -2,6 +2,7 @@ use rusqlite::{Connection, params};
 use serde_json::{Value, json};
 
 use crate::error::Result;
+use crate::textutil::cap_chars;
 
 pub fn list_organizations(
     conn: &Connection,
@@ -485,7 +486,7 @@ pub fn get_customer_detail(conn: &Connection, customer_id: i64) -> Result<Option
             Ok(json!({
                 "number": r.get::<_, i64>(0)?,
                 "subject": r.get::<_, Option<String>>(1)?,
-                "resolution": resolution.map(|res| res.chars().take(400).collect::<String>()),
+                "resolution": resolution.map(|res| cap_chars(&res, 400)),
                 "closed_at": r.get::<_, Option<String>>(3)?,
             }))
         })?

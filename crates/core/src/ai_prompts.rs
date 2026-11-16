@@ -1,3 +1,4 @@
+use crate::textutil::cap_chars;
 use serde::{Deserialize, Serialize};
 
 pub(crate) const PROMPT_VERSIONS_TICKET_ANALYSIS: &str = "ticket_analysis_v1";
@@ -528,7 +529,7 @@ pub(crate) fn build_interaction_observation_user(
             format!(
                 "[thread {}] {}",
                 tid.map(|i| i.to_string()).unwrap_or_else(|| "?".into()),
-                text.chars().take(900).collect::<String>()
+                cap_chars(text, 900)
             )
         })
         .collect::<Vec<_>>()
@@ -551,7 +552,7 @@ pub(crate) fn build_interaction_observation_user(
                 format!(
                     "#{number} {}: {}",
                     subject.unwrap_or(""),
-                    excerpt.chars().take(200).collect::<String>()
+                    cap_chars(excerpt, 200)
                 )
             })
             .collect::<Vec<_>>()

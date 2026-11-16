@@ -4,6 +4,7 @@ use super::{ConfirmRequest, NavRequest};
 use eframe::egui;
 use spp_core::ai_attributes::AttributeDistribution;
 use spp_core::db::DbHandle;
+use spp_core::textutil::cap_chars;
 
 use crate::design::{self, BadgeTone, ButtonVariant};
 use crate::icons::Icon;
@@ -561,13 +562,13 @@ impl AiCenterPage {
                 ui.horizontal_wrapped(|ui| {
                     for session in self.copilot_sessions.clone() {
                         let id = session.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
-                        let title: String = session
-                            .get("title")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("(untitled)")
-                            .chars()
-                            .take(60)
-                            .collect();
+                        let title: String = cap_chars(
+                            session
+                                .get("title")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("(untitled)"),
+                            60,
+                        );
                         let count = session
                             .get("message_count")
                             .and_then(|v| v.as_i64())
@@ -628,13 +629,13 @@ impl AiCenterPage {
                         ui.horizontal(|ui| {
                             design::hint_text(ui, "cited:");
                             for citation in citations.iter().take(6) {
-                                let label: String = citation
-                                    .get("label")
-                                    .and_then(|l| l.as_str())
-                                    .unwrap_or("source")
-                                    .chars()
-                                    .take(48)
-                                    .collect();
+                                let label: String = cap_chars(
+                                    citation
+                                        .get("label")
+                                        .and_then(|l| l.as_str())
+                                        .unwrap_or("source"),
+                                    48,
+                                );
                                 design::badge(ui, &label, BadgeTone::Success);
                             }
                         });

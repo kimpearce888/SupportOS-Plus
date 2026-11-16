@@ -7,6 +7,12 @@ session updates this file before ending. Statuses: `pending` /
 
 ## CURRENT POINTER
 
+- **PROGRAM 3 OPEN (session 25, 2026-11-16)** — owner directive
+  "finish everything, take the most logical decision to complete
+  everything"; operative task list is plan §12 (R8.1–R8.5, the
+  residue closure). Programs 1 and 2 stay closed. In flight:
+  R8.1 (truncation-idiom fold, battery pending).
+
 - **PROGRAM 2 CLOSED (session 24, 2026-11-16) — Rule 8 STOP.** All
   six Q-letters executed and terminal (records in `complete.md`'s
   Program 2 closing report): R7.1 (f9c568c), R7.2 (e62bf08), R7.3
@@ -416,6 +422,56 @@ lanes, the no-simulation gate, kittest drift gate).
 | build files (root + crates manifests, deny.toml, rust-toolchain, .cargo, .gitignore, workflows, gate script) | R6.1 | comment-free (279 lines removed; D-29 taxonomy; shebang/docstrings functional keeps); functional zero-diff four-way proven; deny lane green against the live advisory DB on run#358 |
 
 ## Session log
+
+### Session 25 — 2026-11-16
+- Session-start protocol: environment intact (toolchain 1.99.1 at
+  /tmp/my-project/{rustup,cargo-home}; HEAD edffa10 = origin/main,
+  clean; CI run#385 green on the terminal head). Residue audit
+  (owner's question): DoD closed, Q-01..Q-06 terminal; residue =
+  the census-noted future-batch items (D-18 truncation idiom,
+  R4.1 dt_cell), D-19(a)'s rejected title proposal, the mooted
+  gate-docstring option, and D-36's R8-material pedantic line.
+- OWNER DIRECTIVE received: "finish everything, take the most
+  logical decision to complete everything" → PROGRAM 3 OPENED
+  (plan §12; handover state line; memory directive note + D-37).
+- R8.1 executed (census-first, two passes — line-level r25
+  machinery + a text-level pass after the line scanner proved
+  blind to multiline chains, 23 sites): true total 125 raw
+  `.chars().take(N).collect()` occurrences = 121 production + 2
+  test-region (D-10) + 2 xtask machinery (D-14). Fold: textutil
+  (the existing text-mechanism home, pub(crate)→pub) gains
+  `cap_chars` (pub, #[must_use]) + `truncate_chars` (pub(crate),
+  the notifications/sweep twin fold — sweep's bare `trim` name
+  fixed with it) + `excerpt` (pub(crate), the
+  interaction_signals/extraction twin fold); analytics' hard-cap
+  `truncate_chars` local deleted (its caller → cap_chars); domain
+  variants kept (quality::excerpt_of, inbox::truncate_chars) with
+  inners dogfooding cap_chars (D-17; full ruling in memory D-37).
+  Terminal raw census: 4 occurrences (definition + 1 test + 2
+  machinery). 41 files, +274/−314 after fmt; 118 external
+  cap_chars call sites; truncate_chars 14 external callers;
+  excerpt 4.
+- Tooling fallout handled: fmt caught two imports placed inside
+  multi-line braced use statements (ai_evidence, helpscout_real)
+  — moved after the complete statements; clippy is the
+  needless_borrow classifier for the mechanical `&recv` prefix.
+- Sandbox constraint: cold cache + 4G RAM / 2 cores / no swap —
+  the default-parallelism clippy build died silently mid-crate
+  (OOM signature); detached background builds are reaped at
+  tool-call boundaries (setsid does not escape it) — the battery
+  runs in foreground chunks (timeout 560-570, incremental resume).
+- Battery GREEN at the EXACT terminal baselines on the recovered
+  cache: gate clean; unwrap-policy clean (production unwrap 0 /
+  expect 1 allowed / panic-family 0; machinery 3+1; 2381
+  test-region exempt); fmt --check; clippy x2 under -D warnings;
+  core 520 at 490s; core-sandbox 528 at 458s; app-shell 293 at
+  264s; catalog+xtask 79 (= the 56 baseline + R7.5's 23 scanner
+  tests — the terminal tree's count); verify-icons; strip-comments
+  261/261. Post-fix census: 121 cap_chars occurrences (118
+  external call sites + definition + 2 internal), 40
+  needless_borrow sites stripped by `cargo clippy --fix` (the
+  classifier pass worked as designed); 45 files, +435/−324.
+- Commit + CI: [PENDING].
 
 ### Session 24 — 2026-11-16
 - Maintenance pre-flight: sandbox reset again; re-cloned via

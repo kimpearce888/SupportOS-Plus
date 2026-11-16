@@ -18,6 +18,7 @@ use crate::helpscout::{
     HsOrganization, HsPropertyDef, HsRating, HsReportRow, HsSavedReply, HsTag, HsTeam, HsThread,
     HsUser, HsUserStatus, HsWebhookConfig, HsWorkflow, Page, ThreadCreated,
 };
+use crate::textutil::cap_chars;
 mod credentials;
 mod rate_limiter;
 pub use credentials::{
@@ -56,7 +57,7 @@ pub(crate) fn friendly_error(status: u16, body: &str, method: &str) -> String {
     let detail = if body.is_empty() {
         String::new()
     } else {
-        body.chars().take(300).collect::<String>()
+        cap_chars(body, 300)
     };
     let get = method == "GET";
     match status {

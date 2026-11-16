@@ -10,6 +10,7 @@ use crate::helpscout::{
     ConversationQuery, CustomerQuery, HelpScoutProvider, HsConversation, HsThread,
 };
 use crate::mirror;
+use crate::textutil::cap_chars;
 
 mod loops;
 
@@ -267,7 +268,7 @@ pub fn record_success(conn: &Connection, resource: &str, records_processed: i64)
 }
 
 pub(crate) fn record_failure(conn: &Connection, resource: &str, error: &str, records_failed: i64) {
-    let clipped: String = error.chars().take(500).collect();
+    let clipped: String = cap_chars(error, 500);
     let _ = conn.execute(
         "INSERT INTO sync_checkpoints (resource, records_processed, records_failed, last_error, retry_count, status)
          VALUES (?1, 0, ?2, ?3, 1, 'error')

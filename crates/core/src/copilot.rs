@@ -10,6 +10,7 @@ use crate::ai_prompts::{
     COPILOT_SYSTEM, PROMPT_VERSIONS_COPILOT_CHAT, build_copilot_context_block,
 };
 use crate::ai_tools;
+use crate::textutil::cap_chars;
 
 pub(crate) fn ensure_copilot_schema(conn: &Connection) -> Result<()> {
     conn.execute_batch(
@@ -58,7 +59,7 @@ pub async fn chat(
     session_id: Option<i64>,
 ) -> std::result::Result<Value, LmStudioError> {
     ensure_copilot_schema(conn).map_err(|e| LmStudioError::new(e.to_string(), true))?;
-    let question: String = question.trim().chars().take(4000).collect();
+    let question: String = cap_chars(question.trim(), 4000);
     if question.is_empty() {
         return Err(LmStudioError::new("The question is empty.", false));
     }
@@ -80,7 +81,7 @@ pub async fn chat(
             return Err(LmStudioError::new("Conversation not found.", false));
         }
         let title: String = if question.chars().count() > 80 {
-            let mut t: String = question.chars().take(77).collect();
+            let mut t: String = cap_chars(&question, 77);
             t.push_str("...");
             t
         } else {
@@ -126,12 +127,7 @@ pub async fn chat(
             } else {
                 m["role"].as_str().unwrap_or("user").into()
             },
-            content: m["content"]
-                .as_str()
-                .unwrap_or_default()
-                .chars()
-                .take(2000)
-                .collect(),
+            content: cap_chars(m["content"].as_str().unwrap_or_default(), 2000),
             tool_calls: None,
             tool_call_id: None,
             name: None,
@@ -223,11 +219,7 @@ pub async fn chat(
                     result: result.clone(),
                 });
                 let bounded = bound_result(&result);
-                let content: String = bounded
-                    .to_string()
-                    .chars()
-                    .take(TOOL_RESULT_MAX_CHARS)
-                    .collect();
+                let content: String = cap_chars(&bounded.to_string(), TOOL_RESULT_MAX_CHARS);
                 messages.push(CopilotWireMessage {
                     role: "tool".into(),
                     content,
@@ -285,9 +277,7 @@ pub async fn chat(
     if !executed.is_empty() {
         let trace: Vec<Value> = executed
             .iter()
-            .map(
-                |e| json!({ "tool": e.name, "args": e.args.chars().take(300).collect::<String>() }),
-            )
+            .map(|e| json!({ "tool": e.name, "args": cap_chars(&e.args, 300) }))
             .collect();
         let trace_str: String = serde_json::to_string(&trace).unwrap_or_default();
         insert_message(
@@ -329,14 +319,14 @@ pub async fn chat(
         Some(&model),
         PROMPT_VERSIONS_COPILOT_CHAT,
         None,
-        &serde_json::json!([question.chars().take(500).collect::<String>()]),
+        &serde_json::json!([cap_chars(&question, 500)]),
     );
     if let Ok(run_id) = run_id {
         let _ = ai_pipeline::complete_run_with_usage(
             conn,
             run_id,
             &json!({
-                "question": question.chars().take(500).collect::<String>(),
+                "question": cap_chars(&question, 500),
                 "tool_calls": executed.len(),
                 "tool_rounds": rounds,
                 "model": model,
@@ -467,7 +457,7 @@ fn bound_result(result: &Value) -> Value {
     }
     json!({
         "truncated": true,
-        "preview": s.chars().take(TOOL_RESULT_MAX_CHARS).collect::<String>(),
+        "preview": cap_chars(&s, TOOL_RESULT_MAX_CHARS),
     })
 }
 
@@ -925,7 +915,7 @@ mod batch31_tests {
     #[test]
     fn tool_result_cap_truncates_by_characters() {
         let output = "a".repeat(3999) + "é" + &"b".repeat(20);
-        let content: String = output.chars().take(TOOL_RESULT_MAX_CHARS).collect();
+        let content: String = cap_chars(&output, TOOL_RESULT_MAX_CHARS);
         assert_eq!(content.chars().count(), TOOL_RESULT_MAX_CHARS);
         assert!(
             content.contains('é'),

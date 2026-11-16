@@ -737,13 +737,7 @@ fn build_timeline(conv_rows: &[CustomerConversation]) -> Vec<TimelineEntry> {
     let mut by_month: std::collections::BTreeMap<String, (i64, Vec<i64>, Vec<String>)> =
         std::collections::BTreeMap::new();
     for c in sorted {
-        let month = c
-            .remote_created_at
-            .as_deref()
-            .unwrap_or("")
-            .chars()
-            .take(7)
-            .collect::<String>();
+        let month = cap_chars(c.remote_created_at.as_deref().unwrap_or(""), 7);
         let g = by_month.entry(month).or_insert((0, Vec::new(), Vec::new()));
         g.0 += 1;
         g.1.push(c.id);

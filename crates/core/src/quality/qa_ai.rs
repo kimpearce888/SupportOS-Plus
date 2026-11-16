@@ -1,4 +1,5 @@
 use super::*;
+use crate::textutil::cap_chars;
 fn coerce_ai_json(raw: &Value) -> Value {
     let val3 = |v: &Value| -> &'static str {
         match v.as_str() {
@@ -17,7 +18,7 @@ fn coerce_ai_json(raw: &Value) -> Value {
     };
     let str_cap = |v: &Value, fallback: &str| -> String {
         v.as_str()
-            .map(|s| s.chars().take(600).collect::<String>())
+            .map(|s| cap_chars(s, 600))
             .unwrap_or_else(|| fallback.to_string())
     };
     let ids = |v: &Value| -> Vec<i64> {
@@ -55,9 +56,9 @@ fn coerce_ai_json(raw: &Value) -> Value {
             "kb_reason": str_cap(&s["kb_reason"], ""),
             "saved_reply_suggested": s["saved_reply_suggested"].as_bool().unwrap_or(false),
             "saved_reply_title": s["saved_reply_title"].as_str()
-                .map(|t| t.chars().take(200).collect::<String>()),
+                .map(|t| cap_chars(t, 200)),
             "issue_association": s["issue_association"].as_str()
-                .map(|t| t.chars().take(200).collect::<String>()),
+                .map(|t| cap_chars(t, 200)),
         })),
     })
 }
@@ -114,13 +115,10 @@ pub(crate) async fn compute_qa_ai_layer(
                     _ => "note",
                 };
                 let text = crate::textutil::html_to_text(body);
-                format!(
-                    "[{author} #{id}] {}",
-                    text.chars().take(600).collect::<String>()
-                )
+                format!("[{author} #{id}] {}", cap_chars(&text, 600))
             })
             .collect();
-        lines.join("\n").chars().take(8000).collect()
+        cap_chars(&lines.join("\n"), 8000)
     };
     let prompt = [
         "You are reviewing a CLOSED support conversation for quality insight. Answer strictly as JSON:".to_string(),

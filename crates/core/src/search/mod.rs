@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
 use crate::migrations::add_column_if_missing;
+use crate::textutil::cap_chars;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchHit {
@@ -414,13 +415,13 @@ pub fn search_with_semantics(
         let entity_type = payload.get("entity_type").and_then(|v| v.as_str());
         let entity_id = payload.get("entity_id").and_then(|v| v.as_i64());
         let Some(entity_id) = entity_id else { continue };
-        let text: String = payload
-            .get("text")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default()
-            .chars()
-            .take(240)
-            .collect();
+        let text: String = cap_chars(
+            payload
+                .get("text")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default(),
+            240,
+        );
         match entity_type {
             Some("conversation_chunk") if want_tickets => {
                 let Ok((number, subject, status)) = conn.query_row(
@@ -787,7 +788,7 @@ fn build_custom_object_search_text(title: &str, data_json: Option<&str>) -> Stri
     }
     let joined = parts.join(" ");
     if joined.chars().count() > 5000 {
-        joined.chars().take(5000).collect()
+        cap_chars(&joined, 5000)
     } else {
         joined
     }

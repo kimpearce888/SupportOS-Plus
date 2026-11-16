@@ -2,6 +2,7 @@ use rusqlite::{Connection, params};
 
 use crate::ai_evidence::SimilarConversation;
 use crate::error::Result;
+use crate::textutil::cap_chars;
 
 const URGENCY_MARKERS: &[&str] = &[
     "asap",
@@ -218,7 +219,7 @@ fn sentences(text: &str) -> Vec<String> {
             if s.chars().count() < 400 {
                 s.to_string()
             } else {
-                s.chars().take(400).collect()
+                cap_chars(s, 400)
             }
         })
         .collect()
@@ -417,13 +418,7 @@ fn build_draft(
     ));
 
     if let Some(best) = similar.first().filter(|s| !s.resolution.is_empty()) {
-        let resolution: String = best
-            .resolution
-            .chars()
-            .take(500)
-            .collect::<String>()
-            .trim()
-            .to_string();
+        let resolution: String = cap_chars(&best.resolution, 500).trim().to_string();
         draft.push_str(&format!(
             "This looks like an issue we resolved recently (conversation #{}). \
              What worked then:\n\n{}\n\n",
@@ -434,7 +429,7 @@ fn build_draft(
             "Our Help Center article \"{}\" covers this — here is the \
              relevant part:\n\n{}\n\n",
             article.name,
-            article.snippet.chars().take(400).collect::<String>()
+            cap_chars(&article.snippet, 400)
         ));
     }
 

@@ -6,6 +6,7 @@ use serde_json::{Map, Value, json};
 
 use crate::error::{Error, Result};
 use crate::migrations::add_column_if_missing;
+use crate::textutil::cap_chars;
 
 pub(crate) const MAX_ROWS_PER_CONNECTOR: usize = 5000;
 const MAX_ROW_BYTES: usize = 32_000;
@@ -409,7 +410,7 @@ pub async fn refresh(
     let result = match refresh_inner(conn, &connector, data_dir).await {
         Ok(result) => result,
         Err(e) => {
-            let message = e.to_string().chars().take(500).collect::<String>();
+            let message = cap_chars(&e.to_string(), 500);
             let c = conn.write_guard();
             record_sync(&c, connector_id, "error", None, Some(&message), None)?;
             RefreshResult {

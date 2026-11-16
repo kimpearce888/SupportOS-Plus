@@ -4,6 +4,7 @@ use crate::catalog::NotificationType;
 use crate::error::Result;
 use crate::mentions::{build_mention_directory, parse_mentions};
 use crate::notifications::{NotificationInput, record_notification};
+use crate::textutil::truncate_chars;
 
 pub(crate) const CURSOR_KEY: &str = "notif_event_cursor";
 
@@ -177,7 +178,7 @@ fn sweep_conversation_events(
                 let subject_suffix = conv
                     .subject
                     .as_deref()
-                    .map(|s| format!(" — {}", trim(s, 60)))
+                    .map(|s| format!(" — {}", truncate_chars(s, 60)))
                     .unwrap_or_default();
                 let r = record_notification(
                     conn,
@@ -215,7 +216,7 @@ fn sweep_conversation_events(
                         &NotificationInput {
                             notification_type: NotificationType::TicketAssigned,
                             title: format!("#{} assigned to {name}", number.unwrap_or(conv_id)),
-                            body: conv.subject.as_deref().map(|s| trim(s, 120)),
+                            body: conv.subject.as_deref().map(|s| truncate_chars(s, 120)),
                             target_user_local_id: Some(next),
                             actor_user_local_id: e.actor_local_id,
                             conversation_id: Some(conv_id),
@@ -253,7 +254,7 @@ fn sweep_conversation_events(
                                 user_display(conn, author),
                                 number.unwrap_or(conv_id)
                             ),
-                            body: Some(trim(&body, 200)),
+                            body: Some(truncate_chars(&body, 200)),
                             target_user_local_id: Some(user),
                             actor_user_local_id: author,
                             conversation_id: Some(conv_id),
@@ -302,7 +303,7 @@ fn sweep_sla(conn: &Connection, bus: Option<&crate::event_bus::EventBus>) -> Res
                 notification_type: notif_type,
                 severity: Some(if breached { "critical" } else { "warning" }),
                 title,
-                body: a.subject.as_deref().map(|s| trim(s, 120)),
+                body: a.subject.as_deref().map(|s| truncate_chars(s, 120)),
                 target_user_local_id: a.assignee_local_id,
                 conversation_id: Some(a.conversation_id),
                 conversation_number: Some(a.number),
@@ -359,7 +360,7 @@ fn sweep_automation_approvals(
                 body: conv
                     .as_ref()
                     .and_then(|c| c.subject.as_deref())
-                    .map(|s| trim(s, 120)),
+                    .map(|s| truncate_chars(s, 120)),
                 conversation_id: conv.as_ref().map(|c| c.id),
                 conversation_number: conv.as_ref().and_then(|c| c.number),
                 job_id: Some(job_id),
@@ -622,9 +623,9 @@ fn sweep_campaign_replies(
                 title: format!(
                     "Campaign reply: {} answered \"{}\"",
                     customer.as_deref().unwrap_or("a customer"),
-                    trim(campaign_name, 50)
+                    truncate_chars(campaign_name, 50)
                 ),
-                body: subject.as_deref().map(|s| trim(s, 120)),
+                body: subject.as_deref().map(|s| truncate_chars(s, 120)),
                 customer_local_id,
                 campaign_id,
                 dedup_key: format!("n:campreply:{id}"),
@@ -671,7 +672,7 @@ fn sweep_known_issues(
             bus,
             &NotificationInput {
                 notification_type: NotificationType::KnownIssueDetected,
-                title: format!("Known issue tracked: {}", trim(&display, 80)),
+                title: format!("Known issue tracked: {}", truncate_chars(&display, 80)),
                 body: Some(format!(
                     "Status: {}",
                     status.as_deref().unwrap_or("investigating")
@@ -726,7 +727,7 @@ fn sweep_issue_spikes(
                 severity: Some("warning"),
                 title: format!(
                     "Issue spike: {} ({} conversations)",
-                    trim(&display, 80),
+                    truncate_chars(&display, 80),
                     conversation_count.unwrap_or(0)
                 ),
                 issue_id: Some(id),
@@ -804,7 +805,7 @@ fn sweep_ai_escalations(
             _ => " — customer frustrated",
         };
         let body = [
-            subject.as_deref().map(|s| trim(s, 100)),
+            subject.as_deref().map(|s| truncate_chars(s, 100)),
             Some(format!("AI confidence: {confidence}")),
         ]
         .into_iter()
@@ -884,7 +885,7 @@ fn sweep_ratings(
                         .map(|c| format!(" from {c}"))
                         .unwrap_or_default()
                 ),
-                body: comments.as_deref().map(|c| trim(c, 200)),
+                body: comments.as_deref().map(|c| truncate_chars(c, 200)),
                 customer_local_id,
                 conversation_id,
                 dedup_key: format!(
@@ -934,7 +935,7 @@ fn thread_body(conn: &Connection, thread_local_id: Option<i64>) -> Result<Option
 }
 
 fn thread_excerpt(conn: &Connection, thread_local_id: Option<i64>) -> Result<Option<String>> {
-    Ok(thread_body(conn, thread_local_id)?.map(|b| trim(&b, 160)))
+    Ok(thread_body(conn, thread_local_id)?.map(|b| truncate_chars(&b, 160)))
 }
 
 fn user_display(conn: &Connection, user_local_id: Option<i64>) -> String {
@@ -991,16 +992,6 @@ fn safe_json_object(v: Option<&str>) -> serde_json::Value {
         .cloned()
         .map(serde_json::Value::Object)
         .unwrap_or(serde_json::json!({}))
-}
-
-fn trim(s: &str, max: usize) -> String {
-    let t = s.trim();
-    if t.chars().count() > max {
-        let cut: String = t.chars().take(max.saturating_sub(1)).collect();
-        format!("{cut}…")
-    } else {
-        t.to_string()
-    }
 }
 
 #[cfg(test)]

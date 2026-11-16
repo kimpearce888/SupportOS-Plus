@@ -1,6 +1,7 @@
 use super::*;
 
 use crate::json_fields::{json_str, json_string};
+use crate::textutil::cap_chars;
 
 async fn docs_request_json(
     req: reqwest::RequestBuilder,
@@ -515,7 +516,7 @@ impl RealHelpScoutProvider {
         }
 
         let body_text = res.text().await.unwrap_or_default();
-        let detail: String = body_text.chars().take(4_000).collect();
+        let detail: String = cap_chars(&body_text, 4_000);
         Err(HsApiError {
             status_code: status,
             message: format!("Help Scout {method} {path} -> {status}: {detail}"),

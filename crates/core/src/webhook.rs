@@ -4,13 +4,14 @@ use rusqlite::{Connection, OptionalExtension, params};
 use sha1::Sha1;
 
 use crate::error::{Error, Result};
+use crate::textutil::cap_chars;
 
 type HmacSha1 = Hmac<Sha1>;
 
 const LEGACY_SECRET_CAP: usize = 40;
 
 fn legacy_capped(secret: &str) -> String {
-    secret.chars().take(LEGACY_SECRET_CAP).collect()
+    cap_chars(secret, LEGACY_SECRET_CAP)
 }
 
 pub(crate) fn verify_delivery(secret: &[u8], body: &[u8], provided_signature: &str) -> Result<()> {

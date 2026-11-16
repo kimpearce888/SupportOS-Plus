@@ -6,6 +6,7 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::error::{Error, Result};
+use crate::textutil::cap_chars;
 
 pub(crate) const IMPORT_DIR_NAME: &str = "knowledge-import";
 
@@ -120,11 +121,7 @@ pub fn list_documents(conn: &Connection, source_id: Option<i64>) -> Vec<Value> {
         .and_then(|mut stmt| {
             let rows = stmt.query_map(params![source_id], |r| {
                 let content: Option<String> = r.get(5)?;
-                let preview: String = content
-                    .unwrap_or_default()
-                    .chars()
-                    .take(200)
-                    .collect::<String>()
+                let preview: String = cap_chars(&content.unwrap_or_default(), 200)
                     .trim()
                     .to_string();
                 Ok(json!({
@@ -308,7 +305,7 @@ pub fn reindex_document(conn: &Connection, document_id: i64) -> Result<usize> {
 }
 
 fn detect_format_for_content(content: &str) -> String {
-    let head: String = content.chars().take(4000).collect();
+    let head: String = cap_chars(content, 4000);
     if head.contains("```") || head.contains("# ") || head.contains("## ") {
         "markdown".to_string()
     } else if head.matches('<').count() > 4 && head.matches('>').count() > 4 {
@@ -951,7 +948,7 @@ fn split_csv_sections(base: &str, text: &str) -> Vec<(String, String, String)> {
         let title: String = if title.trim().is_empty() {
             format!("{base} entry")
         } else {
-            title.trim().chars().take(200).collect()
+            cap_chars(title.trim(), 200)
         };
         let content = header
             .iter()

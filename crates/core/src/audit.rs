@@ -2,6 +2,7 @@ use rusqlite::Connection;
 use serde_json::{Value, json};
 
 use crate::error::Result;
+use crate::textutil::cap_chars;
 
 const EVENT_LOG_CAP: i64 = 500;
 
@@ -118,12 +119,12 @@ pub fn audit(conn: &Connection, entry: &AuditEntry) -> Result<()> {
         .before_state
         .as_ref()
         .map(|v| v.to_string())
-        .map(|s| s.chars().take(4000).collect::<String>());
+        .map(|s| cap_chars(&s, 4000));
     let after = entry
         .after_state
         .as_ref()
         .map(|v| v.to_string())
-        .map(|s| s.chars().take(4000).collect::<String>());
+        .map(|s| cap_chars(&s, 4000));
     let remote_result = entry.remote_result.as_ref().map(|v| v.to_string());
     conn.execute(
         "INSERT INTO audit_log (timestamp, actor, action, conversation_id, before_state, after_state, remote_operation, remote_result, ai_involvement, job_id, correlation_id)
@@ -215,8 +216,8 @@ pub fn log_event(
         "info" | "warn" | "error" => level,
         _ => "error",
     };
-    let msg: String = message.chars().take(2000).collect();
-    let stk: Option<String> = stack.map(|s| s.chars().take(8000).collect());
+    let msg: String = cap_chars(message, 2000);
+    let stk: Option<String> = stack.map(|s| cap_chars(s, 8000));
     let written = conn.execute(
         "INSERT INTO application_errors (timestamp, service, message, stack, context, level)
          VALUES (datetime('now'), ?1, ?2, ?3, ?4, ?5)",

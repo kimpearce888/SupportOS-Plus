@@ -1,6 +1,7 @@
 use rusqlite::{Connection, params};
 
 use crate::error::Result;
+use crate::textutil::cap_chars;
 
 pub(crate) const OUTBOUND_BATCH_PER_TICK: usize = 4;
 
@@ -74,7 +75,7 @@ pub(crate) fn mark_failed(
     error: &str,
     retryable: bool,
 ) -> Result<bool> {
-    let error: String = error.chars().take(1000).collect();
+    let error: String = cap_chars(error, 1000);
     let row: Option<(i64, i64)> = conn
         .prepare("SELECT attempts, max_attempts FROM outbound_jobs WHERE id = ?1")?
         .query_row(params![id], |r| Ok((r.get(0)?, r.get(1)?)))

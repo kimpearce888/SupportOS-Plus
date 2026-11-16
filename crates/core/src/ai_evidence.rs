@@ -8,6 +8,7 @@ use crate::error::Result;
 use crate::search::{
     fts_query_or, search_knowledge_raw, search_known_issues, search_saved_replies,
 };
+use crate::textutil::cap_chars;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SimilarConversation {
@@ -123,11 +124,8 @@ pub fn build(
             Ok(ThreadEntry {
                 author,
                 kind,
-                date: at.unwrap_or_default().chars().take(10).collect(),
-                text: crate::textutil::html_to_text(&raw_text)
-                    .chars()
-                    .take(1500)
-                    .collect(),
+                date: cap_chars(&at.unwrap_or_default(), 10),
+                text: cap_chars(&crate::textutil::html_to_text(&raw_text), 1500),
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -158,7 +156,7 @@ pub fn build(
                     Ok(HistoryEntry {
                         number,
                         subject: subject.unwrap_or_else(|| crate::catalog::NO_SUBJECT.into()),
-                        summary: summary_source.chars().take(200).collect(),
+                        summary: cap_chars(&summary_source, 200),
                         days_ago: at.as_deref().map(days_ago).unwrap_or(0),
                     })
                 })?
@@ -178,8 +176,8 @@ pub fn build(
         .map(|s| SimilarCase {
             number: s.number,
             subject: s.subject,
-            resolution: s.resolution.chars().take(300).collect(),
-            date: s.date.unwrap_or_default().chars().take(10).collect(),
+            resolution: cap_chars(&s.resolution, 300),
+            date: cap_chars(&s.date.unwrap_or_default(), 10),
             visibility: "internal_only".to_string(),
         })
         .collect();
@@ -232,12 +230,11 @@ pub fn build(
             |r| {
                 Ok(KnowledgeEntry {
                     title: r.get(0)?,
-                    text: r
-                        .get::<_, Option<String>>(1)?
-                        .unwrap_or_else(|| k.snippet.clone())
-                        .chars()
-                        .take(1200)
-                        .collect(),
+                    text: cap_chars(
+                        &r.get::<_, Option<String>>(1)?
+                            .unwrap_or_else(|| k.snippet.clone()),
+                        1200,
+                    ),
                     visibility: if k.visibility == "customer_safe" {
                         "customer_safe".to_string()
                     } else {
@@ -267,7 +264,7 @@ pub fn build(
                     let body = text.or(preview).unwrap_or_else(|| r.snippet.clone());
                     Ok(SavedReplyEntry {
                         name,
-                        text: body.chars().take(800).collect(),
+                        text: cap_chars(&body, 800),
                     })
                 },
             )
@@ -515,7 +512,7 @@ pub(crate) fn find_similar(
         let resolution = if last_reply.is_empty() {
             c.row.preview.clone().unwrap_or_default()
         } else {
-            last_reply.chars().take(400).collect()
+            cap_chars(&last_reply, 400)
         };
         scored.push(SimilarConversation {
             conversation_id: c.row.id,
@@ -592,7 +589,7 @@ fn help_center_entries(
         }
         out.push(KnowledgeEntry {
             title: name,
-            text: text.chars().take(1200).collect(),
+            text: cap_chars(&text, 1200),
             visibility: if status == "published" {
                 "customer_safe".to_string()
             } else {

@@ -6,6 +6,7 @@ use crate::ai_provider::{
     ChatMessage, ChatResponse, EmbedResponse, LocalAiProvider, ModelInfo, ModelRole, TokenUsage,
 };
 use crate::error::{Error, Result};
+use crate::textutil::cap_chars;
 
 pub(crate) const LM_STUDIO_BASE_URL: &str = "http://127.0.0.1:1234/v1";
 
@@ -282,7 +283,7 @@ where
         .await
         .map_err(|e| Error::Config(format!("LM Studio {op} read failed: {e}")))?;
     if !status.is_success() {
-        let snippet: String = text.chars().take(300).collect();
+        let snippet: String = cap_chars(&text, 300);
         return Err(Error::Config(format!(
             "LM Studio {op} request failed (HTTP {status}): {snippet}"
         )));

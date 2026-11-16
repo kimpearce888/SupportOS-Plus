@@ -2,6 +2,7 @@ use rusqlite::{Connection, params};
 use serde_json::{Map, Value, json};
 
 use crate::error::{Error, Result};
+use crate::textutil::cap_chars;
 
 fn valid_field_key(key: &str) -> bool {
     let mut chars = key.chars();
@@ -373,7 +374,7 @@ fn validate_properties(
 }
 
 fn valid_iso_date(s: &str) -> bool {
-    let date: String = s.chars().take(10).collect();
+    let date: String = cap_chars(s, 10);
     if s.chars().count() < 10 {
         return false;
     }
@@ -445,7 +446,7 @@ fn build_search_text(title: &str, properties: &Map<String, Value>) -> String {
         }
     }
     let joined = parts.join(" ");
-    joined.chars().take(5000).collect()
+    cap_chars(&joined, 5000)
 }
 
 pub fn create_object(

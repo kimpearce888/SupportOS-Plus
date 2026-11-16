@@ -5,6 +5,7 @@ use serde_json::{Value, json};
 use crate::catalog::GraphNodeKind;
 use crate::error::Result;
 use crate::search::escape_like;
+use crate::textutil::cap_chars;
 
 const GRAPH_EDGES_SQL: &str = r#"
     CREATE TABLE IF NOT EXISTS graph_edges (
@@ -393,7 +394,7 @@ pub fn graph_search(
     query: &str,
     kinds: Option<&[GraphNodeKind]>,
 ) -> Result<Vec<Value>> {
-    let q: String = query.trim().chars().take(120).collect();
+    let q: String = cap_chars(query.trim(), 120);
     if q.is_empty() {
         return Ok(Vec::new());
     }

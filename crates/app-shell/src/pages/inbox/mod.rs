@@ -8,6 +8,7 @@ use spp_core::db::DbHandle;
 use spp_core::event_bus::EventBus;
 use spp_core::inbox::{ConversationDetail, ConversationListItem, InboxFilters};
 use spp_core::sync_engine::SyncEngine;
+use spp_core::textutil::cap_chars;
 use spp_core::ticket_ops::{OperationResult, TicketOperation};
 
 use crate::design::{self, BadgeTone, ButtonVariant, ComposerAct, ComposerState, MessageRole};
@@ -1575,7 +1576,7 @@ fn truncate_chars(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
         s.to_string()
     } else {
-        let cut: String = s.chars().take(max).collect();
+        let cut: String = cap_chars(s, max);
         format!("{cut}…")
     }
 }
@@ -1827,7 +1828,7 @@ pub(crate) fn submit_note(
                     &spp_core::notifications::NotificationInput {
                         notification_type: spp_core::catalog::NotificationType::Mentioned,
                         title: format!("mentioned you on #{}", detail.number),
-                        body: Some(body.chars().take(200).collect()),
+                        body: Some(cap_chars(body, 200)),
                         target_user_local_id: Some(user),
                         actor_user_local_id: None,
                         conversation_id: Some(detail.id),

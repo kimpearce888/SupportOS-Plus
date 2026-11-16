@@ -1,4 +1,5 @@
 use super::*;
+use crate::textutil::cap_chars;
 
 fn rx(pattern: &'static str) -> Result<Regex> {
     Regex::new(pattern).map_err(|e| Error::Other(Box::new(e)))
@@ -55,7 +56,7 @@ pub(super) fn check_unanswered_questions(
                 "draft_excerpt": "(the draft does not appear to address this)",
                 "evidence": [evidence(
                     "customer question",
-                    q.chars().take(EXCERPT_CAP).collect::<String>(),
+                    cap_chars(q, EXCERPT_CAP),
                     Some(conv.id),
                     Some(*thread_id),
                     None
@@ -132,10 +133,10 @@ pub(super) fn check_duplicated_questions(threads: &[ThreadRow], draft: &str) -> 
                 / draft_tokens.len() as f64;
             if overlap >= 0.7 {
                 findings.push(json!({
-                    "draft_excerpt": sentence.chars().take(EXCERPT_CAP).collect::<String>(),
+                    "draft_excerpt": cap_chars(&sentence, EXCERPT_CAP),
                     "evidence": [evidence(
                         "earlier agent question in this conversation",
-                        prior.chars().take(EXCERPT_CAP).collect::<String>(),
+                        cap_chars(prior, EXCERPT_CAP),
                         None,
                         Some(*thread_id),
                         None
@@ -188,7 +189,7 @@ pub(super) fn check_timeframe(conn: &Connection, conv: &ConvRow, draft: &str) ->
     for sentence in split_sentences(draft) {
         for (re, label) in timeframe_patterns()? {
             if re.is_match(&sentence) {
-                promises.push((sentence.chars().take(EXCERPT_CAP).collect(), *label));
+                promises.push((cap_chars(&sentence, EXCERPT_CAP), *label));
                 break;
             }
         }
@@ -230,7 +231,7 @@ pub(super) fn check_timeframe(conn: &Connection, conv: &ConvRow, draft: &str) ->
                         "linked ACTIVE incident{} ({listing})",
                         if active_incidents.len() > 1 { "s" } else { "" }
                     ),
-                    excerpt.chars().take(EXCERPT_CAP).collect::<String>(),
+                    cap_chars(&excerpt, EXCERPT_CAP),
                     None,
                     None,
                     None,
@@ -272,7 +273,7 @@ pub(super) fn check_acknowledgment(
     if signals_re.is_match(signals) {
         frustration = Some((
             "interaction signals (deterministic layer)".into(),
-            signals.chars().take(EXCERPT_CAP).collect(),
+            cap_chars(signals, EXCERPT_CAP),
             None,
         ));
     } else {
@@ -285,7 +286,7 @@ pub(super) fn check_acknowledgment(
             if frustration_markers()?.is_match(&m.text) {
                 frustration = Some((
                     "customer message (frustration markers)".into(),
-                    m.text.chars().take(EXCERPT_CAP).collect(),
+                    cap_chars(&m.text, EXCERPT_CAP),
                     Some(m.id),
                 ));
                 break;
@@ -374,7 +375,7 @@ pub(super) fn check_wording(
             "flagged",
             detail,
             vec![json!({
-                "draft_excerpt": draft.chars().take(EXCERPT_CAP).collect::<String>(),
+                "draft_excerpt": cap_chars(draft, EXCERPT_CAP),
                 "evidence": [evidence(evidence_desc, evidence_excerpt, None, None, None)],
                 "advice": advice
             })],
@@ -420,7 +421,7 @@ pub(super) fn check_detail(signals: &str, threads: &[ThreadRow], draft: &str) ->
                 }
             ),
             vec![json!({
-                "draft_excerpt": draft.chars().take(EXCERPT_CAP).collect::<String>(),
+                "draft_excerpt": cap_chars(draft, EXCERPT_CAP),
                 "evidence": [evidence(
                     "conversation context",
                     format!("{question_count} open question(s){}", if technical { ", technical familiarity signals" } else { "" }),
@@ -507,7 +508,7 @@ pub(super) fn check_internal_leakage(
             {
                 corpus.push((
                     format!("internal knowledge document \"{title}\""),
-                    content.chars().take(8000).collect(),
+                    cap_chars(&content, 8000),
                 ));
             }
         }
@@ -528,7 +529,7 @@ pub(super) fn check_internal_leakage(
             if !content.trim().is_empty() {
                 corpus.push((
                     format!("internal help center article \"{title}\""),
-                    content.chars().take(8000).collect(),
+                    cap_chars(&content, 8000),
                 ));
             }
         }
@@ -562,8 +563,8 @@ pub(super) fn check_internal_leakage(
         }
         if hit.is_some() {
             findings.push(json!({
-                "draft_excerpt": draft.chars().take(EXCERPT_CAP).collect::<String>(),
-                "evidence": [evidence(description.clone(), text.chars().take(EXCERPT_CAP).collect::<String>(), None, None, None)],
+                "draft_excerpt": cap_chars(draft, EXCERPT_CAP),
+                "evidence": [evidence(description.clone(), cap_chars(text, EXCERPT_CAP), None, None, None)],
                 "advice": "This draft shares a verbatim span with internal-only material. Rewrite that passage in customer-safe language before sending."
             }));
         }
@@ -655,7 +656,7 @@ pub(super) fn check_wrong_context(
         if !generic.contains(&greeted.as_str()) && greeted != first && !first.starts_with(&greeted)
         {
             findings.push(json!({
-                        "draft_excerpt": greeting.get(0).map(|m| m.as_str()).unwrap_or("").chars().take(EXCERPT_CAP).collect::<String>(),
+                        "draft_excerpt": cap_chars(greeting.get(0).map(|m| m.as_str()).unwrap_or(""), EXCERPT_CAP),
                         "evidence": [evidence(
                             "customer record",
                             format!("This customer is {}.", first_name),
@@ -750,7 +751,7 @@ pub(super) fn check_preference_mismatch(
                 "Draft shape does not match the observed preference ({mismatch}). This is an observed preference, not a rule."
             ),
             vec![json!({
-                "draft_excerpt": draft.chars().take(EXCERPT_CAP).collect::<String>(),
+                "draft_excerpt": cap_chars(draft, EXCERPT_CAP),
                 "evidence": ev,
                 "advice": format!("This customer's observed preference is \"{pref}\". Reshaping the draft may land better - your call.")
             })],

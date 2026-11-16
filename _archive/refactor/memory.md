@@ -784,7 +784,58 @@ session ends by adding what the next session must not have to rediscover.
   status re-verified with the [lints] live under `-D
   warnings` on both lanes. NOTE: [lints] clippy:: entries are
   silently inert under plain rustc (tool-lint RFC behavior) —
-  cargo test/build lanes are unaffected.
+  cargo test/build lanes are unaffected. [Program-3
+  addendum, session 25: the R8-material line is reviewed
+  under the finish-everything directive and ruled NOT OWED —
+  ~1800 pedantic fires across 139.9K LOC is churn without
+  guardrail value; the 20-lint subset stands as the
+  terminal state; see D-39.]
+
+- **D-37 (session 25, R8.1).** The truncation-idiom fold (D-18's
+  deferred note, resolved under the Program-3 directive). Census
+  required TWO passes — line-level (r25 region machinery) AND
+  text-level (multiline chains are invisible to a line scanner:
+  23 sites): true total 125 raw `.chars().take(N).collect()`
+  occurrences = 121 production + 2 test-region (D-10 keeps) +
+  2 xtask machinery (the byte-identical `preview()` twins, D-14
+  precedent; xtask's core dep is not a reason to churn machinery).
+  Terminal raw census: 4 (the definition itself + those keeps).
+  The census also found the LOCAL-HELPER family (8 fns), which is
+  the fold's real yield:
+  (a) `notifications::truncate_chars` ≡ `notification_sweep::trim`
+  (trim + count-check + saturating_sub(1) + '…') — folded to
+  `textutil::truncate_chars` (pub(crate)); the fold also fixes
+  sweep's misleading bare `trim` name (R4.1's bare-predicate
+  vocabulary family).
+  (b) `interaction_signals::excerpt` ≡
+  `ai_attributes::extraction::excerpt` (whitespace-normalize +
+  take(max_len − 3) + '…'; only the local binding name and the
+  '\u{2026}' escape form differed — same character) — folded to
+  `textutil::excerpt` (pub(crate)).
+  (c) `analytics::truncate_chars` was a hard-cap one-liner (the
+  cap_chars SEMANTICS under a truncate_chars NAME — a vocabulary
+  collision with (a) resolved by the fold): deleted; its caller
+  calls cap_chars.
+  (d) KEPT domain variants (D-17 — different policies, not
+  twins): `quality::excerpt_of` (ASCII "..." + take(max), no
+  budget math), app-shell `inbox::truncate_chars` (no trim,
+  take(max)), each now dogfooding cap_chars internally.
+  Home: `textutil` — the tree's existing text-mechanism module
+  (html_to_text's home; NOT a new module), made `pub` as the
+  carrier for app-shell's sites; `#[must_use]` per the module's
+  html_to_text precedent; no new tests (json_fields precedent —
+  mechanism one-liners ride the suites; baselines stay EXACT).
+  Mechanism-vs-policy split: cap_chars folds the char-safe
+  TRUNCATION TECHNIQUE; every cap VALUE (literal/const/computed)
+  stays at its call site (D-17 satisfied by construction). The
+  pixel safety argument: mechanism-identical conversions render
+  byte-identical strings; the CI kittest drift gate verifies.
+  Conversion tooling note: the mechanical `&recv` prefix is
+  classified by clippy (`needless_borrow` under -D warnings is
+  the honest borrow-stripper); the import sorted-insert placed
+  two imports inside multi-line braced use statements (caught by
+  cargo fmt's parse pass — fmt doubles as the syntax checker;
+  moved after the complete statements).
 
 ## Facts (F-xx)
 
@@ -995,6 +1046,17 @@ session ends by adding what the next session must not have to rediscover.
 
 
 ## Open questions / deferred owner decisions
+
+- **OWNER DIRECTIVE (session 25).** "Finish everything, take the
+  most logical decision to complete everything" — the residue
+  audit's findings become Program 3 (plan §12): D-18's deferred
+  truncation-idiom note (R8.1), R4.1's deferred dt_cell fold
+  (R8.2), D-19(a)'s title-consolidation proposal (R8.3 —
+  terminally ruled under the most-logical test), the mooted
+  gate-docstring option (R8.4), and D-36's R8-material pedantic
+  line (ruled not-owed, see D-39). The six Q-letters stay closed;
+  no new Q-letters are opened — the residue was never
+  option-gated, it was census-noted.
 
 - **OWNER OVERRIDE (session 21).** "Complete anything ignored and
   skipped" — every Q-01..Q-06 default is overridden; execution is

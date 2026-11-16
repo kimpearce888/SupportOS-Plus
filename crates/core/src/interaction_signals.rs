@@ -2,6 +2,7 @@ use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
+use crate::textutil::excerpt;
 
 const CLIENT_CURRENT_SIGNALS_SQL: &str = "
         CREATE TABLE IF NOT EXISTS client_current_signals (
@@ -387,16 +388,6 @@ fn count_markers(text: &str, markers: &[&str]) -> usize {
 
 fn matches_any(text: &str, markers: &[&str]) -> bool {
     markers.iter().any(|m| has_marker(text, m))
-}
-
-fn excerpt(text: &str, max_len: usize) -> String {
-    let clean: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    if clean.chars().count() <= max_len {
-        clean
-    } else {
-        let cut: String = clean.chars().take(max_len - 3).collect();
-        format!("{cut}…")
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
