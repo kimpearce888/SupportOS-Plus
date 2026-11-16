@@ -381,7 +381,7 @@ impl CustomersPage {
                 |ui, i| {
                     let row = &rows[i];
                     let t = design::tokens(ui);
-                    dt_cell(
+                    design::dt_cell(
                         ui,
                         190.0,
                         egui::RichText::new(&row.display_name)
@@ -390,7 +390,7 @@ impl CustomersPage {
                             .color(t.foreground),
                         false,
                     );
-                    dt_cell(
+                    design::dt_cell(
                         ui,
                         230.0,
                         egui::RichText::new(row.email.as_deref().unwrap_or(design::MISSING_VALUE))
@@ -398,7 +398,7 @@ impl CustomersPage {
                             .color(t.foreground),
                         false,
                     );
-                    dt_cell(
+                    design::dt_cell(
                         ui,
                         90.0,
                         egui::RichText::new(row.conversation_count.to_string())
@@ -407,7 +407,7 @@ impl CustomersPage {
                             .color(t.foreground),
                         true,
                     );
-                    dt_cell(
+                    design::dt_cell(
                         ui,
                         140.0,
                         egui::RichText::new(
@@ -897,17 +897,6 @@ fn initials(name: &str) -> String {
         .take(2)
         .collect::<String>()
         .to_uppercase()
-}
-
-fn dt_cell(ui: &mut egui::Ui, width: f32, text: egui::RichText, align_right: bool) {
-    let layout = if align_right {
-        egui::Layout::right_to_left(egui::Align::Center)
-    } else {
-        egui::Layout::left_to_right(egui::Align::Center)
-    };
-    ui.allocate_ui_with_layout(egui::vec2(width, design::scale::ROW_H), layout, |ui| {
-        ui.add(egui::Label::new(text).truncate());
-    });
 }
 
 #[cfg(test)]

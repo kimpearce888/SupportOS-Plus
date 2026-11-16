@@ -453,7 +453,7 @@ fn org_row(
     let customers = i64_field(org, "customer_count");
     let conversations = i64_field(org, "conversation_count");
     let t = design::tokens(ui);
-    dt_cell(
+    design::dt_cell(
         ui,
         240.0,
         egui::RichText::new(&name)
@@ -462,7 +462,7 @@ fn org_row(
             .color(t.foreground),
         false,
     );
-    dt_cell(
+    design::dt_cell(
         ui,
         220.0,
         egui::RichText::new(domains)
@@ -471,7 +471,7 @@ fn org_row(
             .color(t.muted_foreground),
         false,
     );
-    dt_cell(
+    design::dt_cell(
         ui,
         90.0,
         egui::RichText::new(customers.to_string())
@@ -480,7 +480,7 @@ fn org_row(
             .color(t.foreground),
         true,
     );
-    dt_cell(
+    design::dt_cell(
         ui,
         110.0,
         egui::RichText::new(conversations.to_string())
@@ -651,17 +651,6 @@ fn initials(name: &str) -> String {
         .take(2)
         .collect::<String>()
         .to_uppercase()
-}
-
-fn dt_cell(ui: &mut egui::Ui, width: f32, text: egui::RichText, align_right: bool) {
-    let layout = if align_right {
-        egui::Layout::right_to_left(egui::Align::Center)
-    } else {
-        egui::Layout::left_to_right(egui::Align::Center)
-    };
-    ui.allocate_ui_with_layout(egui::vec2(width, design::scale::ROW_H), layout, |ui| {
-        ui.add(egui::Label::new(text).truncate());
-    });
 }
 
 #[cfg(test)]

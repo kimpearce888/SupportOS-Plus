@@ -360,7 +360,12 @@ session ends by adding what the next session must not have to rediscover.
   divergences; a future "consolidate titles with label()" proposal
   must thread a PageKey through 20+ page ui() signatures for
   byte-identical output — rejected unless the owner asks (Q-03
-  family). (b) Adding a page: write the enum variant + label() arm +
+  family). [Program-3 addendum, session 25 (R8.3): reviewed under
+  the finish-everything directive's most-logical test and REJECTED
+  terminally — threading PageKey through 20+ signatures for
+  byte-identical output is indirection without abstraction (D-23);
+  the proven intentional divergences stand; ruled in D-39.]
+  (b) Adding a page: write the enum variant + label() arm +
   for_page arm + all() entry + NAV_GROUPS row + the two dispatch
   arms — the compiler FORCES all six (exhaustive matches + the
   `[Self; 23]` length type); this is the table's safety property,
@@ -539,6 +544,10 @@ session ends by adding what the next session must not have to rediscover.
     verifier). If the owner ever wants gate docstrings gone
     too, that is a one-minute follow-up batch — recorded as the
     standing owner option (same shape as Q-06's prose).
+    [Program-3 addendum, session 25 (R8.4): MOOTED — R7.5 deleted
+    scripts/ and ported the gate into the xtask `gate` subcommand;
+    the option's object no longer exists; this note stands as
+    history only.]
   - **Out of scope, deliberately:** `_archive/` (the program's
     own memory — not build machinery) and Cargo.lock (generated,
     zero comments). `.gitattributes` was censused (zero
@@ -836,6 +845,38 @@ session ends by adding what the next session must not have to rediscover.
   two imports inside multi-line braced use statements (caught by
   cargo fmt's parse pass — fmt doubles as the syntax checker;
   moved after the complete statements).
+
+- **D-38 (session 25, R8.2).** The dt_cell fold (R4.1's deferred
+  note, resolved under the Program-3 directive). The three private
+  copies (customers.rs / incidents.rs / organizations.rs) were
+  byte-identical (R4.1 had already renamed align_right across all
+  three — the fold precondition was prepared by that batch). Home:
+  `design` — beside `data_table` (the cell renderer IS the data
+  table's companion mechanism; the pages' convention of qualified
+  `design::` calls carries the fold: 11 call sites prefixed, no
+  import churn). pub(crate) visibility (all three consumers are
+  app-shell pages). Body identical modulo the self-module scale
+  reference (`design::scale::ROW_H` -> `scale::ROW_H`). Pixel
+  neutrality: the widget-call sequence is byte-identical by
+  construction; the CI kittest drift gate verified (run#386-class
+  evidence on the R8.2 head).
+
+- **D-39 (session 25, R8.3/R8.4 + the R8-material ruling).** The
+  residue rulings under the directive's most-logical test:
+  (a) page-title label() consolidation REJECTED terminally (the
+  D-19(a) annotation): churn without abstraction.
+  (b) the gate-docstring option MOOTED by R7.5 (the R8.4
+  annotation): the option's object no longer exists.
+  (c) D-36's R8-material big-fire pedantic remediation ruled NOT
+  OWED: ~1800 fires across 139.9K LOC is churn without guardrail
+  value; the 20-lint zero-fire subset stands as the terminal
+  state; a future owner can still order it, but nothing in the
+  finish-everything directive demands it (the residue audit's
+  question was ignored/skipped WORK, and this was an explicit
+  keep-with-reason).
+  The lesson generalizes: "complete everything" resolves NOTES
+  (census findings awaiting a decision), not KEEPS (decisions
+  already made and recorded).
 
 ## Facts (F-xx)
 

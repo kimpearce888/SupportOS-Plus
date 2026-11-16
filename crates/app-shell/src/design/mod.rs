@@ -1162,6 +1162,17 @@ pub fn data_table(
         });
 }
 
+pub(crate) fn dt_cell(ui: &mut egui::Ui, width: f32, text: egui::RichText, align_right: bool) {
+    let layout = if align_right {
+        egui::Layout::right_to_left(egui::Align::Center)
+    } else {
+        egui::Layout::left_to_right(egui::Align::Center)
+    };
+    ui.allocate_ui_with_layout(egui::vec2(width, scale::ROW_H), layout, |ui| {
+        ui.add(egui::Label::new(text).truncate());
+    });
+}
+
 pub fn metric_tile(
     ui: &mut egui::Ui,
     count: &str,

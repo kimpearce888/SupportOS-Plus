@@ -981,7 +981,7 @@ fn incident_row(ui: &mut egui::Ui, row: &serde_json::Value) -> Option<i64> {
     let severity = str_field(row, "severity");
     let convs = i64_field(row, "conversation_count");
     let t = design::tokens(ui);
-    dt_cell(
+    design::dt_cell(
         ui,
         90.0,
         egui::RichText::new(&code)
@@ -990,7 +990,7 @@ fn incident_row(ui: &mut egui::Ui, row: &serde_json::Value) -> Option<i64> {
             .color(t.foreground),
         false,
     );
-    dt_cell(
+    design::dt_cell(
         ui,
         240.0,
         egui::RichText::new(&title)
@@ -1012,7 +1012,7 @@ fn incident_row(ui: &mut egui::Ui, row: &serde_json::Value) -> Option<i64> {
             design::badge(ui, &status, incident_status_tone(&status));
         },
     );
-    dt_cell(
+    design::dt_cell(
         ui,
         110.0,
         egui::RichText::new(convs.to_string())
@@ -1067,17 +1067,6 @@ fn incident_detail_header(
             design::badge(ui, &status, incident_status_tone(&status));
             design::badge(ui, &severity, severity_tone(&severity));
         });
-    });
-}
-
-fn dt_cell(ui: &mut egui::Ui, width: f32, text: egui::RichText, align_right: bool) {
-    let layout = if align_right {
-        egui::Layout::right_to_left(egui::Align::Center)
-    } else {
-        egui::Layout::left_to_right(egui::Align::Center)
-    };
-    ui.allocate_ui_with_layout(egui::vec2(width, design::scale::ROW_H), layout, |ui| {
-        ui.add(egui::Label::new(text).truncate());
     });
 }
 

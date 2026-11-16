@@ -10,8 +10,11 @@ session updates this file before ending. Statuses: `pending` /
 - **PROGRAM 3 OPEN (session 25, 2026-11-16)** — owner directive
   "finish everything, take the most logical decision to complete
   everything"; operative task list is plan §12 (R8.1–R8.5, the
-  residue closure). Programs 1 and 2 stay closed. In flight:
-  R8.1 (truncation-idiom fold, battery pending).
+  residue closure). Programs 1 and 2 stay closed. Done this
+  session: R8.1 (475e055, run#386 green — the truncation fold);
+  R8.2 (dt_cell fold, battery green, commit pending); R8.3/R8.4
+  ruled (D-39). In flight: R8.2 push + R8.5 (version 1.10.1 +
+  tagged release).
 
 - **PROGRAM 2 CLOSED (session 24, 2026-11-16) — Rule 8 STOP.** All
   six Q-letters executed and terminal (records in `complete.md`'s
@@ -471,7 +474,29 @@ lanes, the no-simulation gate, kittest drift gate).
   external call sites + definition + 2 internal), 40
   needless_borrow sites stripped by `cargo clippy --fix` (the
   classifier pass worked as designed); 45 files, +435/−324.
-- Commit + CI: [PENDING].
+- R8.1 committed as 475e055 and pushed; CI run#386 GREEN on
+  475e055, all four lanes — the kittest drift gate passed, so the
+  fold is pixel-verified (203 goldens byte-identical).
+- R8.2 executed (R4.1's deferred dt_cell note): the three
+  byte-identical private copies folded to one pub(crate) fn
+  dt_cell in design beside data_table (self-module scale::ROW_H;
+  11 call sites qualified design::dt_cell; zero import churn —
+  the pages' existing `use crate::design::{self, …}` carries it).
+  Ruling in memory D-38. Battery green at the EXACT baselines
+  (gate, unwrap-policy 0/1/0, fmt, clippy x2, core 520 at 471s,
+  core-sandbox 528 at 451s, app-shell 293 at 289s, catalog+xtask
+  79, verify-icons, strip 261/261). One environment event: the
+  disk filled mid-lane (target 7.5G on the 9.9G root; the
+  multi-variant cold build) — freed 4.0G by deleting
+  target/debug/incremental; the 8 xtask test failures in the
+  interrupted lane were disk-full artifacts, re-run clean (79/79).
+- R8.3 ruled (D-39): page-title label() consolidation REJECTED
+  terminally under the most-logical test (indirection without
+  abstraction; D-19(a) annotated).
+- R8.4 ruled (D-39): the gate-docstring option annotated MOOTED
+  by R7.5 (scripts/ deleted; the note stands as history).
+- R8.5 next: version 1.10.1 + CHANGELOG + tagged release.
+- R8.2 commit + CI: [PENDING].
 
 ### Session 24 — 2026-11-16
 - Maintenance pre-flight: sandbox reset again; re-cloned via
