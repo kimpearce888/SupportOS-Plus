@@ -11,10 +11,10 @@ session updates this file before ending. Statuses: `pending` /
   "finish everything, take the most logical decision to complete
   everything"; operative task list is plan §12 (R8.1–R8.5, the
   residue closure). Programs 1 and 2 stay closed. Done this
-  session: R8.1 (475e055, run#386 green — the truncation fold);
-  R8.2 (dt_cell fold, battery green, commit pending); R8.3/R8.4
-  ruled (D-39). In flight: R8.2 push + R8.5 (version 1.10.1 +
-  tagged release).
+  session: R8.1 (475e055, run#386 green); R8.2 (d3cdb36, run#387
+  green — both folds CI/pixel-verified); R8.3/R8.4 ruled (D-39).
+  In flight: R8.5 (version 1.10.1, commit pending) — then the
+  Program 3 close-out.
 
 - **PROGRAM 2 CLOSED (session 24, 2026-11-16) — Rule 8 STOP.** All
   six Q-letters executed and terminal (records in `complete.md`'s
@@ -495,8 +495,24 @@ lanes, the no-simulation gate, kittest drift gate).
   abstraction; D-19(a) annotated).
 - R8.4 ruled (D-39): the gate-docstring option annotated MOOTED
   by R7.5 (scripts/ deleted; the note stands as history).
-- R8.5 next: version 1.10.1 + CHANGELOG + tagged release.
-- R8.2 commit + CI: [PENDING].
+- R8.2 committed as d3cdb36 and pushed; CI run#387 GREEN on
+  d3cdb36, all four lanes — the kittest drift gate passed (the
+  dt_cell fold is pixel-verified; 203 goldens byte-identical).
+- R8.5 executed: workspace version 1.10.0 -> 1.10.1 (root
+  Cargo.toml; members are version.workspace) + Cargo.lock synced
+  (exactly the 4 workspace-member version fields — the lock's
+  fifth 1.10.1 is httparse, a pre-existing coincidence) +
+  CHANGELOG [1.10.1] section (the residue-closure patch: the two
+  folds + the terminal rulings, zero-behavior-change framing).
+  Drift safety re-verified per the R7.6 analysis: CARGO_PKG_VERSION
+  display sites are app/mod.rs:507 (sidebar chrome) + settings
+  x2 + fatal.rs (error-path); grep confirms NO version content in
+  any golden. Fast local gates green on the bumped tree (gate,
+  unwrap-policy 0/1/0, fmt --check, clippy -D, verify-icons, strip
+  261/261); full battery rides CI per the R7.6 precedent (the
+  code tree differs from run#387's head only in version fields +
+  ledger docs).
+- R8.5 commit + CI + tag + release: [PENDING].
 
 ### Session 24 — 2026-11-16
 - Maintenance pre-flight: sandbox reset again; re-cloned via

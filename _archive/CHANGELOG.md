@@ -4,6 +4,36 @@ All notable changes to **SupportOS+** (SupportOS-Plus) are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.10.1] — 2026-11-16
+
+### Changed — the residue-closure patch (program 3)
+
+The audit's recorded follow-up notes, resolved in one
+owner-directed pass (CI runs #386+); zero behavior change — the
+203 kittest goldens stay byte-identical:
+
+- **The char-safe truncation idiom is single-sourced.** The
+  `.chars().take(n).collect()` mechanism (121 production sites,
+  censused line-level AND text-level — multiline chains are
+  invisible to a line scanner) now lives in
+  `core::textutil::cap_chars`; every cap VALUE stays at its call
+  site (mechanism folded, policy per-site). Two census-discovered
+  byte-identical helper pairs folded with it:
+  `textutil::truncate_chars` (notifications/notification_sweep —
+  retiring the misleading bare `trim` name) and
+  `textutil::excerpt` (interaction_signals/ai_attributes);
+  analytics' hard-cap local `truncate_chars` deleted (a
+  vocabulary collision resolved). Domain variants with genuinely
+  different policies stay (quality's ASCII-dots excerpt, inbox's
+  no-trim display cap), each dogfooding `cap_chars` internally.
+- **The data-table cell renderer is single-sourced.** The three
+  byte-identical private `dt_cell` copies
+  (customers/incidents/organizations) fold into one
+  `design::dt_cell` beside `data_table`; 11 call sites qualified.
+- Two long-recorded proposals terminally ruled rather than left
+  open: page-title consolidation rejected (indirection without
+  abstraction), the pre-port gate-docstring option mooted.
+
 ## [1.10.0] — 2026-11-16
 
 ### Changed — the deep-refactor program: two programs, closed
