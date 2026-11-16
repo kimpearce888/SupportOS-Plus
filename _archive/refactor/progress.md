@@ -1,6 +1,6 @@
 # Refactor Progress — Live State
 
-Last updated: session 22 (2026-11-16). Update rule: every session updates
+Last updated: session 23 (2026-11-16). Update rule: every session updates
 this file before ending. Statuses: `pending` / `in_progress` / `done` /
 `terminal` (done + closed in `complete.md`) / `dropped` (with reason in
 `memory.md`).
@@ -10,10 +10,11 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
 - **PROGRAM 2 OPEN** (session 21, 2026-11-15) — owner override
   "complete anything ignored and skipped"; operative task list is
   plan §11 (Q-01..Q-06 execution). Program 1 stays closed; every
-  protocol carries over. **CURRENT POINTER: R7.4-c (3 class-D
-  bootstrap sites: workers/mod.rs:30 tokio runtime, task_bridge.rs:41
-  thread spawn, design/mod.rs:239 font family — startup error
-  handling per the plan letter)**. Done: R7.1 (f9c568c), R7.2
+  protocol carries over. **CURRENT POINTER: R7.5 (Q-01 guardrails:
+  R5.1 no-simulation gate port to xtask + python3 drop from the
+  release container (G-03); R5.2 unwrap-policy lint subcommand
+  enforcing the post-R7.4 zero state in CI; R5.3 clippy pedantic
+  subset)**. Done: R7.1 (f9c568c), R7.2
   (e62bf08), R7.3 (10c3cde,
   CI run#361), R7.4-a/1 sandbox (05f7006, run#362), R7.4-a/2
   security cluster (6c9538a, run#364), R7.4-a/3 coaching cluster
@@ -24,8 +25,15 @@ this file before ending. Statuses: `pending` / `in_progress` / `done` /
   class-C post-conditions (4d91080, run#375; prod_expect 12 -> 6
   r25-series / 5 truncation: the census's 8 included 2
   cfg(test)-region digest sites — 6 production sites converted;
-  remaining 5 truncation = class D 3 + D-14 keeps 2).
-  Then R7.5 -> R7.6.
+  remaining 5 truncation = class D 3 + D-14 keeps 2) — R7.4-c
+  class-D bootstrap sites (4fd37af, run#378: block_ai_pipeline
+  Result<F::Output> + 13 '?', TaskBridge/ShellApp io::Result up to
+  main's fatal-exit channel, design font if-let gate; prod unwraps 0;
+  prod_expect r25-series 6 -> 3 / truncation 5 -> 2 — CLASS D
+  COMPLETE, the Q-03 strict-letter conversion is tree-wide complete;
+  remaining = interaction_signals D-14 keep + 2 cfg(test)-region
+  digest sites + xtask machinery). Then R7.6 (Q-02: 1.10.0 + tagged
+  release) -> program close-out.
 - Last program-1 head `6dd8c8b` CI-green (run#360, all four lanes —
   verified this session before Program 2 opened). Session counter
   resets for Program 2: session 1 of Program 2 = session 21 overall.
@@ -392,6 +400,31 @@ lanes, the no-simulation gate, kittest drift gate).
 | build files (root + crates manifests, deny.toml, rust-toolchain, .cargo, .gitignore, workflows, gate script) | R6.1 | comment-free (279 lines removed; D-29 taxonomy; shebang/docstrings functional keeps); functional zero-diff four-way proven; deny lane green against the live advisory DB on run#358 |
 
 ## Session log
+
+### Session 23 — 2026-11-16
+- Maintenance pre-flight: sandbox reset again; re-cloned via
+  github-reconnect.sh; toolchain intact at /tmp/my-project/
+  {rustup,cargo-home} (rustc 1.99.1). Discovered the repo had
+  advanced past the session-22 close-out: R7.4-c was already
+  committed (4fd37af) and pushed, but its ledger addendum never
+  landed (context-budget stop before the four-piece update).
+- CI verified: run#378 (id 43829896373) GREEN on 4fd37af, all
+  lanes — R7.4-c closed. Battery per the commit message: green at
+  exact baselines (gate, fmt --check with fmt --all run before the
+  battery (G-21), clippy workspace (70s) + core sandbox (47s)
+  -D warnings, core 520 (460s), core-sandbox 528 (450s), app-shell
+  293+2 (270s), catalog+xtask 56, verify-icons, strip-comments
+  259/259). Post-batch census: prod_expect r25-series 6 -> 3
+  (truncation 5 -> 2) — CLASS D COMPLETE; remaining = the
+  interaction_signals D-14 keep + 2 cfg(test)-region digest
+  sites + xtask machinery; prod unwraps 0. The R7.4 a+b+c
+  closure: Q-03's strict-letter conversion is tree-wide
+  complete.
+- This addendum (ledger catch-up): pointer -> R7.5; session-23
+  row recorded; R7.4-c's own execution narrative lives in the
+  4fd37af commit message (the E0308-verified spawn_blocking
+  closure ruling and the three-site detail are authoritative
+  there). Next: R7.5 (Q-01 guardrails) per the pointer.
 
 ### Session 22 — 2026-11-16
 - Maintenance pre-flight: sandbox reset again (repo gone);
