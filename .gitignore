@@ -6,7 +6,6 @@
 *.supportos
 .env
 .env.*
-!.env.example
 
 .vscode/
 .idea/

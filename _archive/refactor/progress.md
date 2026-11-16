@@ -2317,4 +2317,15 @@ lanes, the no-simulation gate, kittest drift gate).
   79; verify-icons; strip-comments 262/262 (testkit counted). The leak
   check is the new evidence line: ZERO spp-* dirs in /tmp after the
   full battery (previously ~24+ leaked per run). CI verification on the
-  pushed head to follow.
+  pushed head to follow.- R9.2 executed: repo presentation surfaced at root — git mv
+  _archive/{README.md,LICENSE,CHANGELOG.md} to the root (GitHub license
+  detection + landing page render; CHANGELOG follows Keep-a-Changelog's
+  root convention); release.yml's changes.md extractor follows the move
+  (`CHANGELOG.md` path); the README's stale CI bullet (cited the
+  R0-removed python gate scripts and traceability step) refreshed to the
+  current CI truth (xtask gate + unwrap-policy, 20-lint clippy set,
+  203-golden drift gate, arm64 packaging lane, dev-battery zero-comment
+  note); the dangling `!.env.example` gitignore negation (no such file
+  exists; nothing loads .env files) dropped. Code tree byte-identical to
+  R9.1's head — the docs-only precedent equivalence; fast gates re-run
+  green; CI verification on the pushed head to follow.

@@ -259,17 +259,20 @@ targets are gone; the two Linux packages are the complete packaging surface.
 
 ## Verification
 
-- **CI (every push to main):** the no-simulation and traceability gates
-  (`scripts/gate_no_simulation.py`, `scripts/gate_traceability.py` — the app
-  builds empty and every page traces to its acceptance record), fmt, icon
-  verification, clippy (`-D warnings`) across the workspace and the `sandbox`
-  feature, the full workspace test suite plus the sandbox-feature tests,
-  `cargo-deny` advisories/licenses/bans, and the kittest snapshot locks (the
-  reskin drift gate — golden snapshots diff-locked on lavapipe).
-  A second job adds an AppImage build, a `.deb` build, and boot-chain smoke
-  runs of both packages (`SPP_SMOKE=1` verifies logging, single-instance
-  lock, migrations, boot services, background workers and the loopback
-  listener).
+- **CI (every push to main):** the no-simulation gate (the xtask `gate`
+  subcommand — the app builds empty), the unwrap/panic policy gate (xtask
+  `unwrap-policy`: zero production unwraps, one allowlisted
+  constant-regex expect), fmt, icon verification, clippy (`-D warnings`,
+  including a 20-lint zero-fire pedantic set) across the workspace and the
+  `sandbox` feature, the full workspace test suite plus the sandbox-feature
+  tests, `cargo-deny` advisories/licenses/bans, and the kittest snapshot
+  locks (the reskin drift gate — 203 golden snapshots diff-locked on
+  lavapipe). A second job adds an AppImage build, a `.deb` build, and
+  boot-chain smoke runs of both packages (`SPP_SMOKE=1` verifies logging,
+  single-instance lock, migrations, boot services, background workers and
+  the loopback listener), on x86_64 and arm64. The dev battery
+  (`cargo xtask lint` + `strip-comments --check`) additionally enforces the
+  zero-comment tree.
 - **Release pipeline (every tag):** builds both packages on the ubuntu:22.04
   glibc 2.35 baseline, installs the `.deb` through APT on clean
   ubuntu:22.04 / ubuntu:24.04 / debian:12 containers (dependency resolution,
