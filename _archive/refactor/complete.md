@@ -234,3 +234,64 @@ per-head evidence. Every batch battery-verified locally, pushed green.
 - The closing docs-only head `a0fe69d` is CI-VERIFIED: run#384
   (id 43875255895) green, all four lanes (the R3.5 docs-only
   precedent — code tree byte-identical to run#382's).
+
+## Program 3 — residue closure (R8.1–R8.5), closing report
+
+Opened session 25 (2026-11-16) on the owner directive "finish
+everything, take the most logical decision to complete everything";
+the scope was the residue audit's findings. CI runs #386–#389 +
+Release run#39 carry the per-head evidence. Every batch
+battery-verified locally, pushed green.
+
+### Terminal records (plan §12 letters)
+
+- **R8.1 (D-18's deferred truncation-idiom note), `475e055`, CI
+  run#386.** The char-safe truncation mechanism single-sourced into
+  `core::textutil` (the existing text-mechanism home): `pub fn
+  cap_chars` + two census-discovered twin folds
+  (`truncate_chars` = the notifications/notification_sweep pair,
+  retiring the misleading bare `trim` name; `excerpt` = the
+  interaction_signals/ai_attributes pair). Census (line-level AND
+  text-level — the line scanner was blind to 23 multiline chains):
+  125 raw occurrences = 121 production + 2 test-region (D-10) + 2
+  xtask machinery (D-14); 116 sites converted + 5 removed with the
+  folded twins; analytics' hard-cap local `truncate_chars` deleted
+  (a semantic vocabulary collision resolved); domain variants kept
+  per D-17 (quality::excerpt_of, inbox::truncate_chars) dogfooding
+  cap_chars. Terminal raw census: 4 (definition + keeps).
+  118 external cap_chars call sites; 45 files, +447/−324.
+- **R8.2 (R4.1's deferred dt_cell note), `d3cdb36`, CI run#387.**
+  The three byte-identical private copies folded to one
+  `pub(crate) fn dt_cell` in `design` beside `data_table`; 11 call
+  sites qualified `design::dt_cell`; zero import churn. Ruling in
+  D-38.
+- **R8.3 + R8.4 (the rulings, riding `d3cdb36`'s ledger block,
+  D-39).** Page-title `label()` consolidation REJECTED terminally
+  (indirection without abstraction; D-19(a) annotated); the
+  gate-docstring option annotated MOOTED by R7.5; D-36's
+  R8-material big-fire pedantic remediation ruled NOT OWED (the
+  20-lint zero-fire subset stands as the terminal state).
+- **R8.5, `d4a19f5`, CI run#388 + tag run#389 + Release run#39
+  (all 6 jobs green).** Version 1.10.1 + CHANGELOG [1.10.1] (the
+  residue-closure patch) + the tagged release. Published at tag
+  `v1.10.1` (target `d4a19f5`), 2026-11-16T18:10:27Z,
+  live-verified post-publish: BUILD-INFO version/commit match,
+  both binary assets HTTP 200 through the public download URLs
+  (AppImage 13.07 MB, .deb 10.40 MB), SHA256SUMS present
+  (030918e2… / 3a2ff473…).
+
+### Program-3 final state
+
+- 261 Rust files / 139,820 LOC / 0 comments / 0 production
+  unwraps / 1 justified production expect / 0 production
+  panic-family / 203 kittest goldens byte-identical (the drift
+  gate stayed green through runs #386–#389 — every Program-3
+  batch pixel-verified) / pub surface +1 (cap_chars, with
+  reachability proof: 118 call sites incl. app-shell's).
+- The residue audit's ledger is now fully resolved: every
+  census-noted future-batch note is either executed (R8.1, R8.2)
+  or terminally ruled with a written most-logical-test decision
+  (R8.3, R8.4, the R8-material line). Nothing recorded as
+  "deferred"/"if ordered" remains open anywhere in the ledger.
+- Terminal condition met: Program 3 ends at a Rule 8 STOP — the
+  queue is empty; new work opens only on an owner directive.

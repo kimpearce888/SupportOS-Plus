@@ -7,14 +7,18 @@ session updates this file before ending. Statuses: `pending` /
 
 ## CURRENT POINTER
 
-- **PROGRAM 3 OPEN (session 25, 2026-11-16)** — owner directive
-  "finish everything, take the most logical decision to complete
-  everything"; operative task list is plan §12 (R8.1–R8.5, the
-  residue closure). Programs 1 and 2 stay closed. Done this
-  session: R8.1 (475e055, run#386 green); R8.2 (d3cdb36, run#387
-  green — both folds CI/pixel-verified); R8.3/R8.4 ruled (D-39).
-  In flight: R8.5 (version 1.10.1, commit pending) — then the
-  Program 3 close-out.
+- **PROGRAM 3 CLOSED (session 25, 2026-11-16) — Rule 8 STOP.**
+  All five R-letters executed and terminal (records in
+  `complete.md`'s Program 3 closing report): R8.1 (475e055,
+  run#386), R8.2 (d3cdb36, run#387), R8.3/R8.4 (the D-39 rulings,
+  riding d3cdb36's ledger block), R8.5 (d4a19f5, CI run#388 + tag
+  run#389 + Release run#39 — **v1.10.1 PUBLISHED** at tag
+  `v1.10.1`, target `d4a19f5`, post-publish live-verified:
+  BUILD-INFO version/commit match, both binary assets HTTP 200,
+  SHA256SUMS present). The residue is fully resolved — nothing
+  recorded as deferred/if-ordered remains open anywhere in the
+  ledger. The queue is empty — new work opens only on an owner
+  directive.
 
 - **PROGRAM 2 CLOSED (session 24, 2026-11-16) — Rule 8 STOP.** All
   six Q-letters executed and terminal (records in `complete.md`'s
@@ -512,7 +516,24 @@ lanes, the no-simulation gate, kittest drift gate).
   261/261); full battery rides CI per the R7.6 precedent (the
   code tree differs from run#387's head only in version fields +
   ledger docs).
-- R8.5 commit + CI + tag + release: [PENDING].
+- R8.5 committed as d4a19f5 and pushed; CI run#388 GREEN on
+  d4a19f5 (all four lanes; kittest drift gate green — zero golden
+  drift as predicted); tag v1.10.1 pushed at d4a19f5 -> tag CI
+  run#389 GREEN + Release run#39 GREEN (all 6 jobs:
+  build+test+package, verify .deb ubuntu:22.04/24.04 + debian:12,
+  verify AppImage, publish). Published 2026-11-16T18:10:27Z;
+  live-verified: BUILD-INFO shows version 1.10.1 / commit
+  d4a19f5bd8c4… (exact match), both assets HTTP 200 through the
+  public URLs (AppImage 13,072,888 B; .deb 10,399,802 B),
+  SHA256SUMS present (030918e2… / 3a2ff473…).
+- PROGRAM 3 CLOSED (Rule 8 STOP): closing report in complete.md;
+  pointer updated; handover state line -> all three programs
+  closed; memory directive note closed out. Final state: 261
+  files / 139,820 LOC / 0 comments / 0 production unwraps / 1
+  justified expect / 0 panic-family / 203 goldens byte-identical
+  / pub +1 (cap_chars). Terminal-head CI verification follows on
+  this closing docs-only head (the R3.5 precedent; code tree
+  byte-identical to run#388's d4a19f5).
 
 ### Session 24 — 2026-11-16
 - Maintenance pre-flight: sandbox reset again; re-cloned via

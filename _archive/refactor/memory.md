@@ -1097,7 +1097,12 @@ session ends by adding what the next session must not have to rediscover.
   gate-docstring option (R8.4), and D-36's R8-material pedantic
   line (ruled not-owed, see D-39). The six Q-letters stay closed;
   no new Q-letters are opened — the residue was never
-  option-gated, it was census-noted.
+  option-gated, it was census-noted. **PROGRAM-3 CLOSE-OUT
+  (session 25): all five R-letters executed and closed — R8.1
+  (475e055, run#386), R8.2 (d3cdb36, run#387), R8.3/R8.4 (the
+  D-39 rulings), R8.5 (d4a19f5, run#388/#389 + Release run#39;
+  v1.10.1 published and live-verified). Rule 8 STOP; the residue
+  ledger is fully resolved.**
 
 - **OWNER OVERRIDE (session 21).** "Complete anything ignored and
   skipped" — every Q-01..Q-06 default is overridden; execution is
