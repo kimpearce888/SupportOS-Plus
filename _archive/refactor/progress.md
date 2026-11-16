@@ -532,6 +532,39 @@ lanes, the no-simulation gate, kittest drift gate).
   restructure is pixel-verified). Session-22 total: 7 commits
   (3 batch + 1 fmt fix + 3 addenda incl. this one); CI runs
   #369-#375. Next: R7.4-c (3 class-D bootstrap sites).
+- R7.4-c prep (read-only census, recorded for the next
+  session; D-33(d) discipline; context-budget stop: the
+  session-21 lesson says never carry uncommitted state across
+  a battery when the context window may die): (1)
+  workers/mod.rs:26 block_ai_pipeline<F> -> F::Output with
+  Builder::new_current_thread().enable_all().build()
+  .expect("AI pipeline runtime") — 13 call sites, ALL inside
+  Result-returning job handlers (ops.rs 157/261/508 + ai.rs
+  35/226/282/316/377/450/560/627 + more; the honest form:
+  block_ai_pipeline -> Result<F::Output> via .map_err into
+  the crate Error channel + 13 '?' at the call sites —
+  every caller is already Result-aware, so the churn is one
+  '?' per site; alternative shapes (thread-local cached
+  runtime) rejected: per-call current-thread runtime is the
+  existing design). (2) task_bridge.rs:41 thread Builder
+  spawn .expect("failed to spawn the task bridge thread") —
+  TaskBridge::spawn (app/mod.rs:105, the ONLY prod caller) +
+  spawn_with (test region :27 region calls it directly); the
+  honest form: spawn_with -> Result<Self> (std::io::Error ->
+  Error::Other), spawn -> Result<Self>, the app bootstrap
+  caller handles at startup (check app/mod.rs:105's enclosing
+  fn — if it is infallible TODAY the startup-error channel
+  needs the app run fn's error path — census at edit time);
+  the test caller gains .expect (D-10). (3) design/mod.rs:239
+  fonts.families.get_mut(&Proportional).expect("proportional
+  family") — a post-condition on FontDefinitions::default()
+  (the family is always present in a fresh default); the
+  honest form: if-let gate on the push (zero signature
+  churn; on the never-taken None the Hack font registration
+  is skipped — pixel-neutral on the reachable path, the
+  kittest gate rides the push); install() is called ONCE
+  (app/mod.rs:102). Sub-batching: all three in one batch
+  (small; the battery rides once).
 
 ### Session 21 — 2026-11-15
 - Maintenance pre-flight (program-1-closed protocol): re-cloned via
