@@ -1322,4 +1322,13 @@ session ends by adding what the next session must not have to rediscover.
   audit terminal rulings recorded in plan §13 (R8.1 stat typo —
   immutable history; too_many_arguments migration — not owed;
   excerpt_of ASCII dots — domain keep; sandbox disk pressure —
-  environmental, no repo action).
+  environmental, no repo action).- **Program-4 close-out note (session 26):** all three letters
+  terminal with their commits and runs — R9.1 34b4186 (CI #392
+  attempt 2; original dispatch concurrency-cancelled by the next
+  push, re-run to green — the cancel-in-progress design means a
+  superseded head needs its rerun), R9.2 5a2634b (rides the R3.5
+  docs-only equivalence: crates/ byte-identical to the
+  run#392-verified 34b4186; its release.yml path edit verified live
+  by Release #40), R9.3 3c0a64d (CI #394 + tag CI #395 + Release
+  run#40 all green; v1.10.2 live-verified: BUILD-INFO match, HTTP 200
+  x4, SHA256 MATCH x2, root-changelog notes extraction working).

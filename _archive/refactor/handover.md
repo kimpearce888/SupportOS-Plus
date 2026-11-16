@@ -3,10 +3,13 @@
 Read this every session before touching anything. Pairs with `memory.md`
 (durable decisions) and `progress.md` (live state).
 
-**PROGRAM STATE: PROGRAM 4 OPEN — audit-fix closure (R9.1–R9.3)**
-(session 26, 2026-11-16; owner directive "fix everything" after the
-independent post-v1.10.1 audit). Programs 1–3 stay closed; v1.10.1
-remains the published release until R9.3 tags 1.10.2
+**PROGRAM STATE: ALL FOUR PROGRAMS CLOSED — Rule 8 STOP**
+(session 26, 2026-11-16). Programs 1–3 stay closed as recorded;
+Program 4 (R9.1–R9.3, the audit-fix closure) is terminal with its
+closing report in `complete.md`. **v1.10.2 is published** (tag
+`v1.10.2`, target `3c0a64d`, Release run#40 all-6-jobs green,
+post-publish live-verified; v1.10.1 and v1.10.0 stand at their tags).
+The queue is empty — new work opens only on an owner directive
 (session 25, 2026-11-16). Program 1 (20 sessions / CI runs
 #301–#359), Program 2 (Q-01..Q-06, sessions 21–24 / CI runs
 #360–#383), and Program 3 (R8.1–R8.5, session 25 / CI runs

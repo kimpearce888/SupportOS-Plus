@@ -2297,8 +2297,8 @@ lanes, the no-simulation gate, kittest drift gate).
 - CI: run#301 (id 43227385165) — completed / success on all four lanes
   (check, packages x86_64, packages arm64, kittest snapshot locks).
   R0 terminal; evidence in `complete.md`.
-- PROGRAM 4 OPEN (session 26, R9.1 in flight): audit-fix closure under
-  the owner directive "fix everything".
+- PROGRAM 4 CLOSED (session 26, Rule 8 STOP): audit-fix closure
+  complete — R9.1/R9.2/R9.3 terminal, v1.10.2 published; queue empty.
 
 ## session 26 — Program 4 (audit-fix closure)
 
@@ -2340,4 +2340,11 @@ lanes, the no-simulation gate, kittest drift gate).
   unwrap-policy / fmt / verify-icons / strip 262/262); full battery
   rode R9.1's byte-identical code head 34b4186 (CI run#392) per the
   docs-only precedent equivalence. Tag v1.10.2 follows at the green
-  head; release evidence chain to follow in complete.md.
+  head; release evidence chain to follow in complete.md.- R9.3 release evidence chain: CI #394 green on the release head
+  3c0a64d (all four lanes; the kittest drift gate confirmed the
+  203 goldens byte-identical through the R9.1 sweep); tag CI #395
+  green; Release run#40 all-6-jobs green; live-verified post-publish
+  (BUILD-INFO 1.10.2/3c0a64d match, assets HTTP 200, SHA256 digest
+  MATCH x2, root-changelog release-note extraction working).
+  Program 4 closing report in complete.md; handover state line ->
+  ALL FOUR PROGRAMS CLOSED. Rule 8 STOP.

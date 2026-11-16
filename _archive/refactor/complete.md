@@ -295,3 +295,57 @@ battery-verified locally, pushed green.
   "deferred"/"if ordered" remains open anywhere in the ledger.
 - Terminal condition met: Program 3 ends at a Rule 8 STOP — the
   queue is empty; new work opens only on an owner directive.
+## Program 4 — audit-fix closure (R9.1–R9.3), closing report
+
+Opened session 26 (2026-11-16) on the owner directive "fix everything"
+following the independent post-v1.10.1 audit; the scope was the audit's
+fixable findings. CI runs #392 (attempt 2), #394, #395 + Release run#40
+carry the per-head evidence. Every batch battery-verified locally,
+pushed green.
+
+### Terminal records (plan §13 letters)
+
+- **R9.1 (test scratch hygiene + the truncate_chars name collision),
+  `34b4186`, CI run#392 (attempt 2 — the original dispatch was
+  concurrency-cancelled by the next push; re-run to green).**
+  core::testkit::TempDir (the 46th whole-file cfg(test) module) + the
+  app-shell testsupport twin own every test-region scratch dir; 28
+  files swept — the workers family (leaked unconditionally, ~24 dirs
+  per battery run), the panic-leakers, bench's local TempDirGuard fold.
+  New evidence line: ZERO spp-* dirs in /tmp after a full battery. The
+  inbox display-cap twin renamed ellipsize (D-41), killing the
+  cross-crate name collision; 4 call sites. Scope rulings in D-40
+  (file-based keeps; it_helpscout pass-through).
+- **R9.2 (root repo presentation), `5a2634b`, run#393
+  concurrency-cancelled — rides the R3.5 docs-only equivalence**: the
+  crates/ tree is byte-identical to 34b4186's (CI-verified by run#392
+  attempt 2), its single non-docs edit (release.yml's changes.md path)
+  is exercised and verified live by Release run#40 on the tag.
+  README/LICENSE/CHANGELOG surfaced at root (git mv); the README's
+  stale CI bullet repaired (the R0-removed python gate scripts
+  replaced by the current CI truth); the dangling !.env.example
+  gitignore negation dropped.
+- **R9.3 (release), `3c0a64d`, CI run#394 green + tag CI run#395 green
+  + Release run#40 all-6-jobs green.** Version 1.10.2 + CHANGELOG
+  [1.10.2] (the audit-fix patch) + the tagged release. Published at
+  tag `v1.10.2` (target `3c0a64d`), 2026-11-16T23:46:43Z,
+  live-verified post-publish: BUILD-INFO version/commit match; both
+  binary assets HTTP 200 through the public download URLs (AppImage
+  13.07 MB, .deb 10.39 MB); SHA256SUMS present and verified by full
+  download + digest (49a0f0bd… AppImage / b89a02b9… .deb, both
+  MATCH); the release notes show the [1.10.2] section extracted from
+  the ROOT changelog — R9.2's release.yml path fix verified live.
+
+### Program-4 final state
+
+- 262 Rust files / 139,694 LOC / 0 comments / 0 production
+  unwraps / 1 justified production expect / 0 production
+  panic-family / 203 kittest goldens byte-identical (the drift gate
+  green on every Program-4 CI lane) / pub surface +1 (cap_chars
+  remains; testkit is cfg(test)-gated, not pub).
+- Every audit finding is fixed (R9.1, R9.2) or terminally ruled in
+  plan §13's rulings block (R8.1 stat typo — immutable pushed history;
+  too_many_arguments migration — not owed; excerpt_of ASCII dots —
+  domain keep; sandbox disk pressure — environmental).
+- Terminal condition met: Program 4 ends at a Rule 8 STOP — the
+  queue is empty; new work opens only on an owner directive.
