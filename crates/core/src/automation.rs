@@ -288,12 +288,12 @@ pub(crate) fn apply_m060_automation_once_guard(conn: &Connection) -> Result<()> 
 pub(crate) fn customer_thread_trigger_decision(
     last_fired: Option<i64>,
     newest_customer_thread: Option<i64>,
-) -> Option<&'static str> {
+) -> Option<(&'static str, i64)> {
     match newest_customer_thread {
         None => None,
         Some(thread) if last_fired == Some(thread) => None,
-        Some(_) if last_fired.is_none() => Some("new_conversation"),
-        Some(_) => Some("customer_reply"),
+        Some(thread) if last_fired.is_none() => Some(("new_conversation", thread)),
+        Some(thread) => Some(("customer_reply", thread)),
     }
 }
 
@@ -1392,7 +1392,7 @@ mod batch25_item57_tests {
     fn the_first_customer_thread_ever_seen_fires_new_conversation() {
         assert_eq!(
             customer_thread_trigger_decision(None, Some(41)),
-            Some("new_conversation"),
+            Some(("new_conversation", 41)),
             "no thread has ever fired for this conversation — the first customer thread is THE new conversation"
         );
     }
@@ -1401,7 +1401,7 @@ mod batch25_item57_tests {
     fn a_later_customer_thread_fires_customer_reply_only() {
         assert_eq!(
             customer_thread_trigger_decision(Some(41), Some(57)),
-            Some("customer_reply"),
+            Some(("customer_reply", 57)),
             "a thread the guard has not consumed is a reply, never a second new_conversation"
         );
     }

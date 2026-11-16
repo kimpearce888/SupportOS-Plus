@@ -100,6 +100,11 @@ impl LiveChatsPage {
     pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) -> Option<NavRequest> {
         self.ensure_loaded(db);
 
+        let Some(model) = self.model.as_ref() else {
+            ui.spinner();
+            return None;
+        };
+        let counter = format!("{} open · {} ended", model.open, model.ended);
         design::page_header(
             ui,
             "Live chats",
@@ -108,8 +113,7 @@ impl LiveChatsPage {
                  automatically.",
             ),
             |ui| {
-                let model = self.model.as_ref().expect("loaded above");
-                design::page_counter(ui, &format!("{} open · {} ended", model.open, model.ended));
+                design::page_counter(ui, &counter);
             },
         );
 

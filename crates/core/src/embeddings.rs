@@ -797,22 +797,25 @@ fn vector_point(
     model: &str,
 ) -> Result<crate::vectorstore_sqlitevec::VectorPoint> {
     let entity_type = entity_type_for(table);
-    let mut payload = serde_json::json!({
-        "entity_type": entity_type,
-        "entity_id": chunk.entity_id,
-        "chunk_id": chunk.id,
-        "title": chunk.title,
-        "text": utf16_slice(&chunk.content, 0, 2000),
-        "visibility": chunk.visibility,
-        "embedding_model": model,
-        "index_version": 2
-    });
+    let mut payload = serde_json::Map::new();
+    payload.insert("entity_type".to_string(), serde_json::json!(entity_type));
+    payload.insert("entity_id".to_string(), serde_json::json!(chunk.entity_id));
+    payload.insert("chunk_id".to_string(), serde_json::json!(chunk.id));
+    payload.insert("title".to_string(), serde_json::json!(chunk.title));
+    payload.insert(
+        "text".to_string(),
+        serde_json::json!(utf16_slice(&chunk.content, 0, 2000)),
+    );
+    payload.insert(
+        "visibility".to_string(),
+        serde_json::json!(chunk.visibility),
+    );
+    payload.insert("embedding_model".to_string(), serde_json::json!(model));
+    payload.insert("index_version".to_string(), serde_json::json!(2));
     if table == "conversation_chunks" {
-        payload
-            .as_object_mut()
-            .expect("payload is an object")
-            .insert("number".to_string(), chunk.number.into());
+        payload.insert("number".to_string(), serde_json::json!(chunk.number));
     }
+    let payload = serde_json::Value::Object(payload);
     Ok(crate::vectorstore_sqlitevec::VectorPoint {
         id: crate::vectorstore_sqlitevec::namespaced_chunk_point_id(entity_type, chunk.id)?,
         vector: vector.to_vec(),

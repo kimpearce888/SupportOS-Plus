@@ -519,9 +519,7 @@ impl WorkerManager {
                 last_fired,
                 latest_customer_thread,
             );
-            if let Some(trigger) = trigger {
-                let newest_customer_thread =
-                    latest_customer_thread.expect("decision guarantees a thread id");
+            if let Some((trigger, newest_customer_thread)) = trigger {
                 let mut conn = self.lock();
                 let fired = crate::automation::fire_trigger_for_conversation(
                     &mut conn,

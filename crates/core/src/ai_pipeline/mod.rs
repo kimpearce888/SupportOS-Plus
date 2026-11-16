@@ -1108,7 +1108,7 @@ pub(crate) async fn generate_draft(
     .map_err(|e| LmStudioError::new(e.to_string(), true))?;
     let draft = get_draft(conn, draft_id)
         .map_err(|e| LmStudioError::new(e.to_string(), true))?
-        .expect("draft just created");
+        .ok_or_else(|| LmStudioError::new("draft row missing after insert", false))?;
     Ok((draft, verification))
 }
 

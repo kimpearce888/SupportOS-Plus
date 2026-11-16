@@ -245,37 +245,45 @@ pub fn graph_stats(conn: &Connection) -> Result<Value> {
         })
         .unwrap_or(0)
     };
-    let node_specs: [(&str, &str); 12] = [
+    let node_specs: [(GraphNodeKind, &str); 12] = [
         (
-            "customer",
+            GraphNodeKind::Customer,
             "SELECT id FROM customers WHERE deleted_at IS NULL",
         ),
         (
-            "organization",
+            GraphNodeKind::Organization,
             "SELECT id FROM organizations WHERE deleted_at IS NULL",
         ),
         (
-            "conversation",
+            GraphNodeKind::Conversation,
             "SELECT id FROM conversations WHERE deleted_at IS NULL",
         ),
-        ("known_issue", "SELECT id FROM known_issues"),
-        ("issue_cluster", "SELECT id FROM issue_clusters"),
-        ("incident", "SELECT id FROM incidents"),
-        ("knowledge_document", "SELECT id FROM knowledge_documents"),
-        ("agent", "SELECT id FROM users WHERE deleted_at IS NULL"),
-        ("campaign", "SELECT id FROM outreach_campaigns"),
-        ("product", "SELECT id FROM products"),
+        (GraphNodeKind::KnownIssue, "SELECT id FROM known_issues"),
+        (GraphNodeKind::IssueCluster, "SELECT id FROM issue_clusters"),
+        (GraphNodeKind::Incident, "SELECT id FROM incidents"),
         (
-            "custom_object",
+            GraphNodeKind::KnowledgeDocument,
+            "SELECT id FROM knowledge_documents",
+        ),
+        (
+            GraphNodeKind::Agent,
+            "SELECT id FROM users WHERE deleted_at IS NULL",
+        ),
+        (GraphNodeKind::Campaign, "SELECT id FROM outreach_campaigns"),
+        (GraphNodeKind::Product, "SELECT id FROM products"),
+        (
+            GraphNodeKind::CustomObject,
             "SELECT id FROM custom_objects WHERE deleted_at IS NULL",
         ),
-        ("connector_data", "SELECT id FROM connector_rows"),
+        (
+            GraphNodeKind::ConnectorData,
+            "SELECT id FROM connector_rows",
+        ),
     ];
     let nodes: Vec<Value> = node_specs
         .iter()
         .map(|(kind, sql)| {
-            let kind = GraphNodeKind::parse(kind).expect("12 kinds");
-            json!({"kind": kind.as_str(), "label": kind_label(kind), "count": count(sql)})
+            json!({"kind": kind.as_str(), "label": kind_label(*kind), "count": count(sql)})
         })
         .collect();
     let edge_specs: [(&str, &str, &str); 17] = [

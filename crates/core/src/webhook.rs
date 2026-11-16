@@ -26,7 +26,7 @@ pub(crate) fn verify_delivery(secret: &[u8], body: &[u8], provided_signature: &s
 }
 
 pub(crate) fn verify_signature(secret: &[u8], body: &[u8], provided_signature: &str) -> Result<()> {
-    let mut mac = HmacSha1::new_from_slice(secret).expect("HMAC accepts any key length");
+    let mut mac = HmacSha1::new_from_slice(secret).map_err(|_| Error::WebhookSignature)?;
     mac.update(body);
     let provided = base64::engine::general_purpose::STANDARD
         .decode(provided_signature)
