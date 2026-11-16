@@ -2328,4 +2328,16 @@ lanes, the no-simulation gate, kittest drift gate).
   note); the dangling `!.env.example` gitignore negation (no such file
   exists; nothing loads .env files) dropped. Code tree byte-identical to
   R9.1's head — the docs-only precedent equivalence; fast gates re-run
-  green; CI verification on the pushed head to follow.
+  green; CI verification on the pushed head to follow.- R9.3 executed: version 1.10.2 + CHANGELOG [1.10.2] (the audit-fix
+  patch). Workspace version bump 1.10.1 -> 1.10.2 (root Cargo.toml;
+  members are version.workspace = true) with Cargo.lock synced (exactly
+  the 4 workspace-member version fields; no dependency changes — the
+  1.10.1-era httparse coincidence does not recur). Drift safety per the
+  R7.6 analysis: the CARGO_PKG_VERSION display lives in app/mod.rs
+  sidebar chrome (not rendered by any kittest suite) + settings x2 +
+  fatal.rs (error-path-only); grep confirms no version content in any
+  golden. Fast local gates re-run green on the bumped tree (gate /
+  unwrap-policy / fmt / verify-icons / strip 262/262); full battery
+  rode R9.1's byte-identical code head 34b4186 (CI run#392) per the
+  docs-only precedent equivalence. Tag v1.10.2 follows at the green
+  head; release evidence chain to follow in complete.md.

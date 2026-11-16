@@ -4,6 +4,31 @@ All notable changes to **SupportOS+** (SupportOS-Plus) are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.10.2] — 2026-11-16
+
+### Fixed — the audit-fix patch (program 4)
+
+The independent post-release audit's fixable findings, resolved in one
+owner-directed pass (CI runs #392+); zero behavior change — the 203
+kittest goldens stay byte-identical:
+
+- **Test scratch dirs no longer leak.** Every test-region temp dir is
+  now owned by a Drop guard (`core::testkit::TempDir`, plus an
+  app-shell `testsupport` twin): the workers test family previously
+  leaked a dir per `temp_db()` call unconditionally (~24 per battery
+  run); the others leaked on panic. After a full battery, /tmp now
+  holds zero `spp-*` scratch dirs. Bench's hand-rolled local guard
+  folds into testkit.
+- **The repo surfaces README, LICENSE and CHANGELOG at the root**
+  (moved from the archive): the landing page renders, GitHub detects
+  the MIT license, release notes extract from the root changelog, and
+  the README's CI section no longer cites the long-removed python gate
+  scripts. The dangling `!.env.example` gitignore negation is gone.
+- **The inbox display cap is `ellipsize` now** — the cross-crate name
+  collision with `textutil::truncate_chars` (trim-first, off-by-one)
+  ends; the no-trim display policy itself is unchanged, as is
+  `cap_chars` as the shared truncation mechanism.
+
 ## [1.10.1] — 2026-11-16
 
 ### Changed — the residue-closure patch (program 3)
