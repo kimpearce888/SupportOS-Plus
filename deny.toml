@@ -8,6 +8,8 @@ ignore = [
     { id = "RUSTSEC-2026-0370", reason = "zvariant unmaintained (merged into zbus 6); pulled via accesskit_unix (Linux accessibility bus)" },
     { id = "RUSTSEC-2026-0371", reason = "zbus_names unmaintained; pulled via accesskit_unix (Linux accessibility bus)" },
     { id = "RUSTSEC-2026-0372", reason = "zvariant_derive unmaintained; pulled via accesskit_unix (Linux accessibility bus)" },
+    { id = "RUSTSEC-2026-0543", reason = "chrono 0.4.45 flagged unmaintained upstream on 2026-11-17; no safe upgrade yet — migration to jiff/time tracked separately, suppress until then" },
+    { id = "RUSTSEC-2026-0555", reason = "chrono-tz 0.10.4 flagged unmaintained upstream on 2026-11-17; same story as chrono — suppress pending migration" },
 ]
 
 [licenses]
