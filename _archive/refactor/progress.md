@@ -2347,4 +2347,12 @@ lanes, the no-simulation gate, kittest drift gate).
   (BUILD-INFO 1.10.2/3c0a64d match, assets HTTP 200, SHA256 digest
   MATCH x2, root-changelog release-note extraction working).
   Program 4 closing report in complete.md; handover state line ->
-  ALL FOUR PROGRAMS CLOSED. Rule 8 STOP.
+  ALL FOUR PROGRAMS CLOSED. Rule 8 STOP.- Ledger addendum: terminal-head verification recorded — run#396
+  GREEN on the Program-4 close-out head f94c382, all four lanes (the
+  R3.5 docs-only precedent: code tree byte-identical to run#394's
+  3c0a64d — the close-out commit touches only _archive ledger docs).
+  The engagement's evidence chain now closes with the terminal head
+  itself CI-verified, matching the program-1 session-20, program-2
+  edffa10, and program-3 44d7add patterns. Rule 8 STOP stands: all
+  four programs closed, v1.10.2 published at tag v1.10.2 (target
+  3c0a64d), queue empty — new work opens only on an owner directive.
