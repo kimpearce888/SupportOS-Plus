@@ -316,3 +316,90 @@ fn r5_inbox_folded_views_800_light() {
 fn uxg_inbox_reader_2560_light() {
     render_copilot_state(false, 2560.0, 960.0, false, "uxg_inbox_reader_2560_light");
 }
+
+#[test]
+fn r10_copilot_content_respects_panel_margin_2560() {
+    let (page, db, bus) = seeded_page();
+    db.with_write(|conn| {
+        conn.execute(
+            "INSERT INTO conversation_threads (conversation_id, type, body_text, from_type, state, created_by_user_id, created_at)
+             VALUES (2, 'reply', ?1, 'user', 'published', 5, '2026-07-23T09:00:00.000Z')",
+            [ "A".repeat(400).as_str() ],
+        )
+        .expect("seed long resolution reply");
+        spp_core::search::rebuild_indexes(conn).expect("fts rebuild");
+        conn.execute(
+            "INSERT INTO knowledge_sources (id, name, kind, visibility) VALUES (3, 'wiki', 'manual', 'internal_only')",
+            [],
+        )
+        .expect("seed knowledge source");
+        conn.execute(
+            "INSERT INTO knowledge_documents (id, source_id, title, content)
+             VALUES (77, 3, 'Waiting on customer export CSV format long article title', ?1)",
+            [
+                "The article body explains the export CSV format and waiting-on-customer triage workflow in considerable detail ".repeat(6).as_str(),
+            ],
+        )
+        .expect("seed knowledge doc");
+        Ok::<(), rusqlite::Error>(())
+    })
+    .expect("seed write");
+    let state = CopilotPageState {
+        installed: false,
+        page,
+        db,
+        bus,
+    };
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(2560.0, 1440.0))
+        .with_theme(egui::Theme::Light)
+        .build_ui_state(
+            move |ui, s| {
+                if !s.installed {
+                    design::install(ui.ctx());
+                    s.installed = true;
+                }
+                design::host_inbox_page(ui, |ui| {
+                    s.page.ui(ui, &s.db, &s.bus, None);
+                });
+            },
+            state,
+        );
+    harness.run_ok();
+    harness.get_by_label("Copilot").click();
+    harness.run_ok();
+    harness.run_ok();
+
+    let page_right = 2560.0 - 24.0;
+    let content_right = page_right - 12.0;
+    let probe_labels = [
+        "Signals",
+        "Summary",
+        "Similar past issues",
+        "Relevant help articles",
+        "Suggested reply",
+        "local · no configuration needed",
+    ];
+    for label in probe_labels {
+        for el in harness.query_all_by_label(label) {
+            let r = el.rect();
+            assert!(
+                r.max.x <= content_right + 0.5,
+                "{label} must respect the copilot panel inner margin (right edge {}): got {}",
+                content_right,
+                r.max.x
+            );
+        }
+    }
+    harness.snapshot("r10_copilot_panel_margin_2560");
+    let similar = harness.query_all_by_label("Similar past issues").next();
+    assert!(
+        similar.is_some(),
+        "the seeded report must include similar issues"
+    );
+    let reply = harness.query_all_by_label("Suggested reply").next();
+    assert!(
+        reply.is_some(),
+        "the seeded report must include the suggested reply card"
+    );
+}

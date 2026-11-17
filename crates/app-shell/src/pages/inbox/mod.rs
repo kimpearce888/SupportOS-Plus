@@ -1247,7 +1247,7 @@ impl InboxPage {
             egui::Panel::right("inbox-copilot")
                 .exact_size(inbox_geo::COPILOT_W)
                 .resizable(false)
-                .show_separator_line(true)
+                .show_separator_line(false)
                 .frame(
                     egui::Frame::new()
                         .fill(t.sidebar)

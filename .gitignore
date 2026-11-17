@@ -30,3 +30,7 @@ secrets.key
 /_archive/ux-audit/diffs
 /_archive/ux-audit/scripts
 
+crates/app-shell/tests/snapshots/*.new.png
+crates/app-shell/tests/snapshots/*.diff.png
+crates/app-shell/tests/snapshots/*.old.png
+

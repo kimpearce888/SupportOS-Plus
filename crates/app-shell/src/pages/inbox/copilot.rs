@@ -7,6 +7,8 @@ impl InboxPage {
         db: &DbHandle,
         detail: Option<&ConversationDetail>,
     ) {
+        let pane_clip = ui.clip_rect().intersect(ui.max_rect());
+        ui.set_clip_rect(pane_clip);
         ui.horizontal(|ui| {
             Icon::Sparkles.show(ui, 14.0, design::tokens(ui).ai);
             ui.label(
@@ -119,7 +121,12 @@ impl InboxPage {
         } else {
             design::card_titled(ui, "Similar past issues", None, |ui| {
                 for s in report.similar.iter().take(3) {
-                    ui.horizontal(|ui| {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        design::badge(
+                            ui,
+                            &format!("{}%", (s.score * 100.0) as u32),
+                            design::BadgeTone::Ai,
+                        );
                         ui.add(
                             egui::Label::new(
                                 egui::RichText::new(format!("#{} {}", s.number, s.subject))
@@ -129,25 +136,26 @@ impl InboxPage {
                             )
                             .truncate(),
                         );
-                        design::badge(
-                            ui,
-                            &format!("{}%", (s.score * 100.0) as u32),
-                            design::BadgeTone::Ai,
-                        );
                     });
-                    ui.label(
-                        egui::RichText::new(format!(
-                            "resolved with: {}",
-                            ellipsize(&s.resolution, 160)
-                        ))
-                        .small()
-                        .color(design::tokens(ui).muted_foreground),
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(format!(
+                                "resolved with: {}",
+                                ellipsize(&s.resolution, 160)
+                            ))
+                            .small()
+                            .color(design::tokens(ui).muted_foreground),
+                        )
+                        .wrap(),
                     );
                     if !s.why.is_empty() {
-                        ui.label(
-                            egui::RichText::new(format!("why: {}", s.why.join(", ")))
-                                .small()
-                                .weak(),
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(format!("why: {}", s.why.join(", ")))
+                                    .small()
+                                    .weak(),
+                            )
+                            .wrap(),
                         );
                     }
                     ui.add_space(design::scale::space::SP1);
@@ -159,14 +167,17 @@ impl InboxPage {
         if !report.articles.is_empty() {
             design::card_titled(ui, "Relevant help articles", None, |ui| {
                 for art in report.articles.iter().take(3) {
-                    ui.label(
-                        egui::RichText::new(format!(
-                            "• {} — {}",
-                            art.name,
-                            ellipsize(&art.snippet, 120)
-                        ))
-                        .small()
-                        .color(design::tokens(ui).muted_foreground),
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(format!(
+                                "• {} — {}",
+                                art.name,
+                                ellipsize(&art.snippet, 120)
+                            ))
+                            .small()
+                            .color(design::tokens(ui).muted_foreground),
+                        )
+                        .wrap(),
                     );
                 }
             });
